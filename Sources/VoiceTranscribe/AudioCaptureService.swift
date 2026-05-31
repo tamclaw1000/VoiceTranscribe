@@ -31,6 +31,7 @@ final class AudioCaptureService: ObservableObject {
             return
         }
 
+        Trace.event("capture.starting", ["source": source.name, "deviceID": source.audioDeviceID])
         stop()
         status = .starting
         activeSource = source
@@ -47,7 +48,9 @@ final class AudioCaptureService: ObservableObject {
                 UInt32(MemoryLayout<AudioDeviceID>.size)
             )
             guard result == noErr else {
-                status = .failed("Could not select input device \(source.name). Core Audio status \(result).")
+                let msg = "Could not select input device \(source.name). Core Audio status \(result)."
+                Trace.event("capture.error", ["source": source.name, "error": msg])
+                status = .failed(msg)
                 throw AudioDeviceError.coreAudioStatus(result)
             }
         }
@@ -67,7 +70,13 @@ final class AudioCaptureService: ObservableObject {
         do {
             try engine.start()
             status = .active(sourceID: source.id)
+            Trace.event("capture.started", [
+                "source": source.name,
+                "sampleRate": Int(format.sampleRate),
+                "channels": Int(format.channelCount)
+            ])
         } catch {
+            Trace.event("capture.error", ["source": source.name, "error": error.localizedDescription])
             inputNode.removeTap(onBus: 0)
             status = .failed(error.localizedDescription)
             throw error
@@ -76,12 +85,14 @@ final class AudioCaptureService: ObservableObject {
 
     func stopIfUnused() {
         if consumers.isEmpty {
+            Trace.event("capture.stopping", ["reason": "no consumers"])
             stop()
         }
     }
 
     func stop() {
         if engine.isRunning {
+            Trace.event("capture.stopped", ["source": activeSource?.name ?? "none"])
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
         }
@@ -103,7 +114,9 @@ final class AudioCaptureService: ObservableObject {
         activeConsumerIDs.remove(id)
     }
 
+    private var bufferCount = 0
     private func process(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
+        bufferCount += 1
         let metrics = Self.metrics(for: buffer)
         let displayLevel = Self.displayLevel(forRMS: metrics.rms, peak: metrics.peak)
         levelHistory.append(displayLevel)
@@ -120,6 +133,16 @@ final class AudioCaptureService: ObservableObject {
                 history: levelHistory.elements
             )
             lastVisualizationUpdate = now
+            // Log audio level periodically (every ~1 second = ~30 buffers)
+            if bufferCount == 1 || bufferCount % 30 == 0 {
+                Trace.audio("level", [
+                    "buffer#": bufferCount,
+                    "rms": String(format: "%.4f", metrics.rms),
+                    "peak": String(format: "%.4f", metrics.peak),
+                    "display": String(format: "%.4f", displayLevel),
+                    "clipping": metrics.peak >= 0.98
+                ])
+            }
         }
 
         for consumer in consumers.values {

@@ -31,6 +31,7 @@ final class RecordingService: ObservableObject {
 
         writer = AsyncAudioFileWriter(file: file) { [weak self] error in
             Task { @MainActor in
+                Trace.event("recording.writeError", ["error": error.localizedDescription])
                 self?.lastError = error.localizedDescription
             }
         }
@@ -45,6 +46,11 @@ final class RecordingService: ObservableObject {
             transcriptURL: transcriptURL,
             metadataURL: metadataURL
         )
+        Trace.file("recording.started", path: audioURL.path, extra: [
+            "source": source.name,
+            "format": outputFormat.rawValue,
+            "sampleRate": Int(inputFormat.sampleRate)
+        ])
         lastError = nil
     }
 
@@ -79,9 +85,14 @@ final class RecordingService: ObservableObject {
             .appendingPathComponent("\(finalBasename).json")
 
         try moveReplacingExisting(from: session.audioURL, to: finalAudioURL)
+        Trace.file("recording.finalized", path: finalAudioURL.path, extra: [
+            "format": currentFormat.rawValue,
+            "durationSeconds": String(format: "%.2f", endDate.timeIntervalSince(session.startDate))
+        ])
 
         if saveTranscript {
             try transcriptText.write(to: finalTranscriptURL, atomically: true, encoding: .utf8)
+            Trace.file("transcript.saved", path: finalTranscriptURL.path, extra: ["chars": transcriptText.count])
         }
 
         let metadata = RecordingMetadata(
@@ -95,6 +106,7 @@ final class RecordingService: ObservableObject {
         )
         let data = try JSONEncoder.voiceTranscribe.encode(metadata)
         try data.write(to: finalMetadataURL, options: .atomic)
+        Trace.file("metadata.saved", path: finalMetadataURL.path)
 
         let finalized = RecordingSession(
             id: session.id,

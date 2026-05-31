@@ -53,16 +53,20 @@ final class AppModel: ObservableObject {
 
     func toggleListen(for source: SoundInputSource) {
         if isListening(source) {
+            Trace.button("listen.stop", source: source.name)
             captureService.removeConsumer(id: "listen")
             captureService.stopIfUnused()
             return
         }
 
+        Trace.button("listen.start", source: source.name)
         Task {
             do {
                 try await ensureCapture(for: source)
                 captureService.addConsumer(id: "listen") { _, _ in }
+                Trace.event("listen.started", ["source": source.name])
             } catch {
+                Trace.event("listen.error", ["source": source.name, "error": error.localizedDescription])
                 userMessage = error.localizedDescription
             }
         }
@@ -70,10 +74,12 @@ final class AppModel: ObservableObject {
 
     func toggleRecord(for source: SoundInputSource) {
         if recordingService.isRecording {
+            Trace.button("record.stop", source: source.name)
             stopRecording()
             return
         }
 
+        Trace.button("record.start", source: source.name)
         Task {
             do {
                 try await ensureCapture(for: source)
@@ -88,11 +94,13 @@ final class AppModel: ObservableObject {
                         recordingService?.consume(buffer: buffer, time: time)
                     }
                 }
+                Trace.event("record.started", ["source": source.name, "outputFolder": settings.outputFolder.path])
 
                 if settings.startTranscriptionWithRecording && !transcription.isTranscribing {
                     try await startTranscriptionConsumer(for: source)
                 }
             } catch {
+                Trace.event("record.error", ["source": source.name, "error": error.localizedDescription])
                 userMessage = error.localizedDescription
             }
         }
@@ -100,15 +108,19 @@ final class AppModel: ObservableObject {
 
     func toggleTranscribe(for source: SoundInputSource) {
         if transcription.isTranscribing {
+            Trace.button("transcribe.stop", source: source.name)
             stopTranscription()
             return
         }
 
+        Trace.button("transcribe.start", source: source.name)
         Task {
             do {
                 try await ensureCapture(for: source)
                 try await startTranscriptionConsumer(for: source)
+                Trace.event("transcribe.started", ["source": source.name])
             } catch {
+                Trace.event("transcribe.error", ["source": source.name, "error": error.localizedDescription])
                 userMessage = error.localizedDescription
             }
         }
@@ -168,15 +180,23 @@ final class AppModel: ObservableObject {
                 transcriptionEngine: transcription.engineName
             )
             if let finalized {
+                Trace.event("record.stopped", [
+                    "basename": finalized.basename,
+                    "audioFile": finalized.audioURL.path,
+                    "transcriptFile": finalized.transcriptURL.path,
+                    "duration": String(format: "%.2f", finalized.duration)
+                ])
                 completedRecordings.insert(finalized, at: 0)
             }
             captureService.stopIfUnused()
         } catch {
+            Trace.event("record.stopError", ["error": error.localizedDescription])
             userMessage = error.localizedDescription
         }
     }
 
     private func stopTranscription() {
+        Trace.event("transcribe.stopped", ["segments": transcription.segments.count])
         captureService.removeConsumer(id: "transcribe")
         transcription.stop()
         captureService.stopIfUnused()

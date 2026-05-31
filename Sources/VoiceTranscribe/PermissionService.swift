@@ -60,11 +60,15 @@ final class PermissionService: ObservableObject {
 
         switch microphoneStatus {
         case .authorized:
+            Trace.event("permission.mic", ["status": "alreadyAuthorized"])
             return true
         case .notDetermined:
             microphoneStatus = await microphoneProvider.requestAccess()
-            return microphoneStatus == .authorized
+            let granted = microphoneStatus == .authorized
+            Trace.event("permission.mic", ["status": granted ? "granted" : "denied"])
+            return granted
         case .denied, .restricted:
+            Trace.event("permission.mic", ["status": "deniedOrRestricted"])
             return false
         @unknown default:
             microphoneStatus = microphoneProvider.currentStatus()

@@ -188,6 +188,7 @@ final class TranscriptionCoordinator: ObservableObject {
         interimSegment = nil
         bufferSnapshot = TranscriptionBufferSnapshot()
 
+        Trace.event("transcription.starting", ["engine": service.engineName])
         try await service.start { [weak self] segment in
             Task { @MainActor in
                 self?.apply(segment)
@@ -196,6 +197,7 @@ final class TranscriptionCoordinator: ObservableObject {
         isTranscribing = true
         startBufferTimer()
         lastError = nil
+        Trace.event("transcription.started", ["engine": service.engineName])
     }
 
     func consume(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
@@ -216,6 +218,7 @@ final class TranscriptionCoordinator: ObservableObject {
         bufferTimer?.invalidate()
         bufferTimer = nil
         bufferSnapshot.isReceivingAudio = false
+        Trace.event("transcription.stopped", ["finalSegments": segments.count])
     }
 
     private func apply(_ segment: TranscriptSegment) {
@@ -223,6 +226,7 @@ final class TranscriptionCoordinator: ObservableObject {
         bufferSnapshot.queuedDuration = segment.isFinal ? 0 : min(bufferSnapshot.queuedDuration, 0.75)
         transcript.apply(segment)
         if segment.isFinal {
+            Trace.event("transcription.segmentFinal", ["text": segment.text.prefix(80), "confidence": segment.confidence.map { String(format: "%.2f", $0) } ?? "nil"])
             segments.append(segment)
             interimSegment = nil
         } else {

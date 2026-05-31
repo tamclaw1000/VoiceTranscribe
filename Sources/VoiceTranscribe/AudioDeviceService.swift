@@ -57,6 +57,11 @@ final class AudioDeviceService: ObservableObject {
             }
 
             if mapped != sources {
+                Trace.event("devices.changed", [
+                    "previousCount": sources.count,
+                    "newCount": mapped.count,
+                    "devices": mapped.map { $0.name }.joined(separator: ", ")
+                ])
                 sources = mapped
             }
             lastError = nil

@@ -137,6 +137,8 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 1.3.4 | 8 | PCM recording fix: 16-bit interleaved (VLC-compatible) |
+| 1.3.3 | 7 | Synchronous trace writes + stderr echo |
 | 1.3.2 | 6 | Structured event tracing (`Trace.swift`) |
 | 1.3.1 | 5 | Fixed nested ObservableObject SwiftUI bug |
 | 1.3.0 | 4 | Migrated from SFSpeechRecognizer to SpeechTranscriber |

@@ -11,30 +11,10 @@ enum Trace {
     private static let queue = DispatchQueue(label: "VoiceTranscribe.Trace", qos: .utility)
     private static let path = "/tmp/VoiceTranscribe.log"
     private static var handle: FileHandle?
-    private static let startedAt = ISO8601DateFormatter().string(from: Date())
-    private static let lock = NSLock()
 
-    private static func ensureHandle() -> FileHandle? {
-        lock.lock()
-        defer { lock.unlock() }
-        if let handle { return handle }
-
-        // Truncate on first open per process lifetime, then append.
-        let url = URL(fileURLWithPath: path)
-        do {
-            try Data().write(to: url) // truncate
-            let h = try FileHandle(forWritingTo: url)
-            h.seekToEndOfFile()
-            handle = h
-            return h
-        } catch {
-            fputs("[Trace] Could not open \(path): \(error.localizedDescription)\n", stderr)
-            return nil
-        }
-    }
-
-    /// Writes a structured event line. All values are converted to strings; the
-    /// caller decides the event name and key-value pairs to record.
+    /// Write synchronously to guarantee the event is on disk before the caller
+    /// continues. This keeps the trace reliable during debugging; if it becomes
+    /// a bottleneck under heavy audio load, switch back to async + periodic flush.
     static func event(_ name: String, _ pairs: [String: CustomStringConvertible?] = [:]) {
         let formatter = ISO8601DateFormatter()
         var dict: [String: String] = [
@@ -47,21 +27,37 @@ enum Trace {
 
         guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
               var line = String(data: data, encoding: .utf8) else { return }
+
+        // Also echo to stderr so it's visible in Console.app / terminal launch.
+        fputs("[VT] \(line)\n", stderr)
+
         line.append("\n")
 
-        queue.async {
+        queue.sync {
             guard let h = ensureHandle() else { return }
             do {
                 try h.write(contentsOf: line.data(using: .utf8)!)
+                try h.synchronize()
             } catch {
                 fputs("[Trace] write failed: \(error.localizedDescription)\n", stderr)
             }
         }
     }
 
-    /// Convenience: log a state transition.
-    static func state(_ component: String, from old: Any, to new: Any) {
-        event("\(component).state", ["from": "\(old)", "to": "\(new)"])
+    private static func ensureHandle() -> FileHandle? {
+        if let handle { return handle }
+
+        let url = URL(fileURLWithPath: path)
+        do {
+            try Data().write(to: url) // truncate
+            let h = try FileHandle(forWritingTo: url)
+            h.seekToEndOfFile()
+            handle = h
+            return h
+        } catch {
+            fputs("[Trace] Could not open \(path): \(error.localizedDescription)\n", stderr)
+            return nil
+        }
     }
 
     /// Convenience: log a button action.
@@ -81,12 +77,5 @@ enum Trace {
         var p = extra
         p["filePath"] = path
         Trace.event("file.\(event)", p)
-    }
-
-    /// Flush and close (call on app termination if desired).
-    static func flush() {
-        queue.sync {
-            try? handle?.synchronize()
-        }
     }
 }

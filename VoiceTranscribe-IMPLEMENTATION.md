@@ -338,3 +338,18 @@ This checklist converts `VoiceTranscribe-REQUIREMENTS.md` into implementation wo
 - [x] Trace errors: `listen.error`, `record.error`, `transcribe.error`, `capture.error`, `record.stopError`.
 - [x] View live: `tail -f /tmp/VoiceTranscribe.log`.
 - [x] Bump app version to `1.3.2` build `6`.
+
+## 25. v1.3.3. Synchronous Trace + Stderr Echo
+
+- [x] Change Trace from async (`queue.async`) to synchronous (`queue.sync` + `synchronize()`) so events hit disk immediately.
+- [x] Echo every trace event to stderr (`[VT] <json>`) so events are visible in Console.app when launched as `.app` bundle.
+- [x] Remove unused `lock`, `startedAt`, `state()`, `flush()` from Trace to simplify.
+- [x] Bump app version to `1.3.3` build `7`.
+
+## 26. v1.3.4. PCM Recording Format Fix
+
+- [x] Fix: `.wav` and `.caf` recordings unplayable in VLC and most media players.
+- [x] Root cause: audio settings used `AVLinearPCMIsNonInterleaved: true` + 32-bit float — valid PCM but virtually no player supports non-interleaved layout.
+- [x] Fix: switch to 16-bit integer interleaved PCM (`AVLinearPCMBitDepthKey: 16`, `AVLinearPCMIsFloatKey: false`, `AVLinearPCMIsNonInterleaved: false`).
+- [x] `.m4a` (AAC) was never affected — default format remains playable.
+- [x] Bump app version to `1.3.4` build `8`.

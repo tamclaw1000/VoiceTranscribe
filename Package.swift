@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "VoiceTranscribe",
     platforms: [
-        .macOS(.v14)
+        .macOS("26.0")
     ],
     targets: [
         .executableTarget(

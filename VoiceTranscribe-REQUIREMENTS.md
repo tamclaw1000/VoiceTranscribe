@@ -18,11 +18,11 @@ The application must prioritize a fast, responsive user experience. Audio captur
 
 ## 3. Target Platform
 
-- Platform: macOS.
+- Platform: macOS 26 or newer.
 - Language: Swift.
 - UI framework: SwiftUI preferred unless AppKit is required for lower-level audio or window behavior.
 - Audio APIs: Core Audio and AVFoundation where appropriate.
-- Speech APIs: Apple Speech framework by default, with a design that can support alternate transcription engines later.
+- Speech APIs: Apple SpeechTranscriber and SpeechAnalyzer by default, with a design that can support alternate transcription engines later.
 
 ## 4. Core User Experience
 

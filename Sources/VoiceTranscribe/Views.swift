@@ -94,7 +94,9 @@ struct ContentView: View {
 
             TranscriptPanel(
                 finalized: appModel.transcription.segments,
-                interim: appModel.transcription.interimSegment
+                interim: appModel.transcription.interimSegment,
+                buffer: appModel.transcription.bufferSnapshot,
+                isTranscribing: appModel.transcription.isTranscribing
             )
 
             if !appModel.completedRecordings.isEmpty {
@@ -163,23 +165,28 @@ private struct SourceRow: View {
             }
 
             HStack(spacing: 8) {
-                Button {
+                actionButton(
+                    title: appModel.isListening(source) ? "Stop" : "Listen",
+                    systemImage: "waveform",
+                    isActive: appModel.isListening(source)
+                ) {
                     appModel.toggleListen(for: source)
-                } label: {
-                    Label(appModel.isListening(source) ? "Stop" : "Listen", systemImage: "waveform")
                 }
 
-                Button {
+                actionButton(
+                    title: appModel.isRecording(source) ? "Stop" : "Record",
+                    systemImage: appModel.isRecording(source) ? "record.circle.fill" : "record.circle",
+                    isActive: appModel.isRecording(source)
+                ) {
                     appModel.toggleRecord(for: source)
-                } label: {
-                    Label(appModel.isRecording(source) ? "Stop" : "Record", systemImage: "record.circle")
                 }
-                .tint(appModel.isRecording(source) ? .red : .accentColor)
 
-                Button {
+                actionButton(
+                    title: appModel.isTranscribing(source) ? "Stop" : "Transcribe",
+                    systemImage: appModel.isTranscribing(source) ? "text.bubble.fill" : "text.bubble",
+                    isActive: appModel.isTranscribing(source)
+                ) {
                     appModel.toggleTranscribe(for: source)
-                } label: {
-                    Label(appModel.isTranscribing(source) ? "Stop" : "Transcribe", systemImage: "text.bubble")
                 }
 
                 Spacer()
@@ -192,7 +199,83 @@ private struct SourceRow: View {
             }
             .buttonStyle(.bordered)
             .disabled(!source.isAvailable)
+
+            SourceConsoleView(source: source)
+                .environmentObject(appModel)
         }
+    }
+
+    private func actionButton(
+        title: String,
+        systemImage: String,
+        isActive: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(isActive ? Color.green : Color.secondary)
+                Text(title)
+                    .foregroundStyle(isActive ? Color.green : Color.primary)
+            }
+        }
+        .tint(isActive ? .green : .accentColor)
+        .accessibilityValue(isActive ? "Active" : "Inactive")
+    }
+}
+
+private struct SourceConsoleView: View {
+    @EnvironmentObject private var appModel: AppModel
+    let source: SoundInputSource
+
+    private var isActiveSource: Bool {
+        appModel.activeSourceID == source.id
+    }
+
+    private var modeText: String {
+        var modes: [String] = []
+        if appModel.isListening(source) {
+            modes.append("listen")
+        }
+        if appModel.isRecording(source) {
+            modes.append("record")
+        }
+        if appModel.isTranscribing(source) {
+            modes.append("transcribe")
+        }
+        return modes.isEmpty ? "none" : modes.joined(separator: ",")
+    }
+
+    private var captureText: String {
+        if isActiveSource {
+            return "capture=active"
+        }
+        return "capture=idle"
+    }
+
+    var body: some View {
+        let visualization = appModel.captureService.visualization
+        let buffer = appModel.transcription.bufferSnapshot
+
+        VStack(alignment: .leading, spacing: 4) {
+            Text(
+                "\(captureText) modes=\(modeText) rms=\(Int(visualization.rmsLevel * 100))% peak=\(Int(visualization.peakLevel * 100))%"
+            )
+            Text(
+                "transcription=\(appModel.transcription.isTranscribing ? "active" : "idle") buffer=\(String(format: "%.1f", buffer.queuedDuration))s receiving=\(buffer.isReceivingAudio ? "yes" : "no")"
+            )
+        }
+        .font(.caption2.monospaced())
+        .foregroundStyle(isActiveSource ? Color.green : Color.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(isActiveSource ? Color.green.opacity(0.35) : Color.secondary.opacity(0.15), lineWidth: 1)
+        )
     }
 }
 
@@ -223,7 +306,7 @@ private struct GraphPanel: View {
                 Label("Input Level", systemImage: "waveform.path.ecg")
                     .font(.headline)
                 Spacer()
-                Text(snapshot.isClipping ? "Clipping" : "Peak \(Int(snapshot.peakLevel * 100))%")
+                Text(snapshot.isClipping ? "Clipping" : "RMS \(Int(snapshot.rmsLevel * 100))%  Peak \(Int(snapshot.peakLevel * 100))%")
                     .font(.caption)
                     .foregroundStyle(snapshot.isClipping ? .red : .secondary)
             }
@@ -231,12 +314,24 @@ private struct GraphPanel: View {
             Canvas { context, size in
                 let midY = size.height / 2
                 let values = snapshot.history.isEmpty ? [0] : snapshot.history
-                let stepX = size.width / CGFloat(max(values.count - 1, 1))
+                let stepX = size.width / CGFloat(max(values.count, 1))
                 var path = Path()
 
                 for index in values.indices {
-                    let x = CGFloat(index) * stepX
+                    let x = CGFloat(index) * stepX + stepX / 2
                     let normalized = CGFloat(min(max(values[index], 0), 1))
+                    let barHeight = max(normalized * size.height * 0.90, normalized > 0 ? 2 : 0)
+                    let barRect = CGRect(
+                        x: CGFloat(index) * stepX,
+                        y: midY - barHeight / 2,
+                        width: max(stepX - 1, 1),
+                        height: barHeight
+                    )
+                    context.fill(
+                        Path(roundedRect: barRect, cornerRadius: 2),
+                        with: .color(.green.opacity(0.32 + normalized * 0.45))
+                    )
+
                     let y = midY - (normalized * size.height * 0.45)
                     if index == values.startIndex {
                         path.move(to: CGPoint(x: x, y: y))
@@ -247,7 +342,7 @@ private struct GraphPanel: View {
 
                 var mirror = Path()
                 for index in values.indices {
-                    let x = CGFloat(index) * stepX
+                    let x = CGFloat(index) * stepX + stepX / 2
                     let normalized = CGFloat(min(max(values[index], 0), 1))
                     let y = midY + (normalized * size.height * 0.45)
                     if index == values.startIndex {
@@ -257,8 +352,8 @@ private struct GraphPanel: View {
                     }
                 }
 
-                context.stroke(path, with: .color(.accentColor), lineWidth: 2)
-                context.stroke(mirror, with: .color(.accentColor.opacity(0.45)), lineWidth: 2)
+                context.stroke(path, with: .color(.green), lineWidth: 2.5)
+                context.stroke(mirror, with: .color(.green.opacity(0.6)), lineWidth: 2.5)
                 context.stroke(Path { path in
                     path.move(to: CGPoint(x: 0, y: midY))
                     path.addLine(to: CGPoint(x: size.width, y: midY))
@@ -272,11 +367,18 @@ private struct GraphPanel: View {
 private struct TranscriptPanel: View {
     let finalized: [TranscriptSegment]
     let interim: TranscriptSegment?
+    let buffer: TranscriptionBufferSnapshot
+    let isTranscribing: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Live Transcript", systemImage: "text.alignleft")
-                .font(.headline)
+            HStack {
+                Label("Live Transcript", systemImage: "text.alignleft")
+                    .font(.headline)
+                Spacer()
+                TranscriptionStatusView(buffer: buffer, isTranscribing: isTranscribing)
+                    .frame(width: 260)
+            }
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -313,6 +415,53 @@ private struct TranscriptPanel: View {
             }
         }
         .padding()
+    }
+}
+
+private struct TranscriptionStatusView: View {
+    let buffer: TranscriptionBufferSnapshot
+    let isTranscribing: Bool
+
+    private var statusText: String {
+        guard isTranscribing else {
+            return "Idle"
+        }
+        if buffer.isReceivingAudio {
+            return "Receiving audio"
+        }
+        if buffer.queuedDuration > 0 {
+            return "Processing buffer"
+        }
+        return "Waiting for audio"
+    }
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(isTranscribing ? (buffer.isReceivingAudio ? Color.green : Color.orange) : Color.secondary)
+                    .frame(width: 7, height: 7)
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(String(format: "%.1fs", buffer.queuedDuration))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.secondary.opacity(0.18))
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(isTranscribing ? Color.green : Color.secondary.opacity(0.45))
+                        .frame(width: geometry.size.width * buffer.fillFraction)
+                }
+            }
+            .frame(height: 6)
+            .accessibilityLabel("Transcription buffer")
+            .accessibilityValue(String(format: "%.1f seconds queued", buffer.queuedDuration))
+        }
     }
 }
 

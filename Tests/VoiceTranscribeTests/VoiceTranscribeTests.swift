@@ -46,6 +46,26 @@ import Testing
     #expect(buffer.droppedCount == 1)
 }
 
+@MainActor
+@Test func audioDisplayLevelMakesQuietInputVisible() {
+    let quiet = AudioCaptureService.displayLevel(forRMS: 0.01, peak: 0.03)
+    let louder = AudioCaptureService.displayLevel(forRMS: 0.10, peak: 0.30)
+
+    #expect(quiet > 0.05)
+    #expect(louder > quiet)
+    #expect(louder <= 1.0)
+}
+
+@Test func transcriptionBufferFractionIsClamped() {
+    let normal = TranscriptionBufferSnapshot(queuedDuration: 3, maxDuration: 10)
+    let overflow = TranscriptionBufferSnapshot(queuedDuration: 12, maxDuration: 10)
+    let empty = TranscriptionBufferSnapshot(queuedDuration: -1, maxDuration: 10)
+
+    #expect(normal.fillFraction == 0.3)
+    #expect(overflow.fillFraction == 1)
+    #expect(empty.fillFraction == 0)
+}
+
 @Test func transcriptDocumentKeepsFinalAndInterimText() {
     var document = TranscriptDocument()
     document.apply(TranscriptSegment(text: "hello", isFinal: true))

@@ -67,7 +67,7 @@ This checklist converts `VoiceTranscribe-REQUIREMENTS.md` into implementation wo
 - [x] Show source name for each input.
 - [x] Show device type or transport when available.
 - [ ] Show current availability state.
-- [ ] Show input activity indicator.
+- [x] Show input activity indicator.
 - [x] Add Listen action per source.
 - [x] Add Record action per source.
 - [x] Add Transcribe action per source.
@@ -246,7 +246,7 @@ This checklist converts `VoiceTranscribe-REQUIREMENTS.md` into implementation wo
 - [ ] App launches successfully on supported macOS version.
 - [ ] App lists currently available input sources.
 - [ ] Source list updates after device connection changes.
-- [ ] Listen mode shows a live sound graph.
+- [x] Listen mode shows a live sound graph.
 - [ ] Record mode writes an audio file with the required basename.
 - [ ] Record mode tracks start and end timestamps.
 - [ ] Transcribe mode displays a live transcript.
@@ -267,3 +267,47 @@ This checklist converts `VoiceTranscribe-REQUIREMENTS.md` into implementation wo
 - [x] Show a clear first-run permission prompt path before capture begins.
 - [x] Add tests for first-touch permission request behavior.
 - [x] Add tests for cached permission state reuse.
+
+## 20. v1.2. UX and Transcription Feedback Fixes
+
+- [x] Color active Listen action icon and text while listen mode is active.
+- [x] Color active Record action icon and text while recording is active.
+- [x] Color active Transcribe action icon and text while transcription is active.
+- [x] Fix input graph metering so normal speech produces visible movement.
+- [x] Support float, int16, and int32 PCM buffers in audio level metering.
+- [x] Scale RMS and peak levels for a more readable visual graph.
+- [x] Add a transcription buffer status model.
+- [x] Display a transcription buffer bar in the live transcript panel.
+- [x] Display queued buffer duration while transcription is active.
+- [x] Display transcription status text for receiving audio, processing buffer, waiting for audio, and idle states.
+- [x] Add tests for audio display-level scaling.
+- [x] Add tests for transcription buffer fill clamping.
+- [x] Bump app version to `0.1.1` build `2`.
+
+## 21. v1.2.1. Continued Bug Fixes
+
+- [x] Force active Listen, Record, and Transcribe button icons to green.
+- [x] Use explicit icon/text button labels so active state is visible inside bordered buttons.
+- [x] Add a compact state console under each source's input options.
+- [x] Output capture state in the source console.
+- [x] Output active source modes in the source console.
+- [x] Output live RMS and peak levels in the source console.
+- [x] Output transcription active, buffer duration, and receiving-audio state in the source console.
+- [x] Make the input chart more visibly live with green level bars.
+- [x] Add numeric RMS and peak readout above the input chart.
+- [x] Bump app version to `1.2.1` build `3`.
+
+## 22. v1.3.0. SpeechTranscriber Migration
+
+- [x] Raise the app minimum platform to macOS 26.
+- [x] Replace legacy streaming `SFSpeechRecognizer` transcription with `SpeechTranscriber`.
+- [x] Add `SpeechAnalyzer` input stream startup before audio buffers are sent.
+- [x] Install or verify the current locale's SpeechTranscriber model before transcription starts.
+- [x] Convert captured audio buffers to the analyzer's preferred audio format.
+- [x] Deep-copy captured audio buffers before asynchronous transcription processing.
+- [x] Deep-copy audio tap buffers before dispatching them to UI, recording, and transcription consumers.
+- [x] Feed analyzer input with explicit `CMTime` buffer start times.
+- [x] Consume SpeechTranscriber results off the main actor and publish transcript updates back to the UI.
+- [x] Preserve existing transcription buffer status display while using SpeechTranscriber.
+- [x] Update requirements to state macOS 26 and SpeechTranscriber/SpeechAnalyzer.
+- [x] Bump app version to `1.3.0` build `4`.

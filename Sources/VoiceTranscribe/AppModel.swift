@@ -33,16 +33,22 @@ final class AppModel: ObservableObject {
 
     func toggleListen(for source: SoundInputSource) {
         if isListening(source) {
+            print("[VT] toggleListen: stopping listen for \(source.name)")
             captureService.removeConsumer(id: "listen")
             captureService.stopIfUnused()
             return
         }
 
+        print("[VT] toggleListen: starting listen for \(source.name)")
         Task {
             do {
+                print("[VT] toggleListen: calling ensureCapture...")
                 try await ensureCapture(for: source)
+                print("[VT] toggleListen: ensureCapture done, adding listen consumer. activeSource=\(String(describing: captureService.activeSource?.name)) status=\(captureService.status)")
                 captureService.addConsumer(id: "listen") { _, _ in }
+                print("[VT] toggleListen: consumer added. activeConsumerIDs=\(captureService.activeConsumerIDs)")
             } catch {
+                print("[VT] toggleListen: ERROR \(error)")
                 userMessage = error.localizedDescription
             }
         }
@@ -70,7 +76,7 @@ final class AppModel: ObservableObject {
                 }
 
                 if settings.startTranscriptionWithRecording && !transcription.isTranscribing {
-                    try startTranscriptionConsumer(for: source)
+                    try await startTranscriptionConsumer(for: source)
                 }
             } catch {
                 userMessage = error.localizedDescription
@@ -87,7 +93,7 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 try await ensureCapture(for: source)
-                try startTranscriptionConsumer(for: source)
+                try await startTranscriptionConsumer(for: source)
             } catch {
                 userMessage = error.localizedDescription
             }
@@ -107,8 +113,10 @@ final class AppModel: ObservableObject {
     }
 
     private func ensureCapture(for source: SoundInputSource) async throws {
+        print("[VT] ensureCapture: hasTouched=\(permissionService.hasTouchedRecordingDevice) micStatus=\(permissionService.microphoneStatus.rawValue) canCapture=\(permissionService.canCaptureAudio)")
         if !permissionService.hasTouchedRecordingDevice {
             let authorized = await permissionService.authorizeFirstRecordingDeviceTouch()
+            print("[VT] ensureCapture: first touch result=\(authorized)")
             if !authorized {
                 throw AppModelError.microphonePermissionRequired
             }
@@ -117,21 +125,27 @@ final class AppModel: ObservableObject {
         }
 
         if !permissionService.canCaptureAudio {
+            print("[VT] ensureCapture: canCaptureAudio is FALSE — throwing")
             throw AppModelError.microphonePermissionRequired
         }
 
+        print("[VT] ensureCapture: activeSourceID=\(String(describing: captureService.activeSource?.id)) targetID=\(source.id)")
         if captureService.activeSource?.id != source.id {
+            print("[VT] ensureCapture: starting capture for \(source.name)...")
             captureService.stop()
             try captureService.start(source: source)
+            print("[VT] ensureCapture: capture started, status=\(captureService.status)")
+        } else {
+            print("[VT] ensureCapture: already capturing this source")
         }
     }
 
-    private func startTranscriptionConsumer(for source: SoundInputSource) throws {
+    private func startTranscriptionConsumer(for source: SoundInputSource) async throws {
         if !permissionService.canTranscribe {
             throw AppModelError.speechPermissionRequired
         }
 
-        try transcription.start()
+        try await transcription.start()
         captureService.addConsumer(id: "transcribe") { [weak transcription] buffer, time in
             Task { @MainActor in
                 transcription?.consume(buffer: buffer, time: time)

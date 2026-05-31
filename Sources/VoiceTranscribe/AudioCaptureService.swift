@@ -28,9 +28,11 @@ final class AudioCaptureService: ObservableObject {
 
     func start(source: SoundInputSource) throws {
         if case .active(let sourceID) = status, sourceID == source.id {
+            print("[VT] AudioCapture.start: already active for \(sourceID)")
             return
         }
 
+        print("[VT] AudioCapture.start: starting capture for \(source.name) (deviceID=\(source.audioDeviceID))")
         stop()
         status = .starting
         activeSource = source
@@ -46,23 +48,35 @@ final class AudioCaptureService: ObservableObject {
                 &deviceID,
                 UInt32(MemoryLayout<AudioDeviceID>.size)
             )
+            print("[VT] AudioCapture.start: AudioUnitSetProperty result=\(result)")
             guard result == noErr else {
                 status = .failed("Could not select input device \(source.name). Core Audio status \(result).")
                 throw AudioDeviceError.coreAudioStatus(result)
             }
+        } else {
+            print("[VT] AudioCapture.start: inputNode.audioUnit is nil, using default")
         }
 
         let format = inputNode.outputFormat(forBus: 0)
+        print("[VT] AudioCapture.start: format=\(format) rate=\(format.sampleRate) ch=\(format.channelCount)")
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
-            Task { @MainActor in
-                self?.process(buffer: buffer, time: time)
+            guard let copiedBuffer = Self.copyBuffer(buffer) else {
+                return
+            }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self?.process(buffer: copiedBuffer, time: time)
+                }
             }
         }
+        print("[VT] AudioCapture.start: tap installed")
 
         do {
             try engine.start()
+            print("[VT] AudioCapture.start: engine started, engine.isRunning=\(engine.isRunning)")
             status = .active(sourceID: source.id)
         } catch {
+            print("[VT] AudioCapture.start: engine.start() threw \(error)")
             inputNode.removeTap(onBus: 0)
             status = .failed(error.localizedDescription)
             throw error
@@ -98,7 +112,12 @@ final class AudioCaptureService: ObservableObject {
         activeConsumerIDs.remove(id)
     }
 
+    private var processCount = 0
     private func process(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
+        processCount += 1
+        if processCount == 1 || processCount % 50 == 0 {
+            print("[VT] AudioCapture.process: #\(processCount) frames=\(buffer.frameLength) ch=\(buffer.format.channelCount)")
+        }
         let metrics = Self.metrics(for: buffer)
         let displayLevel = Self.displayLevel(forRMS: metrics.rms, peak: metrics.peak)
         levelHistory.append(displayLevel)
@@ -173,5 +192,38 @@ final class AudioCaptureService: ObservableObject {
             return 0
         }
         return min(pow(blended, 0.35), 1.0)
+    }
+
+    private static func copyBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else {
+            return nil
+        }
+
+        copy.frameLength = buffer.frameLength
+        let channels = Int(buffer.format.channelCount)
+        let frames = Int(buffer.frameLength)
+
+        if let source = buffer.floatChannelData, let destination = copy.floatChannelData {
+            for channel in 0..<channels {
+                memcpy(destination[channel], source[channel], frames * MemoryLayout<Float>.size)
+            }
+            return copy
+        }
+
+        if let source = buffer.int16ChannelData, let destination = copy.int16ChannelData {
+            for channel in 0..<channels {
+                memcpy(destination[channel], source[channel], frames * MemoryLayout<Int16>.size)
+            }
+            return copy
+        }
+
+        if let source = buffer.int32ChannelData, let destination = copy.int32ChannelData {
+            for channel in 0..<channels {
+                memcpy(destination[channel], source[channel], frames * MemoryLayout<Int32>.size)
+            }
+            return copy
+        }
+
+        return nil
     }
 }

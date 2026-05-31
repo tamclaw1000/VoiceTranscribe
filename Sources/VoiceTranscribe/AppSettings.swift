@@ -39,7 +39,7 @@ final class AppSettings: ObservableObject {
     @AppStorage("audioOutputFormat") var audioOutputFormatRaw: String = AudioOutputFormat.m4a.rawValue
     @AppStorage("transcriptionEngine") var transcriptionEngineRaw: String = TranscriptionEngineKind.appleSpeech.rawValue
     @AppStorage("saveTranscriptsAutomatically") var saveTranscriptsAutomatically: Bool = true
-    @AppStorage("startTranscriptionWithRecording") var startTranscriptionWithRecording: Bool = true
+    @AppStorage("startTranscriptionWithRecording") var startTranscriptionWithRecording: Bool = false
     @AppStorage("visualizationSensitivity") var visualizationSensitivity: Double = 1.0
 
     static var defaultOutputFolder: URL {

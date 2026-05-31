@@ -320,6 +320,7 @@ This checklist converts `VoiceTranscribe-REQUIREMENTS.md` into implementation wo
 - [x] Affected children: `captureService`, `recordingService`, `transcription`, `permissionService`.
 - [x] Result: Button labels (Listen→Stop), "Active" indicator, graph panel, and transcript panel all re-render correctly when underlying service state changes.
 - [x] Add `import Combine` and `cancellables` storage to `AppModel`.
+- [x] Bump app version to `1.3.1` build `5`.
 
 ## 24. v1.3.2. Structured Event Tracing
 
@@ -336,3 +337,4 @@ This checklist converts `VoiceTranscribe-REQUIREMENTS.md` into implementation wo
 - [x] Trace permissions: `permission.mic` with status (`alreadyAuthorized`, `granted`, `denied`).
 - [x] Trace errors: `listen.error`, `record.error`, `transcribe.error`, `capture.error`, `record.stopError`.
 - [x] View live: `tail -f /tmp/VoiceTranscribe.log`.
+- [x] Bump app version to `1.3.2` build `6`.

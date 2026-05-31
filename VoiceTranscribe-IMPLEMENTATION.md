@@ -311,3 +311,28 @@ This checklist converts `VoiceTranscribe-REQUIREMENTS.md` into implementation wo
 - [x] Preserve existing transcription buffer status display while using SpeechTranscriber.
 - [x] Update requirements to state macOS 26 and SpeechTranscriber/SpeechAnalyzer.
 - [x] Bump app version to `1.3.0` build `4`.
+
+## 23. v1.3.1. SwiftUI Nested ObservableObject Fix
+
+- [x] Fix: Listen/Record/Transcribe button states not updating when nested services change.
+- [x] Root cause: AppModel held `@Published` child ObservableObjects (`captureService`, `recordingService`, `transcription`, `permissionService`), but `@Published` on reference types only fires when the reference is reassigned — not when the child's own `@Published` properties change.
+- [x] Fix: In `AppModel.init()`, subscribe to each child's `objectWillChange` publisher via Combine and forward it to `self.objectWillChange`.
+- [x] Affected children: `captureService`, `recordingService`, `transcription`, `permissionService`.
+- [x] Result: Button labels (Listen→Stop), "Active" indicator, graph panel, and transcript panel all re-render correctly when underlying service state changes.
+- [x] Add `import Combine` and `cancellables` storage to `AppModel`.
+
+## 24. v1.3.2. Structured Event Tracing
+
+- [x] Create `Trace.swift` utility writing structured JSON-line events to `/tmp/VoiceTranscribe.log`.
+- [x] Truncate the log on first open per process lifetime, then append.
+- [x] Write asynchronously on a dedicated `DispatchQueue` (`.utility` QoS).
+- [x] Provide convenience methods: `event()`, `state()`, `button()`, `audio()`, `file()`.
+- [x] Trace button presses: `button.listen.start`, `.stop`, `record.*`, `transcribe.*`.
+- [x] Trace audio capture: `capture.starting`, `.started`, `.stopped`, `.error` with sample rate and channel count.
+- [x] Trace audio levels: `audio.level` every ~1 second with RMS, peak, display level, and clipping flag.
+- [x] Trace recording I/O: `recording.started`, `recording.finalized`, `transcript.saved`, `metadata.saved`, `writeError` with paths and duration.
+- [x] Trace transcription: `transcription.starting`, `.started`, `.stopped`, `segmentFinal` with engine name and segment text.
+- [x] Trace device changes: `devices.changed` with previous/new count and device names.
+- [x] Trace permissions: `permission.mic` with status (`alreadyAuthorized`, `granted`, `denied`).
+- [x] Trace errors: `listen.error`, `record.error`, `transcribe.error`, `capture.error`, `record.stopError`.
+- [x] View live: `tail -f /tmp/VoiceTranscribe.log`.

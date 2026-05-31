@@ -101,3 +101,18 @@ struct VisualizationSnapshot: Equatable {
     var isClipping: Bool = false
     var history: [Float] = []
 }
+
+struct TranscriptionBufferSnapshot: Equatable {
+    var queuedDuration: TimeInterval = 0
+    var maxDuration: TimeInterval = 10
+    var isReceivingAudio: Bool = false
+    var lastAudioAt: Date?
+    var lastResultAt: Date?
+
+    var fillFraction: Double {
+        guard maxDuration > 0 else {
+            return 0
+        }
+        return min(max(queuedDuration / maxDuration, 0), 1)
+    }
+}

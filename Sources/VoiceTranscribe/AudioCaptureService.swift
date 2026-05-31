@@ -100,7 +100,8 @@ final class AudioCaptureService: ObservableObject {
 
     private func process(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
         let metrics = Self.metrics(for: buffer)
-        levelHistory.append(metrics.rms)
+        let displayLevel = Self.displayLevel(forRMS: metrics.rms, peak: metrics.peak)
+        levelHistory.append(displayLevel)
         if levelHistory.droppedCount > 0 {
             overflowWarning = "Visualization buffer dropped stale frames."
         }
@@ -108,7 +109,7 @@ final class AudioCaptureService: ObservableObject {
         let now = Date()
         if now.timeIntervalSince(lastVisualizationUpdate) >= visualizationInterval {
             visualization = VisualizationSnapshot(
-                rmsLevel: metrics.rms,
+                rmsLevel: displayLevel,
                 peakLevel: metrics.peak,
                 isClipping: metrics.peak >= 0.98,
                 history: levelHistory.elements
@@ -122,10 +123,6 @@ final class AudioCaptureService: ObservableObject {
     }
 
     static func metrics(for buffer: AVAudioPCMBuffer) -> (rms: Float, peak: Float) {
-        guard let channelData = buffer.floatChannelData else {
-            return (0, 0)
-        }
-
         let channelCount = Int(buffer.format.channelCount)
         let frameLength = Int(buffer.frameLength)
         guard channelCount > 0, frameLength > 0 else {
@@ -136,15 +133,45 @@ final class AudioCaptureService: ObservableObject {
         var peak: Float = 0
         let sampleCount = channelCount * frameLength
 
-        for channel in 0..<channelCount {
-            let samples = channelData[channel]
-            for frame in 0..<frameLength {
-                let value = abs(samples[frame])
-                peak = max(peak, value)
-                sumSquares += value * value
+        if let channelData = buffer.floatChannelData {
+            for channel in 0..<channelCount {
+                let samples = channelData[channel]
+                for frame in 0..<frameLength {
+                    let value = min(abs(samples[frame]), 1.0)
+                    peak = max(peak, value)
+                    sumSquares += value * value
+                }
             }
+        } else if let channelData = buffer.int16ChannelData {
+            for channel in 0..<channelCount {
+                let samples = channelData[channel]
+                for frame in 0..<frameLength {
+                    let value = min(abs(Float(samples[frame]) / Float(Int16.max)), 1.0)
+                    peak = max(peak, value)
+                    sumSquares += value * value
+                }
+            }
+        } else if let channelData = buffer.int32ChannelData {
+            for channel in 0..<channelCount {
+                let samples = channelData[channel]
+                for frame in 0..<frameLength {
+                    let value = min(abs(Float(samples[frame]) / Float(Int32.max)), 1.0)
+                    peak = max(peak, value)
+                    sumSquares += value * value
+                }
+            }
+        } else {
+            return (0, 0)
         }
 
         return (sqrt(sumSquares / Float(sampleCount)), min(peak, 1.0))
+    }
+
+    static func displayLevel(forRMS rms: Float, peak: Float) -> Float {
+        let blended = max(rms, peak * 0.35)
+        guard blended > 0 else {
+            return 0
+        }
+        return min(pow(blended, 0.35), 1.0)
     }
 }

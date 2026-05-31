@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 @MainActor
@@ -10,6 +11,25 @@ final class AppModel: ObservableObject {
     @Published var transcription = TranscriptionCoordinator()
     @Published var completedRecordings: [RecordingSession] = []
     @Published var userMessage: String?
+
+    private var cancellables = Set<AnyCancellable>()
+
+    init() {
+        // Propagate nested ObservableObject changes so SwiftUI re-renders
+        // when captureService, recordingService, or transcription state changes.
+        captureService.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        recordingService.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        transcription.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        permissionService.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+    }
 
     var activeSourceID: String? {
         captureService.activeSource?.id
@@ -33,22 +53,16 @@ final class AppModel: ObservableObject {
 
     func toggleListen(for source: SoundInputSource) {
         if isListening(source) {
-            print("[VT] toggleListen: stopping listen for \(source.name)")
             captureService.removeConsumer(id: "listen")
             captureService.stopIfUnused()
             return
         }
 
-        print("[VT] toggleListen: starting listen for \(source.name)")
         Task {
             do {
-                print("[VT] toggleListen: calling ensureCapture...")
                 try await ensureCapture(for: source)
-                print("[VT] toggleListen: ensureCapture done, adding listen consumer. activeSource=\(String(describing: captureService.activeSource?.name)) status=\(captureService.status)")
                 captureService.addConsumer(id: "listen") { _, _ in }
-                print("[VT] toggleListen: consumer added. activeConsumerIDs=\(captureService.activeConsumerIDs)")
             } catch {
-                print("[VT] toggleListen: ERROR \(error)")
                 userMessage = error.localizedDescription
             }
         }
@@ -113,10 +127,8 @@ final class AppModel: ObservableObject {
     }
 
     private func ensureCapture(for source: SoundInputSource) async throws {
-        print("[VT] ensureCapture: hasTouched=\(permissionService.hasTouchedRecordingDevice) micStatus=\(permissionService.microphoneStatus.rawValue) canCapture=\(permissionService.canCaptureAudio)")
         if !permissionService.hasTouchedRecordingDevice {
             let authorized = await permissionService.authorizeFirstRecordingDeviceTouch()
-            print("[VT] ensureCapture: first touch result=\(authorized)")
             if !authorized {
                 throw AppModelError.microphonePermissionRequired
             }
@@ -125,18 +137,12 @@ final class AppModel: ObservableObject {
         }
 
         if !permissionService.canCaptureAudio {
-            print("[VT] ensureCapture: canCaptureAudio is FALSE — throwing")
             throw AppModelError.microphonePermissionRequired
         }
 
-        print("[VT] ensureCapture: activeSourceID=\(String(describing: captureService.activeSource?.id)) targetID=\(source.id)")
         if captureService.activeSource?.id != source.id {
-            print("[VT] ensureCapture: starting capture for \(source.name)...")
             captureService.stop()
             try captureService.start(source: source)
-            print("[VT] ensureCapture: capture started, status=\(captureService.status)")
-        } else {
-            print("[VT] ensureCapture: already capturing this source")
         }
     }
 

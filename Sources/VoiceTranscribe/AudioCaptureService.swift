@@ -28,11 +28,9 @@ final class AudioCaptureService: ObservableObject {
 
     func start(source: SoundInputSource) throws {
         if case .active(let sourceID) = status, sourceID == source.id {
-            print("[VT] AudioCapture.start: already active for \(sourceID)")
             return
         }
 
-        print("[VT] AudioCapture.start: starting capture for \(source.name) (deviceID=\(source.audioDeviceID))")
         stop()
         status = .starting
         activeSource = source
@@ -48,17 +46,13 @@ final class AudioCaptureService: ObservableObject {
                 &deviceID,
                 UInt32(MemoryLayout<AudioDeviceID>.size)
             )
-            print("[VT] AudioCapture.start: AudioUnitSetProperty result=\(result)")
             guard result == noErr else {
                 status = .failed("Could not select input device \(source.name). Core Audio status \(result).")
                 throw AudioDeviceError.coreAudioStatus(result)
             }
-        } else {
-            print("[VT] AudioCapture.start: inputNode.audioUnit is nil, using default")
         }
 
         let format = inputNode.outputFormat(forBus: 0)
-        print("[VT] AudioCapture.start: format=\(format) rate=\(format.sampleRate) ch=\(format.channelCount)")
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
             guard let copiedBuffer = Self.copyBuffer(buffer) else {
                 return
@@ -69,14 +63,11 @@ final class AudioCaptureService: ObservableObject {
                 }
             }
         }
-        print("[VT] AudioCapture.start: tap installed")
 
         do {
             try engine.start()
-            print("[VT] AudioCapture.start: engine started, engine.isRunning=\(engine.isRunning)")
             status = .active(sourceID: source.id)
         } catch {
-            print("[VT] AudioCapture.start: engine.start() threw \(error)")
             inputNode.removeTap(onBus: 0)
             status = .failed(error.localizedDescription)
             throw error
@@ -112,12 +103,7 @@ final class AudioCaptureService: ObservableObject {
         activeConsumerIDs.remove(id)
     }
 
-    private var processCount = 0
     private func process(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
-        processCount += 1
-        if processCount == 1 || processCount % 50 == 0 {
-            print("[VT] AudioCapture.process: #\(processCount) frames=\(buffer.frameLength) ch=\(buffer.format.channelCount)")
-        }
         let metrics = Self.metrics(for: buffer)
         let displayLevel = Self.displayLevel(forRMS: metrics.rms, peak: metrics.peak)
         levelHistory.append(displayLevel)

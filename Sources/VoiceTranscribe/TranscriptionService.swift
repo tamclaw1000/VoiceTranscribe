@@ -163,12 +163,14 @@ final class TranscriptionCoordinator: ObservableObject {
     @Published private(set) var segments: [TranscriptSegment] = []
     @Published private(set) var interimSegment: TranscriptSegment?
     @Published private(set) var isTranscribing = false
+    @Published private(set) var isStarting = false
     @Published private(set) var lastError: String?
     @Published private(set) var bufferSnapshot = TranscriptionBufferSnapshot()
 
     private var transcript = TranscriptDocument()
     private var service: TranscriptionService
     private var bufferTimer: Timer?
+    private var startTask: Task<Void, Error>?
 
     init(service: TranscriptionService = AppleSpeechTranscriptionService()) {
         self.service = service
@@ -182,22 +184,77 @@ final class TranscriptionCoordinator: ObservableObject {
         transcript.plainText
     }
 
+    /// Replace the transcription engine.  Cancels any in-progress start and
+    /// stops active transcription before swapping.
+    func setEngine(_ kind: TranscriptionEngineKind) {
+        let oldEngine = service.engineName
+        let wasRunning = isTranscribing || isStarting
+
+        // Cancel any pending start (e.g. FluidAudio model download in flight).
+        startTask?.cancel()
+        startTask = nil
+        isStarting = false
+
+        if isTranscribing {
+            stop()
+        }
+
+        service = Self.makeService(for: kind)
+
+        Trace.event("transcription.engineChanged", [
+            "from": oldEngine,
+            "to": service.engineName,
+            "wasRunning": wasRunning
+        ])
+    }
+
+    private static func makeService(for kind: TranscriptionEngineKind) -> TranscriptionService {
+        switch kind {
+        case .appleSpeech:
+            return AppleSpeechTranscriptionService()
+        case .fluidAudio:
+            return FluidAudioTranscriptionService()
+        }
+    }
+
     func start() async throws {
         transcript = TranscriptDocument()
         segments = []
         interimSegment = nil
         bufferSnapshot = TranscriptionBufferSnapshot()
+        isStarting = true
 
-        Trace.event("transcription.starting", ["engine": service.engineName])
-        try await service.start { [weak self] segment in
-            Task { @MainActor in
-                self?.apply(segment)
+        let task = Task { @MainActor in
+            Trace.event("transcription.starting", ["engine": service.engineName])
+            try await service.start { [weak self] segment in
+                Task { @MainActor in
+                    self?.apply(segment)
+                }
             }
+
+            // Check cancellation before committing — setEngine or stop may
+            // have been called during a long model download.
+            try Task.checkCancellation()
+
+            isTranscribing = true
+            isStarting = false
+            startBufferTimer()
+            lastError = nil
+            Trace.event("transcription.started", ["engine": service.engineName])
         }
-        isTranscribing = true
-        startBufferTimer()
-        lastError = nil
-        Trace.event("transcription.started", ["engine": service.engineName])
+
+        startTask = task
+
+        do {
+            try await task.value
+        } catch is CancellationError {
+            isStarting = false
+            Trace.event("transcription.cancelled", ["engine": service.engineName])
+            throw CancellationError()
+        } catch {
+            isStarting = false
+            throw error
+        }
     }
 
     func consume(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
@@ -212,6 +269,10 @@ final class TranscriptionCoordinator: ObservableObject {
     }
 
     func stop() {
+        startTask?.cancel()
+        startTask = nil
+        isStarting = false
+
         service.stop()
         isTranscribing = false
         interimSegment = nil
@@ -230,6 +291,7 @@ final class TranscriptionCoordinator: ObservableObject {
             segments.append(segment)
             interimSegment = nil
         } else {
+            Trace.event("transcription.segmentPartial", ["text": segment.text.prefix(80)])
             interimSegment = segment
         }
     }

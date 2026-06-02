@@ -8,9 +8,13 @@ let package = Package(
     platforms: [
         .macOS("26.0")
     ],
+    dependencies: [
+        .package(path: "external/FluidAudio"),
+    ],
     targets: [
         .executableTarget(
             name: "VoiceTranscribe",
+            dependencies: ["FluidAudio"],
             path: "Sources/VoiceTranscribe"
         ),
         .testTarget(

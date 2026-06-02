@@ -61,8 +61,10 @@ enum Trace {
     }
 
     /// Convenience: log a button action.
-    static func button(_ name: String, source: String) {
-        event("button.\(name)", ["source": source])
+    static func button(_ name: String, source: String, extra: [String: CustomStringConvertible?] = [:]) {
+        var p: [String: CustomStringConvertible?] = ["source": source]
+        for (k, v) in extra { p[k] = v }
+        event("button.\(name)", p)
     }
 
     /// Convenience: log an audio event.

@@ -353,3 +353,297 @@ This checklist converts `VoiceTranscribe-REQUIREMENTS.md` into implementation wo
 - [x] Fix: switch to 16-bit integer interleaved PCM (`AVLinearPCMBitDepthKey: 16`, `AVLinearPCMIsFloatKey: false`, `AVLinearPCMIsNonInterleaved: false`).
 - [x] `.m4a` (AAC) was never affected — default format remains playable.
 - [x] Bump app version to `1.3.4` build `8`.
+
+## 27. v1.3.5. Application Review Fixes
+
+Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/Deepseek/deepseek-v4-pro)
+
+### 27a. Dead Setting: visualizationSensitivity
+
+- [ ] Plumb `AppSettings.visualizationSensitivity` into `AudioCaptureService.displayLevel(forRMS:peak:)`.
+- [ ] Accept a sensitivity multiplier or exponent parameter.
+- [ ] Verify the slider in Settings actually changes the graph appearance.
+
+### 27b. Device Removal During Active Capture
+
+- [ ] Listen for `AVAudioEngineConfigurationChange` notification.
+- [ ] When the active input device disappears, cleanly stop capture and notify user.
+- [ ] Reset active source UI state after device removal.
+- [ ] Trace device removal events.
+
+### 27c. Transcription Buffer Overflows
+
+- [ ] Implement backpressure: drop or throttle incoming audio buffers when `queuedDuration` >= `maxDuration`.
+- [ ] Surface buffer-overflow warning to the transcription panel.
+- [ ] Trace dropped transcription buffers.
+
+### 27d. Recording Filename Collisions
+
+- [ ] Detect when destination file already exists in `RecordingService.stop()`.
+- [ ] Append a disambiguation suffix or UUID before overwriting.
+- [ ] Add unit test for collision case.
+
+### 27e. Analyzer Finalization Is Fire-and-Forget
+
+- [ ] Track the finalization Task in a property so `stop()` can await it before a new `start()`.
+- [ ] Ensure old analyzer sessions complete before new ones begin.
+
+### 27f. Integration Tests
+
+- [ ] Integration test capture lifecycle with mock audio source.
+- [ ] Integration test recording file creation and metadata.
+- [ ] Integration test transcription pipeline end-to-end.
+- [ ] UI test permission denied states.
+- [ ] Performance/stress test for long recordings (≥60 min).
+
+### 27g. Low Disk Space Detection
+
+- [ ] Check available disk space before starting recording.
+- [ ] Warn user if free space drops below threshold during recording.
+- [ ] Gracefully finalize recording if disk fills mid-session.
+
+### 27h. Unsupported Device Format Handling
+
+- [ ] Detect when `AVAudioEngine` cannot use the selected device's format.
+- [ ] Surface a clear error message instead of silent failure.
+- [ ] Log format negotiation details for diagnostics.
+
+### 27i. Validate Inaccessible Output Folders
+
+- [ ] Verify output folder exists and is writable before starting recording.
+- [ ] Show Settings with a clear error if folder is invalid.
+- [ ] Fall back to default folder when configured folder is inaccessible.
+
+### 27j. App Polish
+
+- [ ] Add app icon.
+- [ ] Verify clean install behavior (no pre-existing settings).
+- [ ] Verify upgrade behavior (settings survive version bumps).
+- [ ] Notarize for distribution outside Mac App Store.
+
+### 27k. Performance Benchmarks
+
+- [ ] Measure capture startup latency.
+- [ ] Measure stop/finalize latency.
+- [ ] Measure memory usage during 60-minute recording.
+- [ ] Measure CPU usage during listen-only.
+- [ ] Measure CPU usage during record + transcribe.
+- [ ] Add stress test for slow transcription consumer.
+- [ ] Add stress test for slow disk writes.
+
+## 28. v1.4.0. Simplify UI
+
+### 28a. Combine Listen + Transcribe
+
+- [x] Merge Listen and Transcribe into a single "Transcribe" / "Stop" toggle button.
+- [x] Remove listen-only mode — transcription always runs when capture is active.
+- [x] Keep the live sound graph visible during active transcription.
+- [x] Update `AppModel.toggleListen()` and `AppModel.toggleTranscribe()` into a single `AppModel.toggleTranscribe()` that starts both capture and transcription together.
+- [x] Remove the `listen` consumer from `AudioCaptureService`; transcription always consumes audio.
+- [x] Green-color the Transcribe button icon and label when active (same as current Listen styling).
+- [x] Update `SourceConsoleView` to show only `capture`, `modes`, `rms/peak`, and `transcription` fields.
+
+### 28b. Record as Checkbox
+
+- [x] Replace the Record button with a checkbox toggle.
+- [x] Display the in-progress recording filename next to the checkbox when recording is active.
+- [x] Make the filename clickable — opens the file's location in Finder.
+- [x] After recording stops, show the final basename briefly (5s) then clear it.
+- [x] Transcription text is always saved when recording was active (no separate auto-save toggle dependency).
+
+### 28c. Simplified Source Row Layout
+
+- [x] Source name, device info, and default indicator (unchanged).
+- [x] Replace Listen + Record + Transcribe button group with Transcribe/Stop button + Record checkbox.
+- [x] Move the "Active" indicator next to or within the Transcribe button.
+- [x] Ensure layout is clean at narrow widths.
+
+### 28d. Remove Dead Code
+
+- [x] Remove `isListening()` from `AppModel`.
+- [x] Remove `toggleListen()` from `AppModel`.
+- [x] Remove `SourceAction.listen` from `Models.swift` if no longer referenced.
+- [x] Remove `startTranscriptionWithRecording` setting (transcription always runs when capture is active).
+- [x] Remove the `saveTranscriptsAutomatically` setting dependency from recording stop logic (transcript always saved when recording).
+
+### 28e. Bump Version
+
+- [x] Bump `CFBundleShortVersionString` to `1.4.0`.
+- [x] Bump `CFBundleVersion` to `9`.
+
+## 30. v1.5.0. FluidAudio Integration
+
+### 30a. Review FluidAudio
+
+- [x] Review `external/FluidAudio` architecture and API surface.
+- [x] FluidAudio provides Core ML speech processing on Apple Silicon: ASR (Parakeet TDT batch, Parakeet EOU streaming, Nemotron, Qwen3), TTS (Kokoro, PocketTTS, StyleTTS2, Supertonic3), VAD (Silero), and Diarization (pyannote offline).
+- [x] ASR API: `StreamingEouAsrManager` is an `actor` with `loadModels(to:)` (auto-downloads from HuggingFace), `process(audioBuffer:)` (streaming with internal conversion), EOU/partial callbacks, and `finish()` for final transcript.
+- [x] Model: `parakeet-realtime-eou-120m-coreml` with 160/320/1280ms chunk sizes; 320ms chosen for balanced latency (~630ms audio per chunk, ~5% WER).
+
+### 30b. Pluggable Transcription Engine Architecture
+
+- [x] Add `fluidAudio` case to `TranscriptionEngineKind` enum in `AppSettings.swift`.
+- [x] Create `FluidAudioTranscriptionService` conforming to `TranscriptionService` protocol.
+  - Uses `StreamingEouAsrManager` (320ms chunks, 1280ms EOU debounce).
+  - EOU callback emits finalized `TranscriptSegment`; partial callback emits interim.
+  - `start()` creates manager, sets callbacks, calls `loadModels()` (auto-download).
+  - `append()` dispatches `process(audioBuffer:)` via fire-and-forget `Task`; the actor serializes concurrent calls.
+  - `stop()` calls `finish()` to drain final utterance, then nils the manager.
+- [x] Add `setEngine(_:)` to `TranscriptionCoordinator` — stops active transcription before swapping services.
+- [x] Add `FluidAudio` as local package dependency in `Package.swift` (`external/FluidAudio`).
+- [x] `AppModel.init()` reads persisted engine preference to construct the correct initial service.
+
+### 30c. Engine Picker Behavior
+
+- [x] Settings engine `Picker` calls `appModel.transcription.setEngine(newEngine)` before persisting the setting — stops any active transcription on switch.
+- [x] Engine picker is `.disabled()` while `appModel.transcription.isTranscribing` — cannot change engines mid-transcription.
+- [x] Engine choice persists across app launches via `@AppStorage("transcriptionEngine")`.
+
+### 30d. FluidAudio Dependency
+
+- [x] Added `external/FluidAudio` (swift-tools-version 6.0, macOS 14+) as local path dependency.
+- [x] VoiceTranscribe target depends on `FluidAudio` product.
+- [x] FluidAudio imports: `FluidAudio` (ASR, AudioConverter, ModelRegistry).
+
+### 30e. Bump Version
+
+- [x] Bump `CFBundleShortVersionString` to `1.5.0`.
+- [x] Bump `CFBundleVersion` to `10`.
+
+## 31. v1.5.1. BUGS
+
+### 31a. FluidAudio Transcript Punctuation
+
+- [x] Root cause: Parakeet EOU model does not emit punctuation tokens (`.`, `?`, `!`).
+- [x] Each EOU boundary is a natural utterance end — added `addSentencePunctuation()` post-processing to `FluidAudioTranscriptionService`.
+- [x] Capitalizes first letter and appends a period if the text doesn't already end with sentence punctuation.
+- [x] Applied to both EOU callback (`setEouCallback`) and final drain (`finish()` in `stop()`).
+
+### 31b. Status Console Shows for All Sources
+
+- [x] Root cause: `SourceConsoleView` read `appModel.captureService.visualization` and `appModel.transcription.bufferSnapshot` directly — global state shown identically for every source row.
+- [x] Fix: only use live `visualization` and `bufferSnapshot` when `isActiveSource` is true; use zeroed `VisualizationSnapshot()` / `TranscriptionBufferSnapshot()` for inactive rows.
+- [x] Same guard applied to `isTranscribing` — only shows "active" for the active source.
+
+### 31c. Bump Version
+
+- [x] Bump `CFBundleShortVersionString` to `1.5.1`.
+- [x] Bump `CFBundleVersion` to `11`.
+
+## 31d. v1.5.2. Punctuation Debugging
+
+- [x] Added diagnostic traces to `FluidAudioTranscriptionService.stop()` and `addSentencePunctuation()` to trace the punctuation pipeline.
+- [x] Bump `CFBundleShortVersionString` to `1.5.2`.
+- [x] Bump `CFBundleVersion` to `12`.
+
+## 31e. v1.5.3. Comprehensive Transcription Tracing
+
+- [x] Added trace for EOU callback entry (`fluidAudio.eou.raw`), skip (`fluidAudio.eou.skip`), and punctuated output (`fluidAudio.eou.punctuated`).
+- [x] Added trace for partial callback (`fluidAudio.partial`).
+- [x] Added trace for `stop()` entry (`fluidAudio.stop.enter`) with manager state.
+- [x] Added intermediate `fluidAudio.stop.trimmed` trace to see raw vs trimmed text.
+- [x] Added `transcription.segmentPartial` trace in `TranscriptionCoordinator.apply()` — partial/interim segments now traced.
+- [x] Bump `CFBundleShortVersionString` to `1.5.3`.
+- [x] Bump `CFBundleVersion` to `13`.
+- [ ] After testing: check `/tmp/VoiceTranscribe.log` for `fluidAudio.*` events to diagnose punctuation pipeline.
+
+## 31f. v1.5.4. Real-Time Sentence Boundary Detection
+
+- [x] Import `NaturalLanguage` framework.
+- [x] Added `committedEndIndex` to track which portion of accumulated text has been emitted as finalized segments.
+- [x] Added `splitSentences()` — uses `NLTokenizer(unit: .sentence)` to detect sentence boundaries in real-time partial text.
+- [x] Partial callback now commits complete sentences as finalized segments (with punctuation) and keeps the last incomplete sentence as interim.
+- [x] Requires at least 2 detected sentences before committing the first one, reducing false sentence splits.
+- [x] Resets `committedEndIndex` on each new `start()`.
+- [x] Bump `CFBundleShortVersionString` to `1.5.4`.
+- [x] Bump `CFBundleVersion` to `14`.
+- [x] Confirmed `finish()` drain at Stop produces punctuated text: `fluidAudio.stop.punctuated` trace shows full transcript with capitalization and period.
+- [ ] NLTokenizer failed to find sentence boundaries in unpunctuated ASR text — no `fluidAudio.sentence` events during live transcription.
+
+## 31g. v1.5.5. Length-Based Live Sentence Commit
+
+- [x] Replaced NLTokenizer-based sentence detection with length-based commit strategy.
+- [x] Commits accumulated text as a finalized sentence once 50+ new characters accumulate (with word-boundary split).
+- [x] Removed `import NaturalLanguage` dependency.
+- [x] Bump `CFBundleShortVersionString` to `1.5.5`.
+- [x] Bump `CFBundleVersion` to `15`.
+- [ ] After testing: check `/tmp/VoiceTranscribe.log` for `fluidAudio.sentence` events showing real-time sentence commits.
+
+## 34. v1.8.0. Speaker Diarization
+
+### 34a. Research FluidAudio Diarizer
+
+- [ ] FluidAudio provides `Diarizer` protocol with streaming `addAudio()/process()` → `DiarizerTimelineUpdate`.
+- [ ] `SortformerDiarizer`: 4-speaker streaming diarization, ~11% DER on DI-HARD III, real-time on Apple Silicon.
+- [ ] Also available: `LSEENDDiarizer`, `OfflineDiarizerManager` (pyannote-based).
+- [ ] Sortformer downloads models from HuggingFace (`FluidInference/sortformer-diarizer-coreml`).
+- [ ] `DiarizerTimeline` produces `DiarizerSegment` with speaker label, start/end times, confidence.
+
+### 34b. Integrate Diarizer into Capture Pipeline
+
+- [ ] Add `SortformerDiarizer` instance to `AppModel` or `AudioCaptureService`.
+- [ ] Feed the same audio stream to both ASR and diarizer in parallel.
+- [ ] Diarizer emits `DiarizerTimelineUpdate` containing speaker-labeled speech segments.
+- [ ] Align `TranscriptSegment` timestamps with `DiarizerSegment` time ranges to assign speaker labels.
+
+### 34c. Display Speaker-Attributed Transcript
+
+- [ ] Add speaker label prefix to transcript segments (e.g., "Speaker A: ..." or "👤 A: ...").
+- [ ] Color-code segments by speaker for visual differentiation.
+- [ ] Support speaker enrollment: record a short clip to name a speaker ("John") instead of "Speaker A".
+
+### 34d. Performance and UX
+
+- [ ] Ensure diarizer doesn't block the main thread — run inference on a background actor.
+- [ ] Model download on first use (like FluidAudio ASR models).
+- [ ] Graceful fallback when diarizer is unavailable or fails.
+- [ ] Diarizer off by default; toggle in Settings popup (v1.6.0).
+
+## 32. v1.6.0. Settings Popup and First-Run Access Flow
+
+### 32a. Consolidate Buttons into Settings Popup
+
+- [ ] Move the Engine and Access Request Buttons, and the Apple Settings button into a single Settings button that brings up a pop-up.
+- [ ] The pop-up should contain: transcription engine picker, microphone permission request, speech recognition permission request, and a link to Apple System Settings.
+- [ ] Each permission item shows current authorization state (granted / denied / not determined).
+- [ ] The Apple Settings link opens `x-apple.systempreferences:com.apple.preference.security?Privacy`.
+
+### 32b. First-Run Access Prompt
+
+- [ ] When the application first launches, bring up the Settings pop-up automatically.
+- [ ] Request the user to set approvals if either microphone or speech recognition has not already been granted.
+- [ ] Track first-launch state so the pop-up only auto-opens when permissions are missing.
+- [ ] Do not auto-open the pop-up on subsequent launches once both permissions are granted.
+
+### 32c. Disable All Buttons Until Approved
+
+- [ ] Disable all action buttons (Transcribe, Record) until both microphone and speech recognition permissions have been granted.
+- [ ] Show a clear message or badge on disabled buttons indicating permissions are required.
+- [ ] Re-enable buttons automatically when permissions are granted (via authorization-state change listener).
+- [ ] Ensure the Settings button remains enabled at all times so the user can resolve permissions.
+
+## 33. v1.7.0. File Input Source
+
+### 33a. File as Input Source
+
+- [ ] Add the ability to load an audio file as an input source.
+- [ ] Add a "Load File…" button or menu item to browse for audio files (WAV, M4A, CAF, MP3, FLAC).
+- [ ] Loaded file appears in the source list as a virtual input source with its filename as the display name.
+- [ ] Show file metadata in the source subtitle: duration, format, sample rate, channel count.
+- [ ] Multiple files can be loaded simultaneously; each appears as a separate row.
+- [ ] Add a remove/close button to unload a file source.
+
+### 33b. File Source — Transcribe Only
+
+- [ ] File input sources only have a Transcribe button (no Record checkbox).
+- [ ] Record is not applicable to file sources — the file is already the recording.
+- [ ] Clicking Transcribe on a file source processes the entire file through the selected transcription engine.
+- [ ] Show progress (elapsed / total duration) during file transcription.
+- [ ] Transcription results appear in the live transcript panel as finalized segments.
+
+### 33c. Auto-Select Last Recording
+
+- [ ] After a recording session completes, the recorded file is automatically loaded as a file input source.
+- [ ] The most recently recorded file becomes the selected/active file source.
+- [ ] Previous file sources are retained unless manually removed.
+- [ ] Auto-loaded recording files use the same basename as the recording.

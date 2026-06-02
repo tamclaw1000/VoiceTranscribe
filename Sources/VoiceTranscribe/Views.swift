@@ -65,6 +65,20 @@ struct ContentView: View {
                 isAllowed: appModel.permissionService.canTranscribe
             )
             Spacer()
+            Picker("Engine", selection: Binding(
+                get: { appModel.settings.transcriptionEngine },
+                set: { newEngine in
+                    appModel.transcription.setEngine(newEngine)
+                    appModel.settings.transcriptionEngine = newEngine
+                }
+            )) {
+                ForEach(TranscriptionEngineKind.allCases) { engine in
+                    Text(engine.displayName).tag(engine)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(appModel.transcription.isTranscribing)
+            .help("Transcription engine — cannot be changed while transcribing")
             Button {
                 appModel.requestMicrophonePermission()
             } label: {
@@ -165,28 +179,48 @@ private struct SourceRow: View {
             }
 
             HStack(spacing: 8) {
-                actionButton(
-                    title: appModel.isListening(source) ? "Stop" : "Listen",
-                    systemImage: "waveform",
-                    isActive: appModel.isListening(source)
-                ) {
-                    appModel.toggleListen(for: source)
-                }
-
-                actionButton(
-                    title: appModel.isRecording(source) ? "Stop" : "Record",
-                    systemImage: appModel.isRecording(source) ? "record.circle.fill" : "record.circle",
-                    isActive: appModel.isRecording(source)
-                ) {
-                    appModel.toggleRecord(for: source)
-                }
-
-                actionButton(
-                    title: appModel.isTranscribing(source) ? "Stop" : "Transcribe",
-                    systemImage: appModel.isTranscribing(source) ? "text.bubble.fill" : "text.bubble",
-                    isActive: appModel.isTranscribing(source)
-                ) {
+                // Transcribe / Stop button
+                Button {
                     appModel.toggleTranscribe(for: source)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: appModel.isTranscribing(source) ? "text.bubble.fill" : "text.bubble")
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(appModel.isTranscribing(source) ? Color.green : Color.secondary)
+                        Text(appModel.isTranscribing(source) ? "Stop" : "Transcribe")
+                            .foregroundStyle(appModel.isTranscribing(source) ? Color.green : Color.primary)
+                    }
+                }
+                .tint(appModel.isTranscribing(source) ? .green : .accentColor)
+                .accessibilityValue(appModel.isTranscribing(source) ? "Active" : "Inactive")
+
+                // Record checkbox
+                Toggle(isOn: Binding(
+                    get: { appModel.isRecording(source) },
+                    set: { _ in appModel.toggleRecord(for: source) }
+                )) {
+                    HStack(spacing: 4) {
+                        Image(systemName: appModel.isRecording(source) ? "record.circle.fill" : "record.circle")
+                            .foregroundStyle(appModel.isRecording(source) ? .red : .secondary)
+                        Text("Record")
+                    }
+                }
+                .toggleStyle(.checkbox)
+
+                if let filename = appModel.recordingFilename {
+                    Button {
+                        appModel.revealRecordingInFinder()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "doc.text")
+                            Text(filename)
+                                .font(.caption.monospaced())
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                 }
 
                 Spacer()
@@ -204,25 +238,6 @@ private struct SourceRow: View {
                 .environmentObject(appModel)
         }
     }
-
-    private func actionButton(
-        title: String,
-        systemImage: String,
-        isActive: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: systemImage)
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(isActive ? Color.green : Color.secondary)
-                Text(title)
-                    .foregroundStyle(isActive ? Color.green : Color.primary)
-            }
-        }
-        .tint(isActive ? .green : .accentColor)
-        .accessibilityValue(isActive ? "Active" : "Inactive")
-    }
 }
 
 private struct SourceConsoleView: View {
@@ -235,14 +250,11 @@ private struct SourceConsoleView: View {
 
     private var modeText: String {
         var modes: [String] = []
-        if appModel.isListening(source) {
-            modes.append("listen")
+        if appModel.isTranscribing(source) {
+            modes.append("transcribe")
         }
         if appModel.isRecording(source) {
             modes.append("record")
-        }
-        if appModel.isTranscribing(source) {
-            modes.append("transcribe")
         }
         return modes.isEmpty ? "none" : modes.joined(separator: ",")
     }
@@ -255,15 +267,20 @@ private struct SourceConsoleView: View {
     }
 
     var body: some View {
-        let visualization = appModel.captureService.visualization
-        let buffer = appModel.transcription.bufferSnapshot
+        let visualization = isActiveSource
+            ? appModel.captureService.visualization
+            : VisualizationSnapshot()
+        let buffer = isActiveSource
+            ? appModel.transcription.bufferSnapshot
+            : TranscriptionBufferSnapshot()
+        let isTranscribing = isActiveSource && appModel.transcription.isTranscribing
 
         VStack(alignment: .leading, spacing: 4) {
             Text(
                 "\(captureText) modes=\(modeText) rms=\(Int(visualization.rmsLevel * 100))% peak=\(Int(visualization.peakLevel * 100))%"
             )
             Text(
-                "transcription=\(appModel.transcription.isTranscribing ? "active" : "idle") buffer=\(String(format: "%.1f", buffer.queuedDuration))s receiving=\(buffer.isReceivingAudio ? "yes" : "no")"
+                "transcription=\(isTranscribing ? "active" : "idle") buffer=\(String(format: "%.1f", buffer.queuedDuration))s receiving=\(buffer.isReceivingAudio ? "yes" : "no")"
             )
         }
         .font(.caption2.monospaced())
@@ -520,14 +537,17 @@ struct SettingsView: View {
             Section("Transcription") {
                 Picker("Engine", selection: Binding(
                     get: { appModel.settings.transcriptionEngine },
-                    set: { appModel.settings.transcriptionEngine = $0 }
+                    set: { newEngine in
+                        appModel.transcription.setEngine(newEngine)
+                        appModel.settings.transcriptionEngine = newEngine
+                    }
                 )) {
                     ForEach(TranscriptionEngineKind.allCases) { engine in
                         Text(engine.displayName).tag(engine)
                     }
                 }
+                .disabled(appModel.transcription.isTranscribing)
                 Toggle("Save transcripts automatically", isOn: $appModel.settings.saveTranscriptsAutomatically)
-                Toggle("Start transcription when recording", isOn: $appModel.settings.startTranscriptionWithRecording)
             }
 
             Section("Visualization") {

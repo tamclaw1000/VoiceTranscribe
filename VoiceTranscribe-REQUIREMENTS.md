@@ -301,7 +301,36 @@ These can be considered future enhancements.
 - Transcription delays do not block or stop audio recording.
 - Permission denial states are handled without crashing.
 
-## 14. Open Questions
+## 14. v1.4.0 UI Simplification
+
+### 14.1 Combined Listen + Transcribe
+
+Listen and Transcribe are merged into a single button per source. Toggling it on starts capture with transcription always active; toggling it off stops both. There is no listen-only mode — transcription is always running when the source is active.
+
+- The button label toggles between "Transcribe" and "Stop".
+- The live sound graph remains visible while active.
+- The live transcript panel updates while active.
+- Stopping ends capture and transcription together.
+
+### 14.2 Record as Checkbox
+
+Recording is a separate toggle (checkbox) that can be enabled or disabled independently of transcription. When recording is enabled:
+
+- A filename is displayed showing the current in-progress recording basename.
+- Clicking the filename reveals it in Finder.
+- When recording is stopped, the filename is replaced with the final basename for a brief period, then returns to no filename shown.
+- Transcription text is saved alongside the recording when both are active.
+
+### 14.3 Simplified Source Row Layout
+
+Each source row shows:
+
+- Source name, device info, and default indicator (unchanged).
+- A Transcribe/Stop toggle button.
+- A Record checkbox with filename display when active.
+- Active state indicator.
+
+## 15. Open Questions
 
 - Should the app support multiple simultaneous active input sources in version 1?
 - Should recordings default to compressed `.m4a` or lossless `.wav`/`.caf`?

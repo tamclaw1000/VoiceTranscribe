@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -8,13 +9,35 @@ final class AppModel: ObservableObject {
     @Published var settings = AppSettings()
     @Published var captureService = AudioCaptureService()
     @Published var recordingService = RecordingService()
-    @Published var transcription = TranscriptionCoordinator()
+    @Published var transcription: TranscriptionCoordinator
+
+    private static func makeInitialService() -> TranscriptionService {
+        let raw = UserDefaults.standard.string(forKey: "transcriptionEngine") ?? TranscriptionEngineKind.appleSpeech.rawValue
+        let kind = TranscriptionEngineKind(rawValue: raw) ?? .appleSpeech
+        switch kind {
+        case .appleSpeech:
+            return AppleSpeechTranscriptionService()
+        case .fluidAudio:
+            return FluidAudioTranscriptionService()
+        }
+    }
     @Published var completedRecordings: [RecordingSession] = []
     @Published var userMessage: String?
+    @Published var recordingFilename: String?  // in-progress or recently-completed basename
+    @Published var recordingFileURL: URL?      // for Finder reveal
+
+    /// Guards against double‑click races while transcription is still starting.
+    @Published private(set) var isStartingTranscription = false
+    /// Guards against double‑click races while recording is still starting.
+    @Published private(set) var isStartingRecording = false
 
     private var cancellables = Set<AnyCancellable>()
+    private var transcriptionTask: Task<Void, Never>?
+    private var recordingTask: Task<Void, Never>?
 
     init() {
+        transcription = TranscriptionCoordinator(service: AppModel.makeInitialService())
+
         // Propagate nested ObservableObject changes so SwiftUI re-renders
         // when captureService, recordingService, or transcription state changes.
         captureService.objectWillChange.sink { [weak self] _ in
@@ -51,91 +74,121 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func toggleListen(for source: SoundInputSource) {
-        if isListening(source) {
-            Trace.button("listen.stop", source: source.name)
-            captureService.removeConsumer(id: "listen")
-            captureService.stopIfUnused()
-            return
-        }
-
-        Trace.button("listen.start", source: source.name)
-        Task {
-            do {
-                try await ensureCapture(for: source)
-                captureService.addConsumer(id: "listen") { _, _ in }
-                Trace.event("listen.started", ["source": source.name])
-            } catch {
-                Trace.event("listen.error", ["source": source.name, "error": error.localizedDescription])
-                userMessage = error.localizedDescription
-            }
-        }
-    }
-
     func toggleRecord(for source: SoundInputSource) {
-        if recordingService.isRecording {
-            Trace.button("record.stop", source: source.name)
+        let isCurrentlyRecording = recordingService.isRecording
+        Trace.button(
+            isCurrentlyRecording ? "record.stop" : "record.start",
+            source: source.name,
+            extra: ["isStartingRecording": isStartingRecording]
+        )
+
+        if isCurrentlyRecording {
             stopRecording()
             return
         }
 
-        Trace.button("record.start", source: source.name)
-        Task {
+        guard !isStartingRecording else {
+            Trace.event("record.guard.skip", ["reason": "alreadyStarting"])
+            return
+        }
+
+        isStartingRecording = true
+
+        recordingTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.isStartingRecording = false }
+
             do {
-                try await ensureCapture(for: source)
-                try recordingService.start(
+                try await self.ensureCapture(for: source)
+                try self.recordingService.start(
                     source: source,
-                    inputFormat: captureService.currentInputFormat,
-                    outputFolder: settings.outputFolder,
-                    outputFormat: settings.audioOutputFormat
+                    inputFormat: self.captureService.currentInputFormat,
+                    outputFolder: self.settings.outputFolder,
+                    outputFormat: self.settings.audioOutputFormat
                 )
-                captureService.addConsumer(id: "record") { [weak recordingService] buffer, time in
+                self.captureService.addConsumer(id: "record") { [weak recordingService] buffer, time in
                     Task { @MainActor in
                         recordingService?.consume(buffer: buffer, time: time)
                     }
                 }
-                Trace.event("record.started", ["source": source.name, "outputFolder": settings.outputFolder.path])
-
-                if settings.startTranscriptionWithRecording && !transcription.isTranscribing {
-                    try await startTranscriptionConsumer(for: source)
-                }
+                self.recordingFilename = self.recordingService.activeSession?.basename
+                self.recordingFileURL = nil
+                Trace.event("record.started", [
+                    "source": source.name,
+                    "outputFolder": self.settings.outputFolder.path
+                ])
             } catch {
-                Trace.event("record.error", ["source": source.name, "error": error.localizedDescription])
-                userMessage = error.localizedDescription
+                Trace.event("record.error", [
+                    "source": source.name,
+                    "error": error.localizedDescription
+                ])
+                self.userMessage = error.localizedDescription
             }
         }
     }
 
     func toggleTranscribe(for source: SoundInputSource) {
-        if transcription.isTranscribing {
-            Trace.button("transcribe.stop", source: source.name)
+        let isCurrentlyTranscribing = transcription.isTranscribing
+        let isStarting = transcription.isStarting || isStartingTranscription
+        Trace.button(
+            isCurrentlyTranscribing ? "transcribe.stop" : "transcribe.start",
+            source: source.name,
+            extra: [
+                "isTranscribing": isCurrentlyTranscribing,
+                "isStarting": isStarting,
+                "isStartingTranscription": isStartingTranscription,
+                "engine": transcription.engineName
+            ]
+        )
+
+        if isCurrentlyTranscribing {
             stopTranscription()
             return
         }
 
-        Trace.button("transcribe.start", source: source.name)
-        Task {
+        guard !isStarting else {
+            Trace.event("transcribe.guard.skip", ["reason": "alreadyStarting"])
+            return
+        }
+
+        isStartingTranscription = true
+
+        transcriptionTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.isStartingTranscription = false }
+
             do {
-                try await ensureCapture(for: source)
-                try await startTranscriptionConsumer(for: source)
-                Trace.event("transcribe.started", ["source": source.name])
+                Trace.event("transcribe.capture.ensuring", ["source": source.name])
+                try await self.ensureCapture(for: source)
+                Trace.event("transcribe.service.starting", [
+                    "source": source.name,
+                    "engine": self.transcription.engineName
+                ])
+                try await self.startTranscriptionConsumer(for: source)
+                Trace.event("transcribe.started", [
+                    "source": source.name,
+                    "engine": self.transcription.engineName
+                ])
             } catch {
-                Trace.event("transcribe.error", ["source": source.name, "error": error.localizedDescription])
-                userMessage = error.localizedDescription
+                Trace.event("transcribe.error", [
+                    "source": source.name,
+                    "engine": self.transcription.engineName,
+                    "error": error.localizedDescription
+                ])
+                self.userMessage = error.localizedDescription
             }
         }
     }
 
-    func isListening(_ source: SoundInputSource) -> Bool {
-        captureService.activeSource?.id == source.id && captureService.activeConsumerIDs.contains("listen")
-    }
-
     func isRecording(_ source: SoundInputSource) -> Bool {
-        recordingService.activeSession?.source.id == source.id
+        guard let session = recordingService.activeSession else { return false }
+        return session.source.id == source.id
     }
 
     func isTranscribing(_ source: SoundInputSource) -> Bool {
-        captureService.activeSource?.id == source.id && transcription.isTranscribing
+        // The button is "active" when transcribing OR still starting.
+        guard captureService.activeSource?.id == source.id else { return false }
+        return transcription.isTranscribing || transcription.isStarting || isStartingTranscription
     }
 
     private func ensureCapture(for source: SoundInputSource) async throws {
@@ -172,11 +225,19 @@ final class AppModel: ObservableObject {
     }
 
     private func stopRecording() {
+        recordingTask?.cancel()
+        recordingTask = nil
+        isStartingRecording = false
+
         do {
+            Trace.event("record.stopping", [
+                "source": recordingService.activeSession?.source.name ?? "unknown"
+            ])
             captureService.removeConsumer(id: "record")
+            let saveTranscript = transcription.isTranscribing && !transcription.transcriptText.isEmpty
             let finalized = try recordingService.stop(
                 transcriptText: transcription.transcriptText,
-                saveTranscript: settings.saveTranscriptsAutomatically && !transcription.transcriptText.isEmpty,
+                saveTranscript: saveTranscript,
                 transcriptionEngine: transcription.engineName
             )
             if let finalized {
@@ -187,19 +248,49 @@ final class AppModel: ObservableObject {
                     "duration": String(format: "%.2f", finalized.duration)
                 ])
                 completedRecordings.insert(finalized, at: 0)
+                recordingFilename = finalized.basename
+                recordingFileURL = finalized.audioURL
+            } else {
+                recordingFilename = nil
             }
             captureService.stopIfUnused()
+            scheduleClearRecordingFilename()
         } catch {
             Trace.event("record.stopError", ["error": error.localizedDescription])
             userMessage = error.localizedDescription
         }
     }
 
+    private var clearFilenameTask: Task<Void, Never>?
+
+    private func scheduleClearRecordingFilename() {
+        clearFilenameTask?.cancel()
+        clearFilenameTask = Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+            recordingFilename = nil
+            recordingFileURL = nil
+        }
+    }
+
+    func revealRecordingInFinder() {
+        guard let url = recordingFileURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
     private func stopTranscription() {
-        Trace.event("transcribe.stopped", ["segments": transcription.segments.count])
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        isStartingTranscription = false
+
+        Trace.event("transcribe.stopping", [
+            "segments": transcription.segments.count,
+            "isTranscribing": transcription.isTranscribing
+        ])
         captureService.removeConsumer(id: "transcribe")
         transcription.stop()
         captureService.stopIfUnused()
+        Trace.event("transcribe.stopped", ["finalSegments": transcription.segments.count])
     }
 }
 

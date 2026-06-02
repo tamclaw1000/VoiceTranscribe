@@ -77,6 +77,17 @@ The analyzer stream must be started (`analyzer.start(inputSequence:)`) BEFORE an
 
 Version numbers live in `Resources/Info.plist` (`CFBundleShortVersionString` and `CFBundleVersion`). Every code change section in `VoiceTranscribe-IMPLEMENTATION.md` should end with a bump. If the plist says 1.3.0 but the checklist says 1.3.2, someone forgot.
 
+### ⚠️ IMPLEMENTATION.md IS the Changelog — Do NOT Create a Separate CHANGELOG.md
+
+This project tracks versioned work exclusively in `VoiceTranscribe-IMPLEMENTATION.md`. Each version is a numbered section with checklists. There is NO `CHANGELOG.md` file — do not create one. When adding a new version:
+
+1. Add a new numbered section to `VoiceTranscribe-IMPLEMENTATION.md` (e.g., `## 30. v1.5.0. Feature Name`).
+2. Use checked-off `- [x]` items describing what was done.
+3. Bump `CFBundleShortVersionString` and `CFBundleVersion` in `Resources/Info.plist`.
+4. Add a row to the Version History table in THIS file (AGENTS.md).
+
+That's it. No other files need version info.
+
 ## Tracing
 
 Traces are **always-on** and write to `/tmp/VoiceTranscribe.log` as JSON lines (one per event):
@@ -137,6 +148,9 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 1.5.1 | 11 | Fixed FluidAudio model verification (partial downloads), cleaned cache, bumped version |
+| 1.5.0 | 10 | FluidAudio integration: Parakeet EOU streaming ASR, pluggable engine architecture, engine picker in Settings |
+| 1.4.0 | 9 | Simplified UI: merged Listen+Transcribe, Record→checkbox with filename + Finder reveal |
 | 1.3.4 | 8 | PCM recording fix: 16-bit interleaved (VLC-compatible) |
 | 1.3.3 | 7 | Synchronous trace writes + stderr echo |
 | 1.3.2 | 6 | Structured event tracing (`Trace.swift`) |

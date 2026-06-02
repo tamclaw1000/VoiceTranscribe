@@ -22,6 +22,7 @@ enum AudioOutputFormat: String, CaseIterable, Identifiable {
 
 enum TranscriptionEngineKind: String, CaseIterable, Identifiable {
     case appleSpeech = "appleSpeech"
+    case fluidAudio = "fluidAudio"
 
     var id: String { rawValue }
 
@@ -29,6 +30,8 @@ enum TranscriptionEngineKind: String, CaseIterable, Identifiable {
         switch self {
         case .appleSpeech:
             return "Apple Speech"
+        case .fluidAudio:
+            return "FluidAudio (Parakeet EOU)"
         }
     }
 }
@@ -39,7 +42,6 @@ final class AppSettings: ObservableObject {
     @AppStorage("audioOutputFormat") var audioOutputFormatRaw: String = AudioOutputFormat.m4a.rawValue
     @AppStorage("transcriptionEngine") var transcriptionEngineRaw: String = TranscriptionEngineKind.appleSpeech.rawValue
     @AppStorage("saveTranscriptsAutomatically") var saveTranscriptsAutomatically: Bool = true
-    @AppStorage("startTranscriptionWithRecording") var startTranscriptionWithRecording: Bool = false
     @AppStorage("visualizationSensitivity") var visualizationSensitivity: Double = 1.0
 
     static var defaultOutputFolder: URL {

@@ -28,11 +28,7 @@ struct SoundInputSource: Identifiable, Equatable {
     }
 }
 
-enum SourceAction: String, CaseIterable {
-    case listen = "Listen"
-    case record = "Record"
-    case transcribe = "Transcribe"
-}
+
 
 enum CaptureStatus: Equatable {
     case idle

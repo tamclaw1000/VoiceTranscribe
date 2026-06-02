@@ -1,3 +1,4 @@
+import AVFoundation
 import AudioToolbox
 import Foundation
 
@@ -110,5 +111,85 @@ struct TranscriptionBufferSnapshot: Equatable {
             return 0
         }
         return min(max(queuedDuration / maxDuration, 0), 1)
+    }
+}
+
+// MARK: - File Input Source
+
+/// A virtual input source representing an audio file loaded from disk.
+struct FileInputSource: Identifiable, Equatable {
+    let id: String  // UUID string
+    let name: String  // filename without extension
+    let url: URL
+    let duration: TimeInterval
+    let sampleRate: Double
+    let channelCount: Int
+    let audioFormat: String  // e.g. "WAV", "M4A", "FLAC"
+
+    var subtitle: String {
+        "\(audioFormat) — \(channelCount)ch \(Int(sampleRate)) Hz — \(Self.formatDuration(duration))"
+    }
+
+    static func formatDuration(_ duration: TimeInterval) -> String {
+        let totalSeconds = Int(duration)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    /// Attempt to create a FileInputSource from a URL by reading the audio file header.
+    static func from(url: URL) -> FileInputSource? {
+        let ext = url.pathExtension.uppercased()
+        let formatName = ext.isEmpty ? "?" : ext
+
+        guard let file = try? AVAudioFile(forReading: url) else {
+            // Fallback: try AVAsset for compressed formats
+            return fromAsset(url: url, formatName: formatName)
+        }
+
+        let format = file.processingFormat
+        let duration = Double(file.length) / format.sampleRate
+
+        return FileInputSource(
+            id: UUID().uuidString,
+            name: url.deletingPathExtension().lastPathComponent,
+            url: url,
+            duration: duration,
+            sampleRate: format.sampleRate,
+            channelCount: Int(format.channelCount),
+            audioFormat: formatName
+        )
+    }
+
+    private static func fromAsset(url: URL, formatName: String) -> FileInputSource? {
+        let asset = AVURLAsset(url: url)
+        let cmDuration = asset.duration
+        let duration = CMTimeGetSeconds(cmDuration)
+        guard duration > 0, duration.isFinite else { return nil }
+
+        var sampleRate: Double = 0
+        var channelCount: Int = 0
+
+        if let track = asset.tracks(withMediaType: .audio).first,
+           !track.formatDescriptions.isEmpty {
+            let audioDesc = track.formatDescriptions[0] as! CMAudioFormatDescription
+            let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(audioDesc)?.pointee
+            sampleRate = asbd?.mSampleRate ?? 0
+            channelCount = Int(asbd?.mChannelsPerFrame ?? 0)
+        }
+
+        return FileInputSource(
+            id: UUID().uuidString,
+            name: url.deletingPathExtension().lastPathComponent,
+            url: url,
+            duration: duration,
+            sampleRate: sampleRate > 0 ? sampleRate : 44100,
+            channelCount: channelCount > 0 ? channelCount : 2,
+            audioFormat: formatName
+        )
     }
 }

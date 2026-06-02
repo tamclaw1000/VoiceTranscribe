@@ -148,6 +148,9 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 1.7.0 | 17 | File input sources: load audio files, transcribe files, auto-load recordings |
+| 1.6.0 | 16 | Settings popup, first-run access flow, disable buttons until permissions granted |
+| 1.5.4 | 14 | Real-time sentence boundary detection (NLTokenizer) / length-based commit (1.5.5) |
 | 1.5.1 | 11 | Fixed FluidAudio model verification (partial downloads), cleaned cache, bumped version |
 | 1.5.0 | 10 | FluidAudio integration: Parakeet EOU streaming ASR, pluggable engine architecture, engine picker in Settings |
 | 1.4.0 | 9 | Simplified UI: merged Listen+Transcribe, Record→checkbox with filename + Finder reveal |

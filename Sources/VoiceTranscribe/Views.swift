@@ -43,18 +43,43 @@ struct ContentView: View {
     }
 
     private var sourceList: some View {
-        List(appModel.deviceService.sources) { source in
-            SourceRow(source: source)
-                .environmentObject(appModel)
-                .padding(.vertical, 4)
-        }
-        .overlay {
-            if appModel.deviceService.sources.isEmpty {
-                ContentUnavailableView(
-                    "No Input Sources",
-                    systemImage: "mic.slash",
-                    description: Text("Connect or enable a microphone to begin.")
-                )
+        List {
+            // Device sources
+            Section("Microphones") {
+                if appModel.deviceService.sources.isEmpty {
+                    Text("No microphones available")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(appModel.deviceService.sources) { source in
+                        SourceRow(source: source)
+                            .environmentObject(appModel)
+                            .padding(.vertical, 4)
+                    }
+                }
+            }
+
+            // File sources
+            Section("File Sources") {
+                if appModel.fileSources.isEmpty {
+                    HStack {
+                        Text("No files loaded")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Load File…") {
+                            appModel.loadAudioFiles()
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+                } else {
+                    ForEach(appModel.fileSources) { source in
+                        FileSourceRow(source: source)
+                            .environmentObject(appModel)
+                            .padding(.vertical, 4)
+                    }
+                }
             }
         }
     }
@@ -676,6 +701,105 @@ struct SettingsView: View {
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
             appModel.settings.outputFolderPath = url.path
+        }
+    }
+}
+
+// MARK: - File Source Row
+
+private struct FileSourceRow: View {
+    @EnvironmentObject private var appModel: AppModel
+    let source: FileInputSource
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Image(systemName: "doc.waveform")
+                    .foregroundStyle(
+                        appModel.isTranscribingFileSource(source)
+                            ? Color.green : Color.secondary
+                    )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(source.name)
+                        .font(.headline)
+                    Text(source.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    appModel.removeFileSource(id: source.id)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Remove this file source.")
+            }
+
+            HStack(spacing: 8) {
+                // Transcribe / Stop button
+                Button {
+                    appModel.transcribeFile(source)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: appModel.isTranscribingFileSource(source)
+                            ? "text.bubble.fill" : "text.bubble")
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(
+                                appModel.isTranscribingFileSource(source)
+                                    ? Color.green : Color.secondary
+                            )
+                        Text(appModel.isTranscribingFileSource(source)
+                            ? "Stop" : "Transcribe")
+                            .foregroundStyle(
+                                appModel.isTranscribingFileSource(source)
+                                    ? Color.green : Color.primary
+                            )
+                    }
+                }
+                .tint(appModel.isTranscribingFileSource(source) ? .green : .accentColor)
+                .disabled(appModel.isTranscribingFile
+                    && !appModel.isTranscribingFileSource(source))
+                .help("Transcribe the entire audio file.")
+                .accessibilityValue(appModel.isTranscribingFileSource(source)
+                    ? "Active" : "Inactive")
+
+                // Record not applicable for file sources — show NA
+                HStack(spacing: 4) {
+                    Image(systemName: "record.circle")
+                        .foregroundStyle(.tertiary)
+                    Text("N/A")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
+
+                if appModel.isTranscribingFileSource(source) {
+                    Text("Active")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+            }
+            .buttonStyle(.bordered)
+
+            // Progress bar during file transcription
+            if appModel.isTranscribingFileSource(source) {
+                VStack(spacing: 4) {
+                    ProgressView(value: appModel.fileTranscriptionProgress)
+                        .tint(.green)
+                    HStack {
+                        Text("Transcribing file…")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(String(format: "%.0f%%", appModel.fileTranscriptionProgress * 100))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
     }
 }

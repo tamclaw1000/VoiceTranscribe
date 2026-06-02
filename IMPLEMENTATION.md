@@ -605,27 +605,32 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 
 ### 33a. File as Input Source
 
-- [ ] Add the ability to load an audio file as an input source.
-- [ ] Add a "Load File…" button or menu item to browse for audio files (WAV, M4A, CAF, MP3, FLAC).
-- [ ] Loaded file appears in the source list as a virtual input source with its filename as the display name.
-- [ ] Show file metadata in the source subtitle: duration, format, sample rate, channel count.
-- [ ] Multiple files can be loaded simultaneously; each appears as a separate row.
-- [ ] Add a remove/close button to unload a file source.
+- [x] Add the ability to load an audio file as an input source.
+- [x] Add a "Load File…" button or menu item to browse for audio files (WAV, M4A, CAF, MP3, FLAC).
+- [x] Loaded file appears in the source list as a virtual input source with its filename as the display name.
+- [x] Show file metadata in the source subtitle: duration, format, sample rate, channel count.
+- [x] Multiple files can be loaded simultaneously; each appears as a separate row.
+- [x] Add a remove/close button to unload a file source.
 
 ### 33b. File Source — Transcribe Only
 
-- [ ] File input sources only have a Transcribe button (no Record checkbox).
-- [ ] Record is not applicable to file sources — the file is already the recording.
-- [ ] Clicking Transcribe on a file source processes the entire file through the selected transcription engine.
-- [ ] Show progress (elapsed / total duration) during file transcription.
-- [ ] Transcription results appear in the live transcript panel as finalized segments.
+- [x] File input sources only have a Transcribe button (no Record checkbox).
+- [x] Record is not applicable to file sources — the file is already the recording.
+- [x] Clicking Transcribe on a file source processes the entire file through the selected transcription engine.
+- [x] Show progress (elapsed / total duration) during file transcription.
+- [x] Transcription results appear in the live transcript panel as finalized segments.
 
 ### 33c. Auto-Select Last Recording
 
-- [ ] After a recording session completes, the recorded file is automatically loaded as a file input source.
-- [ ] The most recently recorded file becomes the selected/active file source.
-- [ ] Previous file sources are retained unless manually removed.
-- [ ] Auto-loaded recording files use the same basename as the recording.
+- [x] After a recording session completes, the recorded file is automatically loaded as a file input source.
+- [x] The most recently recorded file becomes the selected/active file source.
+- [x] Previous file sources are retained unless manually removed.
+- [x] Auto-loaded recording files use the same basename as the recording.
+
+### 33d. Bump Version
+
+- [x] Bump `CFBundleShortVersionString` to `1.7.0`.
+- [x] Bump `CFBundleVersion` to `17`.
 
 ## 34. v1.8.0. Speaker Diarization
 

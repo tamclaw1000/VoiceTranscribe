@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import SwiftUI
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -10,6 +11,23 @@ final class AppModel: ObservableObject {
     @Published var captureService = AudioCaptureService()
     @Published var recordingService = RecordingService()
     @Published var transcription: TranscriptionCoordinator
+
+    /// Tracks whether the user has completed the initial permissions setup flow.
+    /// Persisted so we don't re-prompt on every launch after setup.
+    @AppStorage("hasCompletedPermissionsSetup") var hasCompletedPermissionsSetup: Bool = false
+
+    /// Whether Settings should auto-open (permissions are missing and not yet set up).
+    var needsPermissionsSetup: Bool {
+        !hasCompletedPermissionsSetup
+            && (!permissionService.canCaptureAudio || !permissionService.canTranscribe)
+    }
+
+    /// Call when the user dismisses Settings with both permissions granted.
+    func markPermissionsSetupComplete() {
+        if permissionService.canCaptureAudio && permissionService.canTranscribe {
+            hasCompletedPermissionsSetup = true
+        }
+    }
 
     private static func makeInitialService() -> TranscriptionService {
         let raw = UserDefaults.standard.string(forKey: "transcriptionEngine") ?? TranscriptionEngineKind.appleSpeech.rawValue

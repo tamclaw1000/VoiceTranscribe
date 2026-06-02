@@ -569,6 +569,64 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Bump `CFBundleVersion` to `15`.
 - [ ] After testing: check `/tmp/VoiceTranscribe.log` for `fluidAudio.sentence` events showing real-time sentence commits.
 
+
+## 32. v1.6.0. Settings Popup and First-Run Access Flow
+
+### 32a. Consolidate Buttons into Settings Popup
+
+- [x] Move the Engine and Access Request Buttons, and the Apple Settings button into a single Settings button that brings up a pop-up.
+- [x] The pop-up should contain: transcription engine picker, microphone permission request, speech recognition permission request, and a link to Apple System Settings.
+- [x] Each permission item shows current authorization state (granted / denied / not determined).
+- [x] The Apple Settings link opens `x-apple.systempreferences:com.apple.preference.security?Privacy`.
+- [x] Settings popup implemented as `SettingsSheet` presented via `.sheet()` modifier.
+
+### 32b. First-Run Access Prompt
+
+- [x] When the application first launches, bring up the Settings pop-up automatically.
+- [x] Request the user to set approvals if either microphone or speech recognition has not already been granted.
+- [x] Track first-launch state with `@AppStorage("hasCompletedPermissionsSetup")` so the pop-up only auto-opens when permissions are missing.
+- [x] Do not auto-open the pop-up on subsequent launches once both permissions are granted.
+- [x] `markPermissionsSetupComplete()` called on Done when both permissions are granted.
+
+### 32c. Disable All Buttons Until Approved
+
+- [x] Disable all action buttons (Transcribe, Record) until both microphone and speech recognition permissions have been granted.
+- [x] Show a clear message or badge on disabled buttons indicating permissions are required.
+- [x] Re-enable buttons automatically when permissions are granted (via authorization-state change listener).
+- [x] Ensure the Settings button remains enabled at all times so the user can resolve permissions.
+- [x] Orange warning with "Microphone & Speech access required" shown in settingsBar when permissions are missing.
+
+### 32d. Bump Version
+
+- [x] Bump `CFBundleShortVersionString` to `1.6.0`.
+- [x] Bump `CFBundleVersion` to `16`.
+
+## 33. v1.7.0. File Input Source
+
+### 33a. File as Input Source
+
+- [ ] Add the ability to load an audio file as an input source.
+- [ ] Add a "Load File…" button or menu item to browse for audio files (WAV, M4A, CAF, MP3, FLAC).
+- [ ] Loaded file appears in the source list as a virtual input source with its filename as the display name.
+- [ ] Show file metadata in the source subtitle: duration, format, sample rate, channel count.
+- [ ] Multiple files can be loaded simultaneously; each appears as a separate row.
+- [ ] Add a remove/close button to unload a file source.
+
+### 33b. File Source — Transcribe Only
+
+- [ ] File input sources only have a Transcribe button (no Record checkbox).
+- [ ] Record is not applicable to file sources — the file is already the recording.
+- [ ] Clicking Transcribe on a file source processes the entire file through the selected transcription engine.
+- [ ] Show progress (elapsed / total duration) during file transcription.
+- [ ] Transcription results appear in the live transcript panel as finalized segments.
+
+### 33c. Auto-Select Last Recording
+
+- [ ] After a recording session completes, the recorded file is automatically loaded as a file input source.
+- [ ] The most recently recorded file becomes the selected/active file source.
+- [ ] Previous file sources are retained unless manually removed.
+- [ ] Auto-loaded recording files use the same basename as the recording.
+
 ## 34. v1.8.0. Speaker Diarization
 
 ### 34a. Research FluidAudio Diarizer
@@ -598,52 +656,4 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [ ] Model download on first use (like FluidAudio ASR models).
 - [ ] Graceful fallback when diarizer is unavailable or fails.
 - [ ] Diarizer off by default; toggle in Settings popup (v1.6.0).
-
-## 32. v1.6.0. Settings Popup and First-Run Access Flow
-
-### 32a. Consolidate Buttons into Settings Popup
-
-- [ ] Move the Engine and Access Request Buttons, and the Apple Settings button into a single Settings button that brings up a pop-up.
-- [ ] The pop-up should contain: transcription engine picker, microphone permission request, speech recognition permission request, and a link to Apple System Settings.
-- [ ] Each permission item shows current authorization state (granted / denied / not determined).
-- [ ] The Apple Settings link opens `x-apple.systempreferences:com.apple.preference.security?Privacy`.
-
-### 32b. First-Run Access Prompt
-
-- [ ] When the application first launches, bring up the Settings pop-up automatically.
-- [ ] Request the user to set approvals if either microphone or speech recognition has not already been granted.
-- [ ] Track first-launch state so the pop-up only auto-opens when permissions are missing.
-- [ ] Do not auto-open the pop-up on subsequent launches once both permissions are granted.
-
-### 32c. Disable All Buttons Until Approved
-
-- [ ] Disable all action buttons (Transcribe, Record) until both microphone and speech recognition permissions have been granted.
-- [ ] Show a clear message or badge on disabled buttons indicating permissions are required.
-- [ ] Re-enable buttons automatically when permissions are granted (via authorization-state change listener).
-- [ ] Ensure the Settings button remains enabled at all times so the user can resolve permissions.
-
-## 33. v1.7.0. File Input Source
-
-### 33a. File as Input Source
-
-- [ ] Add the ability to load an audio file as an input source.
-- [ ] Add a "Load File…" button or menu item to browse for audio files (WAV, M4A, CAF, MP3, FLAC).
-- [ ] Loaded file appears in the source list as a virtual input source with its filename as the display name.
-- [ ] Show file metadata in the source subtitle: duration, format, sample rate, channel count.
-- [ ] Multiple files can be loaded simultaneously; each appears as a separate row.
-- [ ] Add a remove/close button to unload a file source.
-
-### 33b. File Source — Transcribe Only
-
-- [ ] File input sources only have a Transcribe button (no Record checkbox).
-- [ ] Record is not applicable to file sources — the file is already the recording.
-- [ ] Clicking Transcribe on a file source processes the entire file through the selected transcription engine.
-- [ ] Show progress (elapsed / total duration) during file transcription.
-- [ ] Transcription results appear in the live transcript panel as finalized segments.
-
-### 33c. Auto-Select Last Recording
-
-- [ ] After a recording session completes, the recorded file is automatically loaded as a file input source.
-- [ ] The most recently recorded file becomes the selected/active file source.
-- [ ] Previous file sources are retained unless manually removed.
-- [ ] Auto-loaded recording files use the same basename as the recording.
+	

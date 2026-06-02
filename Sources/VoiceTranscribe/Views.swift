@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var appModel: AppModel
+    @State private var showSettings = false
 
     var body: some View {
         NavigationSplitView {
@@ -18,7 +19,7 @@ struct ContentView: View {
                 }
         } detail: {
             VStack(spacing: 0) {
-                permissionBanner
+                settingsBar
                 Divider()
                 mainDetail
             }
@@ -32,6 +33,12 @@ struct ContentView: View {
             }
         } message: {
             Text(appModel.userMessage ?? "")
+        }
+        .task {
+            // Auto-open Settings on first launch if permissions are missing.
+            if appModel.needsPermissionsSetup {
+                showSettings = true
+            }
         }
     }
 
@@ -52,50 +59,42 @@ struct ContentView: View {
         }
     }
 
-    private var permissionBanner: some View {
+    @ViewBuilder
+    private var settingsBar: some View {
+        let permissionsOK = appModel.permissionService.canCaptureAudio
+            && appModel.permissionService.canTranscribe
+
         HStack(spacing: 12) {
-            PermissionStatusView(
-                title: "Microphone",
-                status: microphoneStatusText(appModel.permissionService.microphoneStatus),
-                isAllowed: appModel.permissionService.canCaptureAudio
-            )
-            PermissionStatusView(
-                title: "Speech",
-                status: speechStatusText(appModel.permissionService.speechStatus),
-                isAllowed: appModel.permissionService.canTranscribe
-            )
-            Spacer()
-            Picker("Engine", selection: Binding(
-                get: { appModel.settings.transcriptionEngine },
-                set: { newEngine in
-                    appModel.transcription.setEngine(newEngine)
-                    appModel.settings.transcriptionEngine = newEngine
-                }
-            )) {
-                ForEach(TranscriptionEngineKind.allCases) { engine in
-                    Text(engine.displayName).tag(engine)
+            Button {
+                showSettings = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "gearshape")
+                        .foregroundColor(permissionsOK ? .secondary : .orange)
+                    Text(permissionsOK ? "Settings" : "Settings — Permissions Needed")
+                        .foregroundColor(permissionsOK ? .primary : .orange)
                 }
             }
-            .pickerStyle(.menu)
-            .disabled(appModel.transcription.isTranscribing)
-            .help("Transcription engine — cannot be changed while transcribing")
-            Button {
-                appModel.requestMicrophonePermission()
-            } label: {
-                Label("Mic Access", systemImage: "mic")
-            }
-            Button {
-                appModel.requestSpeechPermission()
-            } label: {
-                Label("Speech Access", systemImage: "text.bubble")
-            }
-            Button {
-                appModel.permissionService.openSystemPrivacySettings()
-            } label: {
-                Label("Settings", systemImage: "gearshape")
+            .buttonStyle(.bordered)
+            .help(permissionsOK
+                ? "Transcription engine, permissions, and more"
+                : "Microphone or speech recognition permissions are missing — open Settings to grant them")
+
+            if !permissionsOK {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("Microphone & Speech access required")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Spacer()
             }
         }
-        .padding()
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .sheet(isPresented: $showSettings) {
+            SettingsSheet(isPresented: $showSettings)
+                .environmentObject(appModel)
+        }
     }
 
     private var mainDetail: some View {
@@ -118,36 +117,6 @@ struct ContentView: View {
                 RecentRecordingsView(recordings: appModel.completedRecordings)
                     .frame(height: 140)
             }
-        }
-    }
-
-    private func microphoneStatusText(_ status: AVAuthorizationStatus) -> String {
-        switch status {
-        case .authorized:
-            return "Allowed"
-        case .denied:
-            return "Denied"
-        case .restricted:
-            return "Restricted"
-        case .notDetermined:
-            return "Not Requested"
-        @unknown default:
-            return "Unknown"
-        }
-    }
-
-    private func speechStatusText(_ status: SFSpeechRecognizerAuthorizationStatus) -> String {
-        switch status {
-        case .authorized:
-            return "Allowed"
-        case .denied:
-            return "Denied"
-        case .restricted:
-            return "Restricted"
-        case .notDetermined:
-            return "Not Requested"
-        @unknown default:
-            return "Unknown"
         }
     }
 }
@@ -180,6 +149,9 @@ private struct SourceRow: View {
 
             HStack(spacing: 8) {
                 // Transcribe / Stop button
+                let permissionsOK = appModel.permissionService.canCaptureAudio
+                    && appModel.permissionService.canTranscribe
+
                 Button {
                     appModel.toggleTranscribe(for: source)
                 } label: {
@@ -192,6 +164,8 @@ private struct SourceRow: View {
                     }
                 }
                 .tint(appModel.isTranscribing(source) ? .green : .accentColor)
+                .disabled(!permissionsOK)
+                .help(!permissionsOK ? "Microphone and speech recognition permissions are required" : "")
                 .accessibilityValue(appModel.isTranscribing(source) ? "Active" : "Inactive")
 
                 // Record checkbox
@@ -206,6 +180,7 @@ private struct SourceRow: View {
                     }
                 }
                 .toggleStyle(.checkbox)
+                .disabled(!permissionsOK)
 
                 if let filename = appModel.recordingFilename {
                     Button {
@@ -310,6 +285,137 @@ private struct PermissionStatusView: View {
             Text(status)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - Settings Sheet
+
+private struct SettingsSheet: View {
+    @EnvironmentObject private var appModel: AppModel
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        VStack(spacing: 16) {
+            // Header
+            HStack {
+                Label("Settings", systemImage: "gearshape")
+                    .font(.title2.bold())
+                Spacer()
+                Button {
+                    appModel.markPermissionsSetupComplete()
+                    isPresented = false
+                } label: {
+                    Label("Done", systemImage: "checkmark")
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.bottom, 8)
+
+            Divider()
+
+            // Transcription engine
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Transcription Engine", systemImage: "text.bubble")
+                        .font(.headline)
+                    Picker("Engine", selection: Binding(
+                        get: { appModel.settings.transcriptionEngine },
+                        set: { newEngine in
+                            appModel.transcription.setEngine(newEngine)
+                            appModel.settings.transcriptionEngine = newEngine
+                        }
+                    )) {
+                        ForEach(TranscriptionEngineKind.allCases) { engine in
+                            Text(engine.displayName).tag(engine)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                    .disabled(appModel.transcription.isTranscribing)
+                    if appModel.transcription.isTranscribing {
+                        Text("Stop transcription before changing the engine.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            // Permissions
+            GroupBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Permissions", systemImage: "lock.shield")
+                        .font(.headline)
+
+                    // Mic
+                    HStack {
+                        PermissionStatusView(
+                            title: "Microphone",
+                            status: microphoneStatusText(appModel.permissionService.microphoneStatus),
+                            isAllowed: appModel.permissionService.canCaptureAudio
+                        )
+                        Spacer()
+                        Button {
+                            appModel.requestMicrophonePermission()
+                        } label: {
+                            Text(appModel.permissionService.microphoneStatus == .notDetermined
+                                ? "Request Access" : "Open Settings")
+                        }
+                        .disabled(appModel.permissionService.microphoneStatus == .authorized)
+                    }
+
+                    // Speech
+                    HStack {
+                        PermissionStatusView(
+                            title: "Speech Recognition",
+                            status: speechStatusText(appModel.permissionService.speechStatus),
+                            isAllowed: appModel.permissionService.canTranscribe
+                        )
+                        Spacer()
+                        Button {
+                            appModel.requestSpeechPermission()
+                        } label: {
+                            Text(appModel.permissionService.speechStatus == .notDetermined
+                                ? "Request Access" : "Open Settings")
+                        }
+                        .disabled(appModel.permissionService.speechStatus == .authorized)
+                    }
+
+                    // System Settings shortcut
+                    Divider()
+                    Button {
+                        appModel.permissionService.openSystemPrivacySettings()
+                    } label: {
+                        Label("Open System Privacy Settings…", systemImage: "arrow.up.forward.app")
+                    }
+                    .font(.caption)
+                    .buttonStyle(.link)
+                    .padding(.top, 4)
+                }
+            }
+
+            Spacer()
+        }
+        .padding()
+        .frame(width: 420, height: 380)
+    }
+
+    private func microphoneStatusText(_ status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .authorized:  return "Allowed"
+        case .denied:      return "Denied"
+        case .restricted:  return "Restricted"
+        case .notDetermined: return "Not Requested"
+        @unknown default:  return "Unknown"
+        }
+    }
+
+    private func speechStatusText(_ status: SFSpeechRecognizerAuthorizationStatus) -> String {
+        switch status {
+        case .authorized:  return "Allowed"
+        case .denied:      return "Denied"
+        case .restricted:  return "Restricted"
+        case .notDetermined: return "Not Requested"
+        @unknown default:  return "Unknown"
         }
     }
 }

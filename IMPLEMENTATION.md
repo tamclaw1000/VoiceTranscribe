@@ -632,9 +632,83 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Bump `CFBundleShortVersionString` to `1.7.0`.
 - [x] Bump `CFBundleVersion` to `17`.
 
-## 34. v1.8.0. Speaker Diarization
 
-### 34a. Research FluidAudio Diarizer
+
+## 35. v1.8.0. Sherpa-Onnx Integration
+
+### 35a. Add Sherpa-Onnx as Git Submodule
+
+- [ ] Add `https://github.com/k2-fsa/sherpa-onnx` as a git submodule at `external/sherpa-onnx`.
+- [ ] Build the C library (`libsherpa-onnx.a`) for macOS arm64.
+- [ ] Create a `module.modulemap` for C interop (`SherpaOnnx` umbrella module).
+- [ ] Add the C header search paths and library link flags to `Package.swift`.
+- [ ] Verify the Swift API wrapper helpers (`SherpaOnnx.swift`) compile with the project.
+
+### 35b. Review Sherpa-Onnx API Surface
+
+- [ ] Study `SherpaOnnxOnlineRecognizer` for streaming ASR: `create()`, `acceptWaveform()`, `decode()`, `getResult()`, `isEndpoint()`, `inputReady()`, `reset()`.
+- [ ] Study `SherpaOnnxOfflineRecognizer` for file-based ASR: `create()`, `decode()`, `getResult()`.
+- [ ] Study speaker diarization: `SherpaOnnxOfflineDiarizer` with `create()`, `process()`, `getResults()`, sample rate requirements.
+- [ ] Study VAD: `SherpaOnnxSileroVad` with `create()`, `acceptWaveform()`, `isSpeech()`, configurable window size.
+- [ ] Study punctuation: `SherpaOnnxOfflinePunctuation` for post-processing ASR output.
+- [ ] Identify required model files and download sources (HuggingFace repos).
+
+### 35c. Sherpa-Onnx Streaming ASR Engine
+
+- [ ] Add `sherpaOnnx` case to `TranscriptionEngineKind` enum.
+- [ ] Create `SherpaOnnxTranscriptionService` conforming to `TranscriptionService` protocol.
+  - [ ] `start()` — initialize `SherpaOnnxOnlineRecognizer` with transducer/zipformer2 model config, load tokens, set 16kHz feature config.
+  - [ ] `append(buffer:)` — convert `AVAudioPCMBuffer` to float samples, call `acceptWaveform()`, loop `decode()` + `getResult()` for partial/final tokens.
+  - [ ] `stop()` — call `inputFinished()` + final `decode()`, drain remaining results, release recognizer.
+- [ ] Support model download on first use: auto-fetch `.onnx` encoder/decoder/joiner + `tokens.txt` from HuggingFace (e.g., `sherpa-onnx-zipformer-en-2023-06-26`).
+- [ ] Persist downloaded models to `~/Library/Application Support/VoiceTranscribe/sherpa-models/`.
+
+### 35d. Sherpa-Onnx Offline ASR for File Sources
+
+- [ ] Create `SherpaOnnxOfflineTranscriptionService` for file transcription.
+  - [ ] `transcribeFile(url:)` — read file with `AVAudioFile`, resample to 16kHz mono if needed, create `SherpaOnnxOfflineRecognizer`, call `decode()`.
+  - [ ] Return `[TranscriptSegment]` with word-level timestamps when available.
+- [ ] Use offline ASR for file input sources when sherpa-onnx is the selected engine (faster than simulated streaming).
+
+### 35e. Speaker Diarization
+
+- [ ] Create `SherpaOnnxDiarizationService` wrapping `SherpaOnnxOfflineDiarizer`.
+  - [ ] Accept an audio file URL, process with `SherpaOnnxOfflineDiarizer`, return `[DiarizerSegment]` (speaker label, start time, end time).
+  - [ ] Run diarization on a background actor to avoid blocking UI.
+- [ ] Integrate diarization into the recording workflow: after recording stops, optionally run diarization on the saved file.
+- [ ] Align diarization speaker segments with transcription word/segment timestamps.
+- [ ] Display speaker-attributed transcript: prefix segments with speaker label (e.g., "Speaker 0: …", "Speaker 1: …").
+- [ ] Color-code transcript segments by speaker.
+
+### 35f. Voice Activity Detection (VAD)
+
+- [ ] Create `SherpaOnnxVADService` wrapping `SherpaOnnxSileroVad`.
+  - [ ] Feed the live audio stream through VAD before ASR — only forward speech frames.
+  - [ ] Use VAD to trigger automatic utterance boundaries (replace or complement current EOU/timeout approach).
+- [ ] Trace VAD events: `vad.speech.start`, `vad.speech.end` with timestamps.
+
+### 35g. Punctuation Post-Processing
+
+- [ ] Create `SherpaOnnxPunctuationService` wrapping `SherpaOnnxOfflinePunctuation`.
+  - [ ] Apply punctuation to ASR output segments (both streaming final and offline).
+  - [ ] Replace current heuristic punctuation (`addSentencePunctuation`) with model-based approach.
+- [ ] Handle punctuation model download on first use.
+
+### 35h. Models and Bundling
+
+- [ ] Define a `SherpaOnnxModelRegistry` listing required models (ASR encoder/decoder/joiner, diarizer, VAD, punctuation).
+- [ ] Add model download management: check local cache, download from HuggingFace with progress, verify checksums.
+- [ ] Graceful fallback when models are unavailable (degrade to Apple Speech).
+
+### 35i. Bump Version
+
+- [ ] Bump `CFBundleShortVersionString` to `1.8.0`.
+- [ ] Bump `CFBundleVersion` to `18`.
+
+
+## 36. v1.xx.0. Speaker Diarization (Legacy FluidAudio)
+
+### 36a. Research FluidAudio Diarizer
 
 - [ ] FluidAudio provides `Diarizer` protocol with streaming `addAudio()/process()` → `DiarizerTimelineUpdate`.
 - [ ] `SortformerDiarizer`: 4-speaker streaming diarization, ~11% DER on DI-HARD III, real-time on Apple Silicon.
@@ -642,20 +716,20 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [ ] Sortformer downloads models from HuggingFace (`FluidInference/sortformer-diarizer-coreml`).
 - [ ] `DiarizerTimeline` produces `DiarizerSegment` with speaker label, start/end times, confidence.
 
-### 34b. Integrate Diarizer into Capture Pipeline
+### 36b. Integrate Diarizer into Capture Pipeline
 
 - [ ] Add `SortformerDiarizer` instance to `AppModel` or `AudioCaptureService`.
 - [ ] Feed the same audio stream to both ASR and diarizer in parallel.
 - [ ] Diarizer emits `DiarizerTimelineUpdate` containing speaker-labeled speech segments.
 - [ ] Align `TranscriptSegment` timestamps with `DiarizerSegment` time ranges to assign speaker labels.
 
-### 34c. Display Speaker-Attributed Transcript
+### 36c. Display Speaker-Attributed Transcript
 
 - [ ] Add speaker label prefix to transcript segments (e.g., "Speaker A: ..." or "👤 A: ...").
 - [ ] Color-code segments by speaker for visual differentiation.
 - [ ] Support speaker enrollment: record a short clip to name a speaker ("John") instead of "Speaker A".
 
-### 34d. Performance and UX
+### 36d. Performance and UX
 
 - [ ] Ensure diarizer doesn't block the main thread — run inference on a background actor.
 - [ ] Model download on first use (like FluidAudio ASR models).

@@ -139,7 +139,7 @@ swift test
 | `Models.swift` | Data types: SoundInputSource, RecordingSession, TranscriptSegment, etc. |
 | `Utilities.swift` | FileNamer, BoundedBuffer, TranscriptDocument |
 | `AppSettings.swift` | @AppStorage preferences, output folder, format |
-| `Views.swift` | All SwiftUI views: ContentView, SourceRow, GraphPanel, TranscriptPanel, SettingsView |
+| `Views.swift` | All SwiftUI views: ContentView, SourceRow, GraphPanel, TranscriptFactCheckPanel, SettingsView |
 | `Resources/Info.plist` | Bundle metadata, permissions strings, version numbers |
 | `VoiceTranscribe-REQUIREMENTS.md` | Full product requirements |
 | `VoiceTranscribe-IMPLEMENTATION.md` | Versioned implementation checklist |
@@ -148,6 +148,8 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.0.4 | 22 | Default/migrate transcription engine to FluidAudio and trace transcription buffer intake |
+| 2.0.3 | 21 | Combined live transcript and fact-check output into one timestamp/source/text grid |
 | 2.0.2 | 20 | Editable Ollama fact-check prompt template in Settings |
 | 2.0.1 | 19 | Fact-check result display accepts raw Ollama prose and fenced JSON responses |
 | 2.0.0 | 18 | Fact-check pane backed by local Ollama model `igorls/gemma-4-12B-it-heretic-GGUF` |

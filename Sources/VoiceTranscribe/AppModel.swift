@@ -34,8 +34,8 @@ final class AppModel: ObservableObject {
     }
 
     private static func makeInitialService() -> TranscriptionService {
-        let raw = UserDefaults.standard.string(forKey: "transcriptionEngine") ?? TranscriptionEngineKind.appleSpeech.rawValue
-        let kind = TranscriptionEngineKind(rawValue: raw) ?? .appleSpeech
+        let raw = UserDefaults.standard.string(forKey: "transcriptionEngine") ?? AppSettings.defaultTranscriptionEngine.rawValue
+        let kind = TranscriptionEngineKind(rawValue: raw) ?? AppSettings.defaultTranscriptionEngine
         switch kind {
         case .appleSpeech:
             return AppleSpeechTranscriptionService()
@@ -63,6 +63,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var fileTranscriptionProgress: Double = 0
     /// Whether a file transcription is currently running.
     @Published private(set) var isTranscribingFile: Bool = false
+    /// Display name for the source associated with the current transcript.
+    @Published private(set) var transcriptSourceName: String = "Unknown"
 
     private var cancellables = Set<AnyCancellable>()
     private var transcriptionTask: Task<Void, Never>?
@@ -224,6 +226,7 @@ final class AppModel: ObservableObject {
             do {
                 Trace.event("transcribe.capture.ensuring", ["source": source.name])
                 try await self.ensureCapture(for: source)
+                self.transcriptSourceName = source.name
                 if self.settings.factCheckEnabled {
                     self.factCheck.reset()
                 }
@@ -426,6 +429,7 @@ final class AppModel: ObservableObject {
         activeFileSourceID = source.id
         isTranscribingFile = true
         fileTranscriptionProgress = 0
+        transcriptSourceName = source.name
 
         fileTranscriptionTask = Task { [weak self] in
             guard let self else { return }

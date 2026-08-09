@@ -38,15 +38,22 @@ enum TranscriptionEngineKind: String, CaseIterable, Identifiable {
 
 @MainActor
 final class AppSettings: ObservableObject {
+    static let defaultTranscriptionEngine: TranscriptionEngineKind = .fluidAudio
+
     @AppStorage("outputFolderPath") var outputFolderPath: String = DefaultPaths.voiceTranscribeOutputFolder.path
     @AppStorage("audioOutputFormat") var audioOutputFormatRaw: String = AudioOutputFormat.m4a.rawValue
-    @AppStorage("transcriptionEngine") var transcriptionEngineRaw: String = TranscriptionEngineKind.appleSpeech.rawValue
+    @AppStorage("transcriptionEngine") var transcriptionEngineRaw: String = AppSettings.defaultTranscriptionEngine.rawValue
+    @AppStorage("migratedDefaultTranscriptionEngineToFluidAudio") private var migratedDefaultTranscriptionEngineToFluidAudio: Bool = false
     @AppStorage("saveTranscriptsAutomatically") var saveTranscriptsAutomatically: Bool = true
     @AppStorage("visualizationSensitivity") var visualizationSensitivity: Double = 1.0
     @AppStorage("factCheckEnabled") var factCheckEnabled: Bool = true
     @AppStorage("ollamaEndpoint") var ollamaEndpoint: String = "http://localhost:11434"
     @AppStorage("ollamaModel") var ollamaModel: String = "igorls/gemma-4-12B-it-heretic-GGUF"
     @AppStorage("ollamaFactCheckPrompt") var ollamaFactCheckPrompt: String = FactCheckPrompt.defaultTemplate
+
+    init() {
+        migrateDefaultTranscriptionEngineIfNeeded()
+    }
 
     static var defaultOutputFolder: URL {
         DefaultPaths.voiceTranscribeOutputFolder
@@ -62,7 +69,7 @@ final class AppSettings: ObservableObject {
     }
 
     var transcriptionEngine: TranscriptionEngineKind {
-        get { TranscriptionEngineKind(rawValue: transcriptionEngineRaw) ?? .appleSpeech }
+        get { TranscriptionEngineKind(rawValue: transcriptionEngineRaw) ?? Self.defaultTranscriptionEngine }
         set { transcriptionEngineRaw = newValue.rawValue }
     }
 
@@ -72,6 +79,21 @@ final class AppSettings: ObservableObject {
 
     func resetFactCheckPrompt() {
         ollamaFactCheckPrompt = FactCheckPrompt.defaultTemplate
+    }
+
+    private func migrateDefaultTranscriptionEngineIfNeeded() {
+        guard !migratedDefaultTranscriptionEngineToFluidAudio else {
+            return
+        }
+
+        if transcriptionEngineRaw == TranscriptionEngineKind.appleSpeech.rawValue {
+            transcriptionEngineRaw = Self.defaultTranscriptionEngine.rawValue
+            Trace.event("settings.transcriptionEngineMigrated", [
+                "from": TranscriptionEngineKind.appleSpeech.rawValue,
+                "to": Self.defaultTranscriptionEngine.rawValue
+            ])
+        }
+        migratedDefaultTranscriptionEngineToFluidAudio = true
     }
 }
 

@@ -172,6 +172,7 @@ final class TranscriptionCoordinator: ObservableObject {
     private var service: TranscriptionService
     private var bufferTimer: Timer?
     private var startTask: Task<Void, Error>?
+    private var consumedBufferCount = 0
 
     init(service: TranscriptionService = AppleSpeechTranscriptionService()) {
         self.service = service
@@ -223,6 +224,7 @@ final class TranscriptionCoordinator: ObservableObject {
         segments = []
         interimSegment = nil
         bufferSnapshot = TranscriptionBufferSnapshot()
+        consumedBufferCount = 0
         isStarting = true
 
         let task = Task { @MainActor in
@@ -266,6 +268,16 @@ final class TranscriptionCoordinator: ObservableObject {
         )
         bufferSnapshot.isReceivingAudio = true
         bufferSnapshot.lastAudioAt = Date()
+        consumedBufferCount += 1
+        if consumedBufferCount == 1 || consumedBufferCount % 50 == 0 {
+            Trace.event("transcription.bufferConsumed", [
+                "buffer#": consumedBufferCount,
+                "engine": service.engineName,
+                "duration": String(format: "%.4f", duration),
+                "sampleRate": Int(buffer.format.sampleRate),
+                "channels": Int(buffer.format.channelCount)
+            ])
+        }
         service.append(buffer)
     }
 

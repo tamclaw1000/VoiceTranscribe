@@ -22,7 +22,7 @@ The application must prioritize a fast, responsive user experience. Audio captur
 - Language: Swift.
 - UI framework: SwiftUI preferred unless AppKit is required for lower-level audio or window behavior.
 - Audio APIs: Core Audio and AVFoundation where appropriate.
-- Speech APIs: Apple SpeechTranscriber and SpeechAnalyzer by default, with a design that can support alternate transcription engines later.
+- Speech APIs: FluidAudio (Parakeet EOU) by default for responsive streaming transcription, with Apple SpeechTranscriber available as an alternate engine.
 
 ## 4. Core User Experience
 
@@ -334,15 +334,20 @@ Each source row shows:
 
 ### 15.1 Fact-Check Pane Placement
 
-The main window must add a fact-check pane directly under the transcription pane.
+The main window must display transcript and fact-check output in a single combined pane.
 
-The fact-check pane should:
+The combined pane should:
 
 - Remain visually associated with the live transcript.
 - Show fact-check results in the same order as the transcribed sentences.
 - Preserve results after the related transcript sentence is finalized.
 - Clearly show pending, checking, completed, and failed states.
 - Avoid blocking live transcription, audio capture, or recording.
+
+Transcript entries must use a grid layout:
+
+- Line 1: Timestamp | Audio Source | Text
+- Line 2: blank timestamp/source columns | Fact Check result
 
 ### 15.2 Sentence-Level Fact Checking
 

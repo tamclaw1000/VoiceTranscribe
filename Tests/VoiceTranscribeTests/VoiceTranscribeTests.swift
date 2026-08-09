@@ -66,6 +66,11 @@ import Testing
     #expect(empty.fillFraction == 0)
 }
 
+@MainActor
+@Test func defaultTranscriptionEngineIsFluidAudio() {
+    #expect(AppSettings.defaultTranscriptionEngine == .fluidAudio)
+}
+
 @Test func transcriptDocumentKeepsFinalAndInterimText() {
     var document = TranscriptDocument()
     document.apply(TranscriptSegment(text: "hello", isFinal: true))

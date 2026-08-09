@@ -846,3 +846,48 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Add tests for automatic sentence appending when the placeholder is missing.
 - [x] Bump `CFBundleShortVersionString` to `2.0.2`.
 - [x] Bump `CFBundleVersion` to `20`.
+
+## 40. v2.0.3. Combined Transcript and Fact-Check Grid
+
+### 40a. Unified Transcript Pane
+
+- [x] Replace separate transcript and fact-check panes with one combined transcript grid.
+- [x] Show finalized transcript entries as two-line grid groups.
+- [x] Render line 1 as timestamp, audio source, and transcript text.
+- [x] Render line 2 with blank timestamp/source columns and fact-check output in the text column.
+- [x] Keep interim transcript text in the same grid with a pending fact-check state.
+
+### 40b. Source and Fact-Check Association
+
+- [x] Track the active transcript source name for live microphone sessions.
+- [x] Track the active transcript source name for file transcription sessions.
+- [x] Match fact-check results back to transcript rows by normalized sentence text.
+- [x] Support transcript segments containing multiple complete sentences.
+- [x] Preserve existing queued, checking, result, disabled, and failed fact-check states in the combined row.
+
+### 40c. Tests and Version
+
+- [x] Verify the app builds with the combined SwiftUI grid.
+- [x] Verify the existing fact-check and transcription tests still pass.
+- [x] Bump `CFBundleShortVersionString` to `2.0.3`.
+- [x] Bump `CFBundleVersion` to `21`.
+
+## 41. v2.0.4. Transcription Engine Regression Fix
+
+### 41a. Engine Default
+
+- [x] Change the default transcription engine from Apple Speech to FluidAudio.
+- [x] Use FluidAudio as the fallback when no transcription engine preference exists.
+- [x] Add a one-time migration from the old Apple Speech default to FluidAudio for existing installs.
+- [x] Keep Apple Speech selectable manually in Settings after migration.
+
+### 41b. Diagnostics
+
+- [x] Add trace events when audio buffers reach the transcription coordinator.
+- [x] Include engine, sample rate, channel count, and buffer duration in transcription buffer traces.
+- [x] Add a regression test for the FluidAudio default engine.
+
+### 41c. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.0.4`.
+- [x] Bump `CFBundleVersion` to `22`.

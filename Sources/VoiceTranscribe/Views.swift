@@ -130,23 +130,16 @@ struct ContentView: View {
 
             Divider()
 
-            TranscriptPanel(
+            TranscriptFactCheckPanel(
                 finalized: appModel.transcription.segments,
                 interim: appModel.transcription.interimSegment,
+                factChecks: appModel.factCheck.items,
+                sourceName: appModel.transcriptSourceName,
+                isFactCheckEnabled: appModel.settings.factCheckEnabled,
+                isFactChecking: appModel.factCheck.isRunning,
                 buffer: appModel.transcription.bufferSnapshot,
                 isTranscribing: appModel.transcription.isTranscribing
             )
-
-            Divider()
-
-            FactCheckPanel(
-                items: appModel.factCheck.items,
-                isEnabled: appModel.settings.factCheckEnabled,
-                isRunning: appModel.factCheck.isRunning,
-                endpoint: appModel.settings.ollamaEndpoint,
-                model: appModel.settings.ollamaModel
-            )
-            .frame(minHeight: 160, maxHeight: 220)
 
             if !appModel.completedRecordings.isEmpty {
                 Divider()
@@ -572,9 +565,13 @@ private struct GraphPanel: View {
     }
 }
 
-private struct TranscriptPanel: View {
+private struct TranscriptFactCheckPanel: View {
     let finalized: [TranscriptSegment]
     let interim: TranscriptSegment?
+    let factChecks: [FactCheckItem]
+    let sourceName: String
+    let isFactCheckEnabled: Bool
+    let isFactChecking: Bool
     let buffer: TranscriptionBufferSnapshot
     let isTranscribing: Bool
 
@@ -584,13 +581,35 @@ private struct TranscriptPanel: View {
                 Label("Live Transcript", systemImage: "text.alignleft")
                     .font(.headline)
                 Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(factCheckStatusColor)
+                        .frame(width: 7, height: 7)
+                    Text(factCheckStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 TranscriptionStatusView(buffer: buffer, isTranscribing: isTranscribing)
                     .frame(width: 260)
             }
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                        GridRow {
+                            Text("Timestamp")
+                                .frame(width: 76, alignment: .leading)
+                            Text("Audio Source")
+                                .frame(width: 150, alignment: .leading)
+                            Text("Text")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                        Divider()
+                            .gridCellColumns(3)
+
                         if finalized.isEmpty && interim == nil {
                             ContentUnavailableView(
                                 "No Transcript",
@@ -598,17 +617,25 @@ private struct TranscriptPanel: View {
                                 description: Text("Start transcription to see speech as it is processed.")
                             )
                             .frame(maxWidth: .infinity, minHeight: 180)
+                            .gridCellColumns(3)
                         } else {
                             ForEach(finalized) { segment in
-                                Text(segment.text)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                transcriptRows(
+                                    segment: segment,
+                                    sourceName: sourceName,
+                                    factChecks: factChecks(for: segment),
+                                    isInterim: false
+                                )
+                                .id(segment.id)
                             }
                             if let interim {
-                                Text(interim.text)
-                                    .foregroundStyle(.secondary)
-                                    .italic()
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .id("interim")
+                                transcriptRows(
+                                    segment: interim,
+                                    sourceName: sourceName,
+                                    factChecks: [],
+                                    isInterim: true
+                                )
+                                .id("interim")
                             }
                         }
                     }
@@ -617,6 +644,13 @@ private struct TranscriptPanel: View {
                 }
                 .onChange(of: finalized.count) {
                     withAnimation(.easeOut(duration: 0.2)) {
+                        if let last = finalized.last {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    }
+                }
+                .onChange(of: interim?.text) {
+                    withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("interim", anchor: .bottom)
                     }
                 }
@@ -624,140 +658,118 @@ private struct TranscriptPanel: View {
         }
         .padding()
     }
-}
-
-private struct FactCheckPanel: View {
-    let items: [FactCheckItem]
-    let isEnabled: Bool
-    let isRunning: Bool
-    let endpoint: String
-    let model: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Fact Check", systemImage: "checkmark.seal")
-                    .font(.headline)
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 7, height: 7)
-                    Text(statusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if !isEnabled {
-                ContentUnavailableView(
-                    "Fact Checking Disabled",
-                    systemImage: "checkmark.seal",
-                    description: Text("Enable it in Settings to check finalized sentences with local Ollama.")
-                )
-                .frame(maxWidth: .infinity, minHeight: 90)
-            } else if items.isEmpty {
-                ContentUnavailableView(
-                    "No Sentences Checked",
-                    systemImage: "text.badge.checkmark",
-                    description: Text("Complete finalized sentences will appear here after transcription.")
-                )
-                .frame(maxWidth: .infinity, minHeight: 90)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(items) { item in
-                            FactCheckRow(item: item)
-                        }
-                    }
-                    .padding(.trailing, 4)
-                }
-            }
-
-            HStack {
-                Text(endpoint)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
-                Text(model)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .font(.caption2.monospaced())
-            .foregroundStyle(.secondary)
-        }
-        .padding()
-    }
-
-    private var statusText: String {
-        if !isEnabled {
-            return "Disabled"
-        }
-        return isRunning ? "Checking" : "Ready"
-    }
-
-    private var statusColor: Color {
-        if !isEnabled {
-            return .secondary
-        }
-        return isRunning ? .orange : .green
-    }
-}
-
-private struct FactCheckRow: View {
-    let item: FactCheckItem
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(item.sentence)
-                .font(.caption.weight(.semibold))
-
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                verdictBadge
-                Text(detailText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(8)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-    }
 
     @ViewBuilder
-    private var verdictBadge: some View {
-        switch item.state {
-        case .queued:
-            badge("Queued", color: .secondary)
-        case .checking:
-            badge("Checking", color: .orange)
-        case .failed:
-            badge("Failed", color: .red)
-        case .completed(let result):
-            badge("Result", color: color(for: result.verdict))
+    private func transcriptRows(
+        segment: TranscriptSegment,
+        sourceName: String,
+        factChecks: [FactCheckItem],
+        isInterim: Bool
+    ) -> some View {
+        GridRow(alignment: .top) {
+            Text(timestampText(for: segment.timestamp))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 76, alignment: .leading)
+
+            Text(sourceName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .frame(width: 150, alignment: .leading)
+
+            Text(segment.text)
+                .foregroundStyle(isInterim ? .secondary : .primary)
+                .italic(isInterim)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        GridRow(alignment: .top) {
+            Color.clear
+                .frame(width: 76, height: 1)
+            Color.clear
+                .frame(width: 150, height: 1)
+            VStack(alignment: .leading, spacing: 6) {
+                if isInterim {
+                    factCheckDetail(label: "Fact Check", badge: "Pending", color: .secondary, text: "Will run when the sentence is finalized.")
+                } else if !isFactCheckEnabled {
+                    factCheckDetail(label: "Fact Check", badge: "Disabled", color: .secondary, text: "Fact checking is disabled.")
+                } else if factChecks.isEmpty {
+                    factCheckDetail(label: "Fact Check", badge: "Queued", color: .secondary, text: "Waiting for a complete sentence match.")
+                } else {
+                    ForEach(factChecks) { item in
+                        factCheckDetail(for: item)
+                    }
+                }
+            }
         }
     }
 
-    private var detailText: String {
+    private func factCheckDetail(for item: FactCheckItem) -> some View {
         switch item.state {
         case .queued:
-            return "Waiting for Ollama."
+            return factCheckDetail(label: "Fact Check", badge: "Queued", color: .secondary, text: "Waiting for Ollama.")
         case .checking:
-            return "Fact-check request in progress."
+            return factCheckDetail(label: "Fact Check", badge: "Checking", color: .orange, text: "Fact-check request in progress.")
         case .failed(let message):
-            return message
+            return factCheckDetail(label: "Fact Check", badge: "Failed", color: .red, text: message)
         case .completed(let result):
-            return result.displayText
+            return factCheckDetail(label: "Fact Check", badge: "Result", color: color(for: result.verdict), text: result.displayText)
         }
     }
 
-    private func badge(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .foregroundStyle(color)
-            .background(color.opacity(0.14), in: Capsule())
+    private func factCheckDetail(label: String, badge: String, color: Color, text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
+            Text(badge)
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .foregroundStyle(color)
+                .background(color.opacity(0.14), in: Capsule())
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.bottom, 8)
+    }
+
+    private func factChecks(for segment: TranscriptSegment) -> [FactCheckItem] {
+        let segmentText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSegment = FactCheckCoordinator.normalizedSentence(segmentText)
+        let normalizedSentences = Set(FactCheckCoordinator.completeSentences(in: segmentText).map {
+            FactCheckCoordinator.normalizedSentence($0)
+        })
+
+        return factChecks.filter { item in
+            let normalizedItem = FactCheckCoordinator.normalizedSentence(item.sentence)
+            return normalizedItem == normalizedSegment
+                || normalizedSentences.contains(normalizedItem)
+                || segmentText.localizedCaseInsensitiveContains(item.sentence)
+        }
+    }
+
+    private func timestampText(for date: Date) -> String {
+        Self.timestampFormatter.string(from: date)
+    }
+
+    private var factCheckStatusText: String {
+        if !isFactCheckEnabled {
+            return "Disabled"
+        }
+        return isFactChecking ? "Checking" : "Ready"
+    }
+
+    private var factCheckStatusColor: Color {
+        if !isFactCheckEnabled {
+            return .secondary
+        }
+        return isFactChecking ? .orange : .green
     }
 
     private func color(for verdict: FactCheckVerdict) -> Color {
@@ -774,6 +786,12 @@ private struct FactCheckRow: View {
             return .secondary
         }
     }
+
+    private static let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 }
 
 private struct TranscriptionStatusView: View {

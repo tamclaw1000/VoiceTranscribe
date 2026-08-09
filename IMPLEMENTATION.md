@@ -822,3 +822,27 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Add tests for fenced JSON and plain text Ollama responses.
 - [x] Bump `CFBundleShortVersionString` to `2.0.1`.
 - [x] Bump `CFBundleVersion` to `19`.
+
+## 39. v2.0.2. Editable Ollama Prompt
+
+### 39a. Prompt Settings
+
+- [x] Add a persisted fact-check prompt template setting.
+- [x] Reveal the prompt template in the Settings popup.
+- [x] Reveal the prompt template in the full Settings view.
+- [x] Add a reset action that restores the default prompt.
+- [x] Keep the default prompt available for first launch and reset behavior.
+
+### 39b. Prompt Rendering
+
+- [x] Pass the current prompt template into every Ollama fact-check request.
+- [x] Replace `{{sentence}}` with the finalized transcript sentence when present.
+- [x] Append the finalized transcript sentence automatically when the prompt has no placeholder.
+- [x] Preserve the prompt template captured when each sentence is queued.
+
+### 39c. Tests and Version
+
+- [x] Add tests for prompt placeholder replacement.
+- [x] Add tests for automatic sentence appending when the placeholder is missing.
+- [x] Bump `CFBundleShortVersionString` to `2.0.2`.
+- [x] Bump `CFBundleVersion` to `20`.

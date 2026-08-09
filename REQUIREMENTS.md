@@ -378,6 +378,9 @@ The app must:
 
 - Connect to a local Ollama HTTP API endpoint.
 - Use the configured Ollama model for fact-check requests.
+- Let the user view and edit the prompt template used for fact-check requests.
+- Persist the prompt template across launches.
+- Provide a way to restore the default fact-check prompt.
 - Keep fact-checking local by default.
 - Process fact-check requests asynchronously.
 - Limit concurrent fact-check requests so the UI remains responsive.
@@ -386,6 +389,8 @@ The app must:
 ### 15.4 Fact-Check Prompt Requirements
 
 Each fact-check request must use a prompt that asks the model to evaluate the factual correctness of the transcribed sentence.
+
+The prompt must be user-editable in Settings. If the edited prompt does not include a sentence placeholder, the app must append the transcript sentence automatically before sending the request to Ollama.
 
 The prompt must instruct the model to:
 
@@ -416,4 +421,4 @@ Recommended response schema:
 - Should `HHMMSSS` in the filename mean seven total characters or millisecond precision?
 - Should transcripts be saved automatically for every recording or only when Transcribe is active?
 - Should fact-check results be saved alongside transcripts and recording metadata?
-- Should the Ollama model and endpoint be configurable in Settings for v2.0.0?
+- Should the fact-check pane support multiple named prompt presets?

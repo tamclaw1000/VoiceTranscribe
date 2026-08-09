@@ -39,17 +39,20 @@ enum FactCheckState: Equatable {
 struct FactCheckItem: Identifiable, Equatable {
     let id: UUID
     let sentence: String
+    let promptTemplate: String
     var state: FactCheckState
     let createdAt: Date
 
     init(
         id: UUID = UUID(),
         sentence: String,
+        promptTemplate: String,
         state: FactCheckState = .queued,
         createdAt: Date = Date()
     ) {
         self.id = id
         self.sentence = sentence
+        self.promptTemplate = promptTemplate
         self.state = state
         self.createdAt = createdAt
     }
@@ -114,13 +117,13 @@ struct FactCheckResult: Codable, Equatable {
 }
 
 protocol FactCheckService {
-    func factCheck(sentence: String, endpoint: URL, model: String) async throws -> FactCheckResult
+    func factCheck(sentence: String, endpoint: URL, model: String, promptTemplate: String) async throws -> FactCheckResult
 }
 
 struct OllamaFactCheckService: FactCheckService {
     var timeout: TimeInterval = 60
 
-    func factCheck(sentence: String, endpoint: URL, model: String) async throws -> FactCheckResult {
+    func factCheck(sentence: String, endpoint: URL, model: String, promptTemplate: String) async throws -> FactCheckResult {
         let url = endpoint.appendingPathComponent("api/generate")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -128,7 +131,7 @@ struct OllamaFactCheckService: FactCheckService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(OllamaGenerateRequest(
             model: model,
-            prompt: Self.prompt(for: sentence),
+            prompt: FactCheckPrompt.render(template: promptTemplate, sentence: sentence),
             stream: false,
             format: "json",
             options: OllamaGenerateOptions(temperature: 0.1)
@@ -155,7 +158,14 @@ struct OllamaFactCheckService: FactCheckService {
     }
 
     static func prompt(for sentence: String) -> String {
-        """
+        FactCheckPrompt.render(template: FactCheckPrompt.defaultTemplate, sentence: sentence)
+    }
+}
+
+enum FactCheckPrompt {
+    static let sentencePlaceholder = "{{sentence}}"
+
+    static let defaultTemplate = """
         You are fact-checking one sentence from a live speech transcript. The transcript may contain recognition errors.
 
         Evaluate only factual claims present in the sentence. Do not add unrelated claims. If the sentence is subjective, filler, a command, a question without a claim, or otherwise non-factual, use verdict "not_factual". If the claim cannot be checked from your knowledge alone, use verdict "unverifiable".
@@ -170,14 +180,30 @@ struct OllamaFactCheckService: FactCheckService {
         }
 
         Sentence:
+        {{sentence}}
+        """
+
+    static func render(template: String, sentence: String) -> String {
+        let trimmed = template.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.isEmpty ? defaultTemplate : template
+        if base.contains(sentencePlaceholder) {
+            return base.replacingOccurrences(of: sentencePlaceholder, with: sentence)
+        }
+
+        return """
+        \(base)
+
+        Sentence:
         \(sentence)
         """
     }
+}
 
+extension OllamaFactCheckService {
     static func parseResult(_ raw: String, fallbackSentence: String) -> FactCheckResult {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        for candidate in Self.jsonCandidates(from: trimmed) {
+        for candidate in jsonCandidates(from: trimmed) {
             guard let data = candidate.data(using: .utf8),
                   let decoded = try? JSONDecoder().decode(FactCheckResult.self, from: data) else {
                 continue
@@ -258,25 +284,26 @@ final class FactCheckCoordinator: ObservableObject {
         _ segment: TranscriptSegment,
         enabled: Bool,
         endpoint: URL,
-        model: String
+        model: String,
+        promptTemplate: String
     ) {
         guard enabled, segment.isFinal else {
             return
         }
 
         for sentence in Self.completeSentences(in: segment.text) {
-            enqueue(sentence: sentence, endpoint: endpoint, model: model)
+            enqueue(sentence: sentence, endpoint: endpoint, model: model, promptTemplate: promptTemplate)
         }
     }
 
-    private func enqueue(sentence: String, endpoint: URL, model: String) {
+    private func enqueue(sentence: String, endpoint: URL, model: String, promptTemplate: String) {
         let normalized = Self.normalizedSentence(sentence)
         guard !normalized.isEmpty, !seenSentences.contains(normalized) else {
             return
         }
 
         seenSentences.insert(normalized)
-        let item = FactCheckItem(sentence: sentence)
+        let item = FactCheckItem(sentence: sentence, promptTemplate: promptTemplate)
         items.append(item)
         Trace.event("factCheck.queued", ["id": item.id.uuidString, "sentence": sentence.prefix(120)])
         startProcessing(endpoint: endpoint, model: model)
@@ -300,7 +327,12 @@ final class FactCheckCoordinator: ObservableObject {
             update(id: next.id, state: .checking)
 
             do {
-                let result = try await service.factCheck(sentence: next.sentence, endpoint: endpoint, model: model)
+                let result = try await service.factCheck(
+                    sentence: next.sentence,
+                    endpoint: endpoint,
+                    model: model,
+                    promptTemplate: next.promptTemplate
+                )
                 guard !Task.isCancelled else { return }
                 update(id: next.id, state: .completed(result))
                 Trace.event("factCheck.completed", [

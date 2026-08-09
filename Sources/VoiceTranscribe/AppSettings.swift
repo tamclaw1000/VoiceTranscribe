@@ -46,6 +46,7 @@ final class AppSettings: ObservableObject {
     @AppStorage("factCheckEnabled") var factCheckEnabled: Bool = true
     @AppStorage("ollamaEndpoint") var ollamaEndpoint: String = "http://localhost:11434"
     @AppStorage("ollamaModel") var ollamaModel: String = "igorls/gemma-4-12B-it-heretic-GGUF"
+    @AppStorage("ollamaFactCheckPrompt") var ollamaFactCheckPrompt: String = FactCheckPrompt.defaultTemplate
 
     static var defaultOutputFolder: URL {
         DefaultPaths.voiceTranscribeOutputFolder
@@ -67,6 +68,10 @@ final class AppSettings: ObservableObject {
 
     var ollamaEndpointURL: URL {
         URL(string: ollamaEndpoint) ?? URL(string: "http://localhost:11434")!
+    }
+
+    func resetFactCheckPrompt() {
+        ollamaFactCheckPrompt = FactCheckPrompt.defaultTemplate
     }
 }
 

@@ -97,6 +97,25 @@ import Testing
     #expect(prompt.contains("The Earth orbits the Sun."))
 }
 
+@Test func factCheckPromptTemplateReplacesSentencePlaceholder() {
+    let prompt = FactCheckPrompt.render(
+        template: "Check this: {{sentence}}",
+        sentence: "The Earth orbits the Sun."
+    )
+
+    #expect(prompt == "Check this: The Earth orbits the Sun.")
+}
+
+@Test func factCheckPromptTemplateAppendsSentenceWhenPlaceholderIsMissing() {
+    let prompt = FactCheckPrompt.render(
+        template: "Fact-check the following transcript sentence.",
+        sentence: "The Earth orbits the Sun."
+    )
+
+    #expect(prompt.contains("Fact-check the following transcript sentence."))
+    #expect(prompt.contains("Sentence:\nThe Earth orbits the Sun."))
+}
+
 @Test func ollamaFactCheckParserAcceptsMissingNotes() {
     let raw = """
     {"sentence":"The Earth orbits the Sun.","verdict":"supported","confidence":"high","explanation":"This is a basic astronomical fact."}
@@ -144,13 +163,15 @@ import Testing
         TranscriptSegment(text: "The Earth orbits the Sun.", isFinal: true),
         enabled: true,
         endpoint: endpoint,
-        model: "test-model"
+        model: "test-model",
+        promptTemplate: FactCheckPrompt.defaultTemplate
     )
     coordinator.enqueueTranscriptSegment(
         TranscriptSegment(text: "  The Earth orbits the Sun.  ", isFinal: true),
         enabled: true,
         endpoint: endpoint,
-        model: "test-model"
+        model: "test-model",
+        promptTemplate: FactCheckPrompt.defaultTemplate
     )
 
     try? await Task.sleep(nanoseconds: 50_000_000)
@@ -220,7 +241,7 @@ private final class FakeMicrophonePermissionProvider: MicrophonePermissionProvid
 }
 
 private struct FakeFactCheckService: FactCheckService {
-    func factCheck(sentence: String, endpoint: URL, model: String) async throws -> FactCheckResult {
+    func factCheck(sentence: String, endpoint: URL, model: String, promptTemplate: String) async throws -> FactCheckResult {
         FactCheckResult(
             sentence: sentence,
             verdict: .supported,

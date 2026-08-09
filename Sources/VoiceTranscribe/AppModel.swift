@@ -77,7 +77,8 @@ final class AppModel: ObservableObject {
                 segment,
                 enabled: self.settings.factCheckEnabled,
                 endpoint: self.settings.ollamaEndpointURL,
-                model: self.settings.ollamaModel
+                model: self.settings.ollamaModel,
+                promptTemplate: self.settings.ollamaFactCheckPrompt
             )
         }
 
@@ -127,7 +128,8 @@ final class AppModel: ObservableObject {
                 let result = try await OllamaFactCheckService(timeout: 15).factCheck(
                     sentence: "The Earth orbits the Sun.",
                     endpoint: self.settings.ollamaEndpointURL,
-                    model: self.settings.ollamaModel
+                    model: self.settings.ollamaModel,
+                    promptTemplate: self.settings.ollamaFactCheckPrompt
                 )
                 self.userMessage = "Ollama fact-check succeeded: \(result.verdict.displayName)."
             } catch {

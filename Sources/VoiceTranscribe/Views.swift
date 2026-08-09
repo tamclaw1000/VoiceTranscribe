@@ -446,6 +446,29 @@ private struct SettingsSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Prompt Template")
+                                .font(.caption.weight(.semibold))
+                            Spacer()
+                            Button("Reset") {
+                                appModel.settings.resetFactCheckPrompt()
+                            }
+                            .font(.caption)
+                            .buttonStyle(.link)
+                        }
+
+                        TextEditor(text: $appModel.settings.ollamaFactCheckPrompt)
+                            .font(.caption.monospaced())
+                            .frame(minHeight: 150)
+                            .scrollContentBackground(.hidden)
+                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.secondary.opacity(0.18))
+                            )
+                    }
+
                     Button {
                         appModel.testOllamaFactCheck()
                     } label: {
@@ -458,7 +481,7 @@ private struct SettingsSheet: View {
             Spacer()
         }
         .padding()
-        .frame(width: 460, height: 560)
+        .frame(width: 540, height: 740)
     }
 
     private func microphoneStatusText(_ status: AVAuthorizationStatus) -> String {
@@ -872,6 +895,24 @@ struct SettingsView: View {
                 Toggle("Fact-check finalized sentences", isOn: $appModel.settings.factCheckEnabled)
                 TextField("Ollama Endpoint", text: $appModel.settings.ollamaEndpoint)
                 TextField("Ollama Model", text: $appModel.settings.ollamaModel)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Prompt Template")
+                        Spacer()
+                        Button("Reset") {
+                            appModel.settings.resetFactCheckPrompt()
+                        }
+                    }
+                    TextEditor(text: $appModel.settings.ollamaFactCheckPrompt)
+                        .font(.caption.monospaced())
+                        .frame(minHeight: 180)
+                        .scrollContentBackground(.hidden)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.secondary.opacity(0.18))
+                        )
+                }
                 Button {
                     appModel.testOllamaFactCheck()
                 } label: {

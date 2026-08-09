@@ -81,6 +81,83 @@ import Testing
     #expect(document.plainText == "hello\nworld")
 }
 
+@Test func factCheckSentenceExtractionRequiresCompleteSentences() {
+    let sentences = FactCheckCoordinator.completeSentences(
+        in: "Mars is red. Is water wet? This is incomplete"
+    )
+
+    #expect(sentences == ["Mars is red.", "Is water wet?"])
+}
+
+@Test func factCheckPromptIncludesSchemaAndSentence() {
+    let prompt = OllamaFactCheckService.prompt(for: "The Earth orbits the Sun.")
+
+    #expect(prompt.contains("\"verdict\""))
+    #expect(prompt.contains("not_factual"))
+    #expect(prompt.contains("The Earth orbits the Sun."))
+}
+
+@Test func ollamaFactCheckParserAcceptsMissingNotes() {
+    let raw = """
+    {"sentence":"The Earth orbits the Sun.","verdict":"supported","confidence":"high","explanation":"This is a basic astronomical fact."}
+    """
+
+    let result = OllamaFactCheckService.parseResult(raw, fallbackSentence: "fallback")
+
+    #expect(result.sentence == "The Earth orbits the Sun.")
+    #expect(result.verdict == .supported)
+    #expect(result.confidence == .high)
+    #expect(result.notes == [])
+}
+
+@Test func ollamaFactCheckParserAcceptsFencedJSON() {
+    let raw = """
+    ```json
+    {"sentence":"The Earth orbits the Sun.","verdict":"supported","confidence":"high","explanation":"This is a basic astronomical fact."}
+    ```
+    """
+
+    let result = OllamaFactCheckService.parseResult(raw, fallbackSentence: "fallback")
+
+    #expect(result.sentence == "The Earth orbits the Sun.")
+    #expect(result.verdict == .supported)
+    #expect(result.rawResponse == nil)
+}
+
+@Test func ollamaFactCheckParserDisplaysPlainTextResponse() {
+    let raw = "This statement is broadly accurate: the Earth orbits the Sun."
+
+    let result = OllamaFactCheckService.parseResult(raw, fallbackSentence: "The Earth orbits the Sun.")
+
+    #expect(result.sentence == "The Earth orbits the Sun.")
+    #expect(result.rawResponse == raw)
+    #expect(result.displayText == raw)
+}
+
+@MainActor
+@Test func factCheckCoordinatorSuppressesDuplicateSentences() async {
+    let service = FakeFactCheckService()
+    let coordinator = FactCheckCoordinator(service: service)
+    let endpoint = URL(string: "http://localhost:11434")!
+
+    coordinator.enqueueTranscriptSegment(
+        TranscriptSegment(text: "The Earth orbits the Sun.", isFinal: true),
+        enabled: true,
+        endpoint: endpoint,
+        model: "test-model"
+    )
+    coordinator.enqueueTranscriptSegment(
+        TranscriptSegment(text: "  The Earth orbits the Sun.  ", isFinal: true),
+        enabled: true,
+        endpoint: endpoint,
+        model: "test-model"
+    )
+
+    try? await Task.sleep(nanoseconds: 50_000_000)
+
+    #expect(coordinator.items.count == 1)
+}
+
 @MainActor
 @Test func permissionServiceDoesNotPromptDuringInitialization() {
     let provider = FakeMicrophonePermissionProvider(initialStatus: .notDetermined, requestedStatus: .authorized)
@@ -139,5 +216,16 @@ private final class FakeMicrophonePermissionProvider: MicrophonePermissionProvid
         requestCount += 1
         status = requestedStatus
         return status
+    }
+}
+
+private struct FakeFactCheckService: FactCheckService {
+    func factCheck(sentence: String, endpoint: URL, model: String) async throws -> FactCheckResult {
+        FactCheckResult(
+            sentence: sentence,
+            verdict: .supported,
+            confidence: .high,
+            explanation: "Test result."
+        )
     }
 }

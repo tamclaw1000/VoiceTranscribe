@@ -148,6 +148,8 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.0.1 | 19 | Fact-check result display accepts raw Ollama prose and fenced JSON responses |
+| 2.0.0 | 18 | Fact-check pane backed by local Ollama model `igorls/gemma-4-12B-it-heretic-GGUF` |
 | 1.7.0 | 17 | File input sources: load audio files, transcribe files, auto-load recordings |
 | 1.6.0 | 16 | Settings popup, first-run access flow, disable buttons until permissions granted |
 | 1.5.4 | 14 | Real-time sentence boundary detection (NLTokenizer) / length-based commit (1.5.5) |

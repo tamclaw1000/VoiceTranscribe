@@ -14,6 +14,7 @@ final class AppModel: ObservableObject {
     @Published var captureService = AudioCaptureService()
     @Published var recordingService = RecordingService()
     @Published var transcription: TranscriptionCoordinator
+    @Published var factCheck = FactCheckCoordinator()
 
     /// Tracks whether the user has completed the initial permissions setup flow.
     /// Persisted so we don't re-prompt on every launch after setup.
@@ -70,6 +71,15 @@ final class AppModel: ObservableObject {
 
     init() {
         transcription = TranscriptionCoordinator(service: AppModel.makeInitialService())
+        transcription.onFinalSegment = { [weak self] segment in
+            guard let self else { return }
+            self.factCheck.enqueueTranscriptSegment(
+                segment,
+                enabled: self.settings.factCheckEnabled,
+                endpoint: self.settings.ollamaEndpointURL,
+                model: self.settings.ollamaModel
+            )
+        }
 
         // Propagate nested ObservableObject changes so SwiftUI re-renders
         // when captureService, recordingService, or transcription state changes.
@@ -80,6 +90,9 @@ final class AppModel: ObservableObject {
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         transcription.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        factCheck.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         permissionService.objectWillChange.sink { [weak self] _ in
@@ -104,6 +117,22 @@ final class AppModel: ObservableObject {
     func requestSpeechPermission() {
         Task {
             await permissionService.requestSpeechPermission()
+        }
+    }
+
+    func testOllamaFactCheck() {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await OllamaFactCheckService(timeout: 15).factCheck(
+                    sentence: "The Earth orbits the Sun.",
+                    endpoint: self.settings.ollamaEndpointURL,
+                    model: self.settings.ollamaModel
+                )
+                self.userMessage = "Ollama fact-check succeeded: \(result.verdict.displayName)."
+            } catch {
+                self.userMessage = "Ollama fact-check failed: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -193,6 +222,9 @@ final class AppModel: ObservableObject {
             do {
                 Trace.event("transcribe.capture.ensuring", ["source": source.name])
                 try await self.ensureCapture(for: source)
+                if self.settings.factCheckEnabled {
+                    self.factCheck.reset()
+                }
                 Trace.event("transcribe.service.starting", [
                     "source": source.name,
                     "engine": self.transcription.engineName
@@ -398,6 +430,9 @@ final class AppModel: ObservableObject {
 
             do {
                 try await self.transcription.start()
+                if self.settings.factCheckEnabled {
+                    self.factCheck.reset()
+                }
                 Trace.event("fileTranscribe.started", [
                     "file": source.name,
                     "engine": self.transcription.engineName

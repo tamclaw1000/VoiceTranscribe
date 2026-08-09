@@ -137,6 +137,17 @@ struct ContentView: View {
                 isTranscribing: appModel.transcription.isTranscribing
             )
 
+            Divider()
+
+            FactCheckPanel(
+                items: appModel.factCheck.items,
+                isEnabled: appModel.settings.factCheckEnabled,
+                isRunning: appModel.factCheck.isRunning,
+                endpoint: appModel.settings.ollamaEndpoint,
+                model: appModel.settings.ollamaModel
+            )
+            .frame(minHeight: 160, maxHeight: 220)
+
             if !appModel.completedRecordings.isEmpty {
                 Divider()
                 RecentRecordingsView(recordings: appModel.completedRecordings)
@@ -418,10 +429,36 @@ private struct SettingsSheet: View {
                 }
             }
 
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Fact Checking", systemImage: "checkmark.seal")
+                        .font(.headline)
+
+                    Toggle("Fact-check finalized transcript sentences", isOn: $appModel.settings.factCheckEnabled)
+
+                    TextField("Ollama endpoint", text: $appModel.settings.ollamaEndpoint)
+                        .textFieldStyle(.roundedBorder)
+
+                    TextField("Ollama model", text: $appModel.settings.ollamaModel)
+                        .textFieldStyle(.roundedBorder)
+
+                    Text("Default model: igorls/gemma-4-12B-it-heretic-GGUF")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        appModel.testOllamaFactCheck()
+                    } label: {
+                        Label("Test Ollama", systemImage: "network")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
             Spacer()
         }
         .padding()
-        .frame(width: 420, height: 380)
+        .frame(width: 460, height: 560)
     }
 
     private func microphoneStatusText(_ status: AVAuthorizationStatus) -> String {
@@ -566,6 +603,156 @@ private struct TranscriptPanel: View {
     }
 }
 
+private struct FactCheckPanel: View {
+    let items: [FactCheckItem]
+    let isEnabled: Bool
+    let isRunning: Bool
+    let endpoint: String
+    let model: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Fact Check", systemImage: "checkmark.seal")
+                    .font(.headline)
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 7, height: 7)
+                    Text(statusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if !isEnabled {
+                ContentUnavailableView(
+                    "Fact Checking Disabled",
+                    systemImage: "checkmark.seal",
+                    description: Text("Enable it in Settings to check finalized sentences with local Ollama.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 90)
+            } else if items.isEmpty {
+                ContentUnavailableView(
+                    "No Sentences Checked",
+                    systemImage: "text.badge.checkmark",
+                    description: Text("Complete finalized sentences will appear here after transcription.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 90)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(items) { item in
+                            FactCheckRow(item: item)
+                        }
+                    }
+                    .padding(.trailing, 4)
+                }
+            }
+
+            HStack {
+                Text(endpoint)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Text(model)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .font(.caption2.monospaced())
+            .foregroundStyle(.secondary)
+        }
+        .padding()
+    }
+
+    private var statusText: String {
+        if !isEnabled {
+            return "Disabled"
+        }
+        return isRunning ? "Checking" : "Ready"
+    }
+
+    private var statusColor: Color {
+        if !isEnabled {
+            return .secondary
+        }
+        return isRunning ? .orange : .green
+    }
+}
+
+private struct FactCheckRow: View {
+    let item: FactCheckItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(item.sentence)
+                .font(.caption.weight(.semibold))
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                verdictBadge
+                Text(detailText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var verdictBadge: some View {
+        switch item.state {
+        case .queued:
+            badge("Queued", color: .secondary)
+        case .checking:
+            badge("Checking", color: .orange)
+        case .failed:
+            badge("Failed", color: .red)
+        case .completed(let result):
+            badge("Result", color: color(for: result.verdict))
+        }
+    }
+
+    private var detailText: String {
+        switch item.state {
+        case .queued:
+            return "Waiting for Ollama."
+        case .checking:
+            return "Fact-check request in progress."
+        case .failed(let message):
+            return message
+        case .completed(let result):
+            return result.displayText
+        }
+    }
+
+    private func badge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .foregroundStyle(color)
+            .background(color.opacity(0.14), in: Capsule())
+    }
+
+    private func color(for verdict: FactCheckVerdict) -> Color {
+        switch verdict {
+        case .supported:
+            return .green
+        case .questionable:
+            return .orange
+        case .falseClaim:
+            return .red
+        case .unverifiable:
+            return .blue
+        case .notFactual:
+            return .secondary
+        }
+    }
+}
+
 private struct TranscriptionStatusView: View {
     let buffer: TranscriptionBufferSnapshot
     let isTranscribing: Bool
@@ -679,6 +866,17 @@ struct SettingsView: View {
                 }
                 .disabled(appModel.transcription.isTranscribing)
                 Toggle("Save transcripts automatically", isOn: $appModel.settings.saveTranscriptsAutomatically)
+            }
+
+            Section("Fact Checking") {
+                Toggle("Fact-check finalized sentences", isOn: $appModel.settings.factCheckEnabled)
+                TextField("Ollama Endpoint", text: $appModel.settings.ollamaEndpoint)
+                TextField("Ollama Model", text: $appModel.settings.ollamaModel)
+                Button {
+                    appModel.testOllamaFactCheck()
+                } label: {
+                    Label("Test Ollama", systemImage: "network")
+                }
             }
 
             Section("Visualization") {

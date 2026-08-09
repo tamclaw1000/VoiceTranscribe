@@ -43,6 +43,9 @@ final class AppSettings: ObservableObject {
     @AppStorage("transcriptionEngine") var transcriptionEngineRaw: String = TranscriptionEngineKind.appleSpeech.rawValue
     @AppStorage("saveTranscriptsAutomatically") var saveTranscriptsAutomatically: Bool = true
     @AppStorage("visualizationSensitivity") var visualizationSensitivity: Double = 1.0
+    @AppStorage("factCheckEnabled") var factCheckEnabled: Bool = true
+    @AppStorage("ollamaEndpoint") var ollamaEndpoint: String = "http://localhost:11434"
+    @AppStorage("ollamaModel") var ollamaModel: String = "igorls/gemma-4-12B-it-heretic-GGUF"
 
     static var defaultOutputFolder: URL {
         DefaultPaths.voiceTranscribeOutputFolder
@@ -60,6 +63,10 @@ final class AppSettings: ObservableObject {
     var transcriptionEngine: TranscriptionEngineKind {
         get { TranscriptionEngineKind(rawValue: transcriptionEngineRaw) ?? .appleSpeech }
         set { transcriptionEngineRaw = newValue.rawValue }
+    }
+
+    var ollamaEndpointURL: URL {
+        URL(string: ollamaEndpoint) ?? URL(string: "http://localhost:11434")!
     }
 }
 

@@ -330,10 +330,90 @@ Each source row shows:
 - A Record checkbox with filename display when active.
 - Active state indicator.
 
-## 15. Open Questions
+## 15. v2.0.0 Fact-Check Pane
+
+### 15.1 Fact-Check Pane Placement
+
+The main window must add a fact-check pane directly under the transcription pane.
+
+The fact-check pane should:
+
+- Remain visually associated with the live transcript.
+- Show fact-check results in the same order as the transcribed sentences.
+- Preserve results after the related transcript sentence is finalized.
+- Clearly show pending, checking, completed, and failed states.
+- Avoid blocking live transcription, audio capture, or recording.
+
+### 15.2 Sentence-Level Fact Checking
+
+The app must fact-check finalized transcript sentences.
+
+When a full sentence is available:
+
+- Extract the finalized sentence from the transcript stream.
+- Queue the sentence for fact-checking.
+- Send only complete sentences to the fact-check engine.
+- Avoid repeatedly fact-checking the same sentence.
+- Display the original sentence with its fact-check result.
+
+Fact-check output should include:
+
+- Verdict, such as supported, questionable, false, unverifiable, or not factual.
+- Short explanation.
+- Confidence or certainty level when available.
+- Any notable assumptions or missing context.
+- Error state if the local model fails or times out.
+
+### 15.3 Local Ollama Fact-Check Engine
+
+Fact-checking must use a local Ollama session.
+
+The default local model must be:
+
+```text
+igorls/gemma-4-12B-it-heretic-GGUF
+```
+
+The app must:
+
+- Connect to a local Ollama HTTP API endpoint.
+- Use the configured Ollama model for fact-check requests.
+- Keep fact-checking local by default.
+- Process fact-check requests asynchronously.
+- Limit concurrent fact-check requests so the UI remains responsive.
+- Surface a clear status when Ollama is unavailable, the model is missing, or a request times out.
+
+### 15.4 Fact-Check Prompt Requirements
+
+Each fact-check request must use a prompt that asks the model to evaluate the factual correctness of the transcribed sentence.
+
+The prompt must instruct the model to:
+
+- Treat the sentence as a possibly imperfect transcript.
+- Check only factual claims present in the sentence.
+- Avoid adding unrelated claims.
+- Return structured output suitable for UI rendering.
+- Mark subjective, opinion, command, filler, or non-factual text as not factual rather than false.
+- Use unverifiable when the claim cannot be checked from the model's knowledge alone.
+
+Recommended response schema:
+
+```json
+{
+  "sentence": "original sentence",
+  "verdict": "supported | questionable | false | unverifiable | not_factual",
+  "confidence": "low | medium | high",
+  "explanation": "short explanation",
+  "notes": ["optional note"]
+}
+```
+
+## 16. Open Questions
 
 - Should the app support multiple simultaneous active input sources in version 1?
 - Should recordings default to compressed `.m4a` or lossless `.wav`/`.caf`?
 - Should transcription be local-only, Apple Speech-based, cloud-based, or pluggable?
 - Should `HHMMSSS` in the filename mean seven total characters or millisecond precision?
 - Should transcripts be saved automatically for every recording or only when Transcribe is active?
+- Should fact-check results be saved alongside transcripts and recording metadata?
+- Should the Ollama model and endpoint be configurable in Settings for v2.0.0?

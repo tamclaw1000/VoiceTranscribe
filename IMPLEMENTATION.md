@@ -735,4 +735,90 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [ ] Model download on first use (like FluidAudio ASR models).
 - [ ] Graceful fallback when diarizer is unavailable or fails.
 - [ ] Diarizer off by default; toggle in Settings popup (v1.6.0).
-	
+
+## 37. v2.0.0. Fact-Check Pane
+
+### 37a. Fact-Check UI
+
+- [x] Add a fact-check pane directly under the live transcription pane.
+- [x] Display fact-check rows in transcript sentence order.
+- [x] Show each original finalized sentence next to its fact-check result.
+- [x] Show row states: queued, checking, completed, failed.
+- [x] Keep the fact-check pane scrollable and responsive during long sessions.
+- [x] Preserve completed fact-check results while new transcript text arrives.
+- [x] Add empty state text when no complete sentences have been fact-checked yet.
+
+### 37b. Sentence Extraction and Queueing
+
+- [x] Detect complete finalized transcript sentences from `TranscriptSegment` updates.
+- [x] Queue each complete sentence exactly once for fact-checking.
+- [x] Avoid sending interim transcript text to the fact-check engine.
+- [x] Serialize rapid sentence submissions through one internal fact-check queue.
+- [x] Track sentence IDs so updates and results remain associated with the correct transcript sentence.
+- [x] Add tests for sentence extraction, duplicate suppression, and queue ordering.
+
+### 37c. Ollama Fact-Check Service
+
+- [x] Create `FactCheckService` protocol for sentence-level fact checking.
+- [x] Create `OllamaFactCheckService` implementation using the local Ollama HTTP API.
+- [x] Use model `igorls/gemma-4-12B-it-heretic-GGUF` by default.
+- [x] Add configurable Ollama endpoint with default `http://localhost:11434`.
+- [x] Limit concurrent Ollama requests to protect UI responsiveness.
+- [x] Add timeout handling for slow or unavailable local model responses.
+- [x] Surface clear error states when Ollama is not running or the model is unavailable.
+- [x] Trace fact-check lifecycle events: queued, request started, response received, parse failed, request failed.
+
+### 37d. Fact-Check Prompt and Parsing
+
+- [x] Define a prompt that asks the model to fact-check one transcribed sentence.
+- [x] Instruct the model to treat the sentence as a potentially imperfect transcript.
+- [x] Instruct the model to evaluate only factual claims present in the sentence.
+- [x] Instruct the model to classify subjective, command, filler, or non-factual text as `not_factual`.
+- [x] Require structured JSON output with `sentence`, `verdict`, `confidence`, `explanation`, and optional `notes`.
+- [x] Parse model responses into a `FactCheckResult` model.
+- [x] Gracefully handle malformed JSON by showing a failed parse state and raw response excerpt.
+- [x] Add tests for prompt construction and response parsing.
+
+### 37e. App Integration
+
+- [x] Add fact-check coordinator owned by `AppModel`.
+- [x] Subscribe the fact-check coordinator to finalized transcript sentences.
+- [x] Forward nested fact-check coordinator state changes through `AppModel.objectWillChange`.
+- [x] Ensure fact checking never blocks audio capture, recording, or transcription.
+- [x] Reset fact-check state when a new transcription session starts.
+- [ ] Save fact-check results alongside transcript metadata if enabled.
+
+### 37f. Settings
+
+- [x] Add setting for enabling/disabling fact checking.
+- [x] Add setting for Ollama endpoint URL.
+- [x] Add setting for Ollama model name, defaulting to `igorls/gemma-4-12B-it-heretic-GGUF`.
+- [x] Add a "Test Ollama" action to verify connectivity and model availability.
+- [x] Persist fact-check settings with `@AppStorage`.
+
+### 37g. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.0.0`.
+- [x] Bump `CFBundleVersion` to `18`.
+
+## 38. v2.0.1. Fact-Check Result Display Fix
+
+### 38a. Ollama Response Handling
+
+- [x] Accept strict JSON fact-check responses.
+- [x] Accept JSON wrapped in Markdown code fences.
+- [x] Extract embedded JSON when Ollama returns surrounding prose.
+- [x] Fall back to displaying plain text Ollama responses instead of failing with a format error.
+- [x] Trace when raw Ollama text is used as the displayed result.
+
+### 38b. Fact-Check UI
+
+- [x] Display the fact-check result body directly rather than presenting only the verdict badge.
+- [x] Keep structured verdict and confidence information inside the result text when available.
+- [x] Show raw local model output as the result when the model does not return structured JSON.
+
+### 38c. Tests and Version
+
+- [x] Add tests for fenced JSON and plain text Ollama responses.
+- [x] Bump `CFBundleShortVersionString` to `2.0.1`.
+- [x] Bump `CFBundleVersion` to `19`.

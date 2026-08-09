@@ -166,6 +166,7 @@ final class TranscriptionCoordinator: ObservableObject {
     @Published private(set) var isStarting = false
     @Published private(set) var lastError: String?
     @Published private(set) var bufferSnapshot = TranscriptionBufferSnapshot()
+    var onFinalSegment: ((TranscriptSegment) -> Void)?
 
     private var transcript = TranscriptDocument()
     private var service: TranscriptionService
@@ -289,6 +290,7 @@ final class TranscriptionCoordinator: ObservableObject {
         if segment.isFinal {
             Trace.event("transcription.segmentFinal", ["text": segment.text.prefix(80), "confidence": segment.confidence.map { String(format: "%.2f", $0) } ?? "nil"])
             segments.append(segment)
+            onFinalSegment?(segment)
             interimSegment = nil
         } else {
             Trace.event("transcription.segmentPartial", ["text": segment.text.prefix(80)])

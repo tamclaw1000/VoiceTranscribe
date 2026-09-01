@@ -13,7 +13,7 @@ struct VoiceTranscribeApp: App {
         Settings {
             SettingsView()
                 .environmentObject(appModel)
-                .frame(width: 520)
+                .frame(width: 960, height: 680)
         }
     }
 }

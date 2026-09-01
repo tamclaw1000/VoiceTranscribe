@@ -15,10 +15,13 @@ final class AppModel: ObservableObject {
     @Published var recordingService = RecordingService()
     @Published var transcription: TranscriptionCoordinator
     @Published var factCheck = FactCheckCoordinator()
+    @Published var summary = SummaryCoordinator()
 
     /// Tracks whether the user has completed the initial permissions setup flow.
     /// Persisted so we don't re-prompt on every launch after setup.
     @AppStorage("hasCompletedPermissionsSetup") var hasCompletedPermissionsSetup: Bool = false
+    @AppStorage("hasRunFirstLaunchPermissionRequest") private var hasRunFirstLaunchPermissionRequest: Bool = false
+    @Published private(set) var isRunningFirstLaunchPermissionFlow = false
 
     /// Whether Settings should auto-open (permissions are missing and not yet set up).
     var needsPermissionsSetup: Bool {
@@ -30,6 +33,81 @@ final class AppModel: ObservableObject {
     func markPermissionsSetupComplete() {
         if permissionService.canCaptureAudio && permissionService.canTranscribe {
             hasCompletedPermissionsSetup = true
+        }
+    }
+
+    @discardableResult
+    func runFirstLaunchPermissionFlowIfNeeded() async -> Bool {
+        guard !isRunningFirstLaunchPermissionFlow else {
+            return false
+        }
+
+        permissionService.refresh()
+        let needsMicrophonePrompt = permissionService.microphoneStatus == .notDetermined
+        let needsSpeechPrompt = permissionService.speechStatus == .notDetermined
+        guard needsMicrophonePrompt || needsSpeechPrompt else {
+            if !hasRunFirstLaunchPermissionRequest {
+                hasRunFirstLaunchPermissionRequest = true
+            }
+            markPermissionsSetupComplete()
+            return false
+        }
+
+        isRunningFirstLaunchPermissionFlow = true
+        defer { isRunningFirstLaunchPermissionFlow = false }
+
+        Trace.event("permission.firstLaunch.started", [
+            "microphone": permissionService.microphoneStatus.rawValue,
+            "speech": permissionService.speechStatus.rawValue
+        ])
+
+        if needsMicrophonePrompt {
+            await permissionService.requestMicrophonePermission()
+        }
+        if needsSpeechPrompt {
+            await permissionService.requestSpeechPermission()
+        }
+
+        permissionService.refresh()
+        hasRunFirstLaunchPermissionRequest = true
+        markPermissionsSetupComplete()
+        UserDefaults.standard.synchronize()
+
+        Trace.event("permission.firstLaunch.completed", [
+            "microphone": permissionService.microphoneStatus.rawValue,
+            "speech": permissionService.speechStatus.rawValue,
+            "canCaptureAudio": permissionService.canCaptureAudio,
+            "canTranscribe": permissionService.canTranscribe
+        ])
+
+        restartAfterPermissionDialog()
+        return true
+    }
+
+    private func restartAfterPermissionDialog() {
+        let bundleURL = Bundle.main.bundleURL
+        guard bundleURL.pathExtension == "app" else {
+            userMessage = "Permissions were updated. Please restart VoiceTranscribe to continue."
+            Trace.event("app.restart.skipped", ["reason": "notAppBundle", "bundle": bundleURL.path])
+            return
+        }
+
+        userMessage = "Permissions were updated. VoiceTranscribe will restart now."
+        Trace.event("app.restart.scheduled", ["bundle": bundleURL.path])
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            process.arguments = ["-n", bundleURL.path]
+
+            do {
+                try process.run()
+                Trace.event("app.restart.launched", ["bundle": bundleURL.path])
+                NSApp.terminate(nil)
+            } catch {
+                self.userMessage = "Permissions were updated. Please restart VoiceTranscribe manually."
+                Trace.event("app.restart.failed", ["error": error.localizedDescription])
+            }
         }
     }
 
@@ -75,13 +153,14 @@ final class AppModel: ObservableObject {
         transcription = TranscriptionCoordinator(service: AppModel.makeInitialService())
         transcription.onFinalSegment = { [weak self] segment in
             guard let self else { return }
+            let llm = self.settings.selectedLLMEndpoint
             self.factCheck.enqueueTranscriptSegment(
                 segment,
-                enabled: self.settings.factCheckEnabled,
-                endpoint: self.settings.ollamaEndpointURL,
-                model: self.settings.ollamaModel,
+                enabled: self.settings.isFactCheckActive,
+                llm: llm,
                 promptTemplate: self.settings.ollamaFactCheckPrompt
             )
+            self.summary.enqueueTranscriptSegment(segment, prompt: self.settings.summaryPrompt)
         }
 
         // Propagate nested ObservableObject changes so SwiftUI re-renders
@@ -96,6 +175,9 @@ final class AppModel: ObservableObject {
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         factCheck.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        summary.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         permissionService.objectWillChange.sink { [weak self] _ in
@@ -123,19 +205,56 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func testOllamaFactCheck() {
+    func setAIEnabled(_ enabled: Bool) {
+        guard settings.aiEnabled != enabled else {
+            return
+        }
+
+        settings.aiEnabled = enabled
+        Trace.event("settings.aiToggled", ["enabled": enabled])
+        if !enabled {
+            factCheck.reset()
+        }
+    }
+
+    func testSelectedLLMFactCheck() {
+        guard settings.aiEnabled else {
+            userMessage = "AI is disabled. Turn on AI to test fact-checking."
+            return
+        }
+
         Task { [weak self] in
             guard let self else { return }
+            let llm = self.settings.selectedLLMEndpoint
             do {
                 let result = try await OllamaFactCheckService(timeout: 15).factCheck(
                     sentence: "The Earth orbits the Sun.",
-                    endpoint: self.settings.ollamaEndpointURL,
-                    model: self.settings.ollamaModel,
+                    llm: llm,
                     promptTemplate: self.settings.ollamaFactCheckPrompt
                 )
-                self.userMessage = "Ollama fact-check succeeded: \(result.verdict.displayName)."
+                self.userMessage = "\(llm.displayName) fact-check succeeded: \(result.verdict.displayName)."
             } catch {
-                self.userMessage = "Ollama fact-check failed: \(error.localizedDescription)"
+                self.userMessage = "\(llm.displayName) fact-check failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func testSelectedLLMPlainPrompt() {
+        guard settings.aiEnabled else {
+            userMessage = "AI is disabled. Turn on AI to test the selected LLM."
+            return
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            let llm = self.settings.selectedLLMEndpoint
+            let prompt = "Hello, what is 10 * 20?"
+            do {
+                let response = try await OllamaFactCheckService(timeout: 15).generate(prompt: prompt, llm: llm)
+                let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.userMessage = "\(llm.displayName) replied: \(trimmed.isEmpty ? "(empty response)" : trimmed)"
+            } catch {
+                self.userMessage = "\(llm.displayName) prompt test failed: \(error.localizedDescription)"
             }
         }
     }
@@ -227,9 +346,10 @@ final class AppModel: ObservableObject {
                 Trace.event("transcribe.capture.ensuring", ["source": source.name])
                 try await self.ensureCapture(for: source)
                 self.transcriptSourceName = source.name
-                if self.settings.factCheckEnabled {
+                if self.settings.isFactCheckActive {
                     self.factCheck.reset()
                 }
+                self.summary.reset()
                 Trace.event("transcribe.service.starting", [
                     "source": source.name,
                     "engine": self.transcription.engineName
@@ -304,7 +424,7 @@ final class AppModel: ObservableObject {
                 "source": recordingService.activeSession?.source.name ?? "unknown"
             ])
             captureService.removeConsumer(id: "record")
-            let saveTranscript = transcription.isTranscribing && !transcription.transcriptText.isEmpty
+            let saveTranscript = !transcription.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let finalized = try recordingService.stop(
                 transcriptText: transcription.transcriptText,
                 saveTranscript: saveTranscript,
@@ -355,6 +475,96 @@ final class AppModel: ObservableObject {
     func revealRecordingInFinder() {
         guard let url = recordingFileURL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    func copyTranscriptText() {
+        let text = transcription.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            userMessage = "There is no transcript text to copy."
+            return
+        }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        Trace.event("transcript.copied", ["chars": text.count])
+        userMessage = "Transcript copied to the clipboard."
+    }
+
+    func saveTranscriptToFile() {
+        let text = transcription.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            userMessage = "There is no transcript text to save."
+            return
+        }
+
+        let panel = NSSavePanel()
+        try? FileManager.default.createDirectory(at: settings.outputFolder, withIntermediateDirectories: true)
+        panel.allowedContentTypes = [.plainText]
+        panel.canCreateDirectories = true
+        panel.directoryURL = settings.outputFolder
+        panel.nameFieldStringValue = "\(FileNamer.startTimestamp(Date()))-\(FileNamer.sourceSlug(transcriptSourceName)).txt"
+        panel.message = "Save the current transcript text."
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            Trace.file("transcript.exported", path: url.path, extra: ["chars": text.count])
+            userMessage = "Transcript saved to \(url.lastPathComponent)."
+        } catch {
+            Trace.event("transcript.exportError", [
+                "path": url.path,
+                "error": error.localizedDescription
+            ])
+            userMessage = "Could not save transcript: \(error.localizedDescription)"
+        }
+    }
+
+    func copySummaryText() {
+        let text = summary.paragraphs.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            userMessage = "There is no summary text to copy."
+            return
+        }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        Trace.event("summary.copied", ["chars": text.count])
+        userMessage = "Summary copied to the clipboard."
+    }
+
+    func saveSummaryToFile() {
+        let text = summary.paragraphs.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            userMessage = "There is no summary text to save."
+            return
+        }
+
+        let panel = NSSavePanel()
+        try? FileManager.default.createDirectory(at: settings.outputFolder, withIntermediateDirectories: true)
+        panel.allowedContentTypes = [.plainText]
+        panel.canCreateDirectories = true
+        panel.directoryURL = settings.outputFolder
+        panel.nameFieldStringValue = "\(FileNamer.startTimestamp(Date()))-\(FileNamer.sourceSlug(transcriptSourceName))-summary.txt"
+        panel.message = "Save the current recording summary."
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            Trace.file("summary.exported", path: url.path, extra: ["chars": text.count])
+            userMessage = "Summary saved to \(url.lastPathComponent)."
+        } catch {
+            Trace.event("summary.exportError", [
+                "path": url.path,
+                "error": error.localizedDescription
+            ])
+            userMessage = "Could not save summary: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - File Input Sources
@@ -436,9 +646,10 @@ final class AppModel: ObservableObject {
 
             do {
                 try await self.transcription.start()
-                if self.settings.factCheckEnabled {
+                if self.settings.isFactCheckActive {
                     self.factCheck.reset()
                 }
+                self.summary.reset()
                 Trace.event("fileTranscribe.started", [
                     "file": source.name,
                     "engine": self.transcription.engineName

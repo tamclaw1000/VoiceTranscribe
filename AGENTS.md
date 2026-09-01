@@ -45,7 +45,7 @@ Mic → AVAudioEngine tap → copyBuffer() → DispatchQueue.main
 
 3. **SpeechTranscriber (not SFSpeechRecognizer).** The legacy `SFSpeechRecognizer` is broken for streaming on macOS 26. Migration to `SpeechAnalyzer` + `SpeechTranscriber` happened in v1.3.0. The analyzer stream must be started BEFORE audio buffers are fed. Buffers are resampled via `AVAudioConverter` to the analyzer's preferred format.
 
-4. **Lazy permission model.** Device enumeration is passive (no mic prompt). Permission is requested only when the user hits Listen/Record/Transcribe. `PermissionService.authorizeFirstRecordingDeviceTouch()` requests once, caches the result, and never re-prompts.
+4. **Startup + fallback permission model.** Device enumeration is passive, but app startup now requests native microphone/speech dialogs when macOS reports a not-determined state, then relaunches the packaged app so audio starts with fresh authorization. `PermissionService.authorizeFirstRecordingDeviceTouch()` remains the fallback path before capture.
 
 5. **Buffer copying is mandatory.** Tap buffers are transient. Every buffer is deep-copied (`copyBuffer()`, `deepCopy()`) before being handed off to consumers.
 
@@ -148,6 +148,21 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.2.7 | 37 | Fixed permission-flow relaunch to start a fresh app instance |
+| 2.2.6 | 36 | Split the macOS menu Settings window into the same two-column options layout |
+| 2.2.5 | 35 | Made the AI toggle visible in the main settings bar and transcript header |
+| 2.2.4 | 34 | Added a global AI toggle that gates LLM fact-checking and LLM tests |
+| 2.2.3 | 33 | Added first-class OpenRouter configuration and repaired OpenRouter/OpenCode endpoint mismatches |
+| 2.2.2 | 32 | Moved LLM test buttons to top, fixed modal result display, improved LLM HTTP errors |
+| 2.2.1 | 31 | Added a plain selected-LLM prompt test for `Hello, what is 10 * 20?` |
+| 2.2.0 | 30 | Added LLM API types for Ollama, OpenAI-compatible, Anthropic, and Gemini endpoints |
+| 2.1.1 | 29 | Split Settings sheet into two columns and moved LLM configuration to the right |
+| 2.1.0 | 28 | Multiple configurable LLM endpoints with selected endpoint routing for fact-checking |
+| 2.0.9 | 27 | Added CopyText and SaveToFile actions to the Recording Summary |
+| 2.0.8 | 26 | Transcript text saves after transcription stops; added CopyText and SaveToFile actions |
+| 2.0.7 | 25 | Removed FluidAudio length-based partial finalization so fragments are not fact-checked |
+| 2.0.6 | 24 | First-launch native permission prompts with automatic app relaunch |
+| 2.0.5 | 23 | Running recording summary, editable summary prompt, transcript grid no longer auto-scrolls |
 | 2.0.4 | 22 | Default/migrate transcription engine to FluidAudio and trace transcription buffer intake |
 | 2.0.3 | 21 | Combined live transcript and fact-check output into one timestamp/source/text grid |
 | 2.0.2 | 20 | Editable Ollama fact-check prompt template in Settings |

@@ -158,7 +158,7 @@ The live transcript view must:
 - Update incrementally without blocking audio capture.
 - Preserve finalized text once confirmed.
 - Visually distinguish active/interim text from finalized text.
-- Auto-scroll by default while allowing the user to scroll back without fighting the UI.
+- Preserve the user's scroll position as new transcript text is appended.
 - Show a clear empty state before speech is detected.
 
 Optional transcript metadata:
@@ -167,6 +167,20 @@ Optional transcript metadata:
 - Confidence score, if available.
 - Source name.
 - Session start/end time.
+
+### 5.6 Recording Summary Display
+
+The main window must include a running summary section for the current recording or transcription session.
+
+The summary section must:
+
+- Accrue finalized transcript sentences as they arrive.
+- Organize accumulated sentences into readable paragraphs.
+- Update without blocking audio capture, recording, transcription, or fact-checking.
+- Reset when a new transcription session starts.
+- Provide an editable summary prompt or instruction field in Settings.
+- Persist the summary prompt across launches.
+- Provide a reset action that restores the default summary prompt.
 
 ## 6. Performance and Responsiveness Requirements
 
@@ -215,8 +229,11 @@ The app must:
 
 - Explain why microphone access is required.
 - Explain why speech recognition access is required.
+- On first launch, if macOS reports microphone or speech-recognition permission as not determined, show the native permission dialogs before the user starts recording.
+- After first-launch permission dialogs complete, restart the application automatically so the audio subsystem starts with the updated authorization state.
 - Request sound-input recording permission the first time the app touches a recording device.
 - Cache the resulting permission state after the first recording-device access so later listen, record, and transcribe actions can use the cached state until macOS reports a change.
+- If a rebuilt or resigned app returns to a not-determined macOS permission state, request the native permission dialogs again even if the older first-launch flag exists.
 - Handle denied permissions gracefully.
 - Provide a route to macOS Settings when permissions are missing.
 - Avoid transmitting audio to external services unless the selected transcription engine requires it and the user has opted in.
@@ -358,6 +375,8 @@ When a full sentence is available:
 - Extract the finalized sentence from the transcript stream.
 - Queue the sentence for fact-checking.
 - Send only complete sentences to the fact-check engine.
+- Do not fact-check live partial transcript fragments.
+- Do not synthesize punctuation on partial transcript fragments just to make them eligible for fact-checking.
 - Avoid repeatedly fact-checking the same sentence.
 - Display the original sentence with its fact-check result.
 
@@ -369,9 +388,9 @@ Fact-check output should include:
 - Any notable assumptions or missing context.
 - Error state if the local model fails or times out.
 
-### 15.3 Local Ollama Fact-Check Engine
+### 15.3 Local LLM Fact-Check Engine
 
-Fact-checking must use a local Ollama session.
+Fact-checking must use a local Ollama-compatible LLM endpoint by default.
 
 The default local model must be:
 
@@ -382,7 +401,11 @@ igorls/gemma-4-12B-it-heretic-GGUF
 The app must:
 
 - Connect to a local Ollama HTTP API endpoint.
-- Use the configured Ollama model for fact-check requests.
+- Allow the user to configure multiple named LLM endpoints.
+- Store each LLM endpoint with a display name, API type, base endpoint URL, model name, and optional API key.
+- Allow the user to select which configured LLM endpoint is used for fact-check requests.
+- Use the selected LLM endpoint and model for fact-check requests.
+- Support Ollama-compatible, OpenAI-compatible, Anthropic Messages, and Gemini generateContent API shapes.
 - Let the user view and edit the prompt template used for fact-check requests.
 - Persist the prompt template across launches.
 - Provide a way to restore the default fact-check prompt.

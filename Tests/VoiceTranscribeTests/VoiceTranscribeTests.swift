@@ -71,6 +71,112 @@ import Testing
     #expect(AppSettings.defaultTranscriptionEngine == .fluidAudio)
 }
 
+@MainActor
+@Test func aiToggleControlsEffectiveFactChecking() {
+    let settings = AppSettings()
+
+    settings.aiEnabled = false
+    settings.factCheckEnabled = true
+    #expect(settings.isFactCheckActive == false)
+
+    settings.aiEnabled = true
+    settings.factCheckEnabled = false
+    #expect(settings.isFactCheckActive == false)
+
+    settings.factCheckEnabled = true
+    #expect(settings.isFactCheckActive == true)
+}
+
+@Test func llmEndpointConfigurationUsesDefaultOllamaValues() {
+    let configuration = LLMEndpointConfiguration.defaultConfiguration()
+
+    #expect(configuration.name == "Local Ollama")
+    #expect(configuration.endpoint == "http://localhost:11434")
+    #expect(configuration.model == "igorls/gemma-4-12B-it-heretic-GGUF")
+}
+
+@Test func llmEndpointConfigurationSanitizesEmptyListsAndFields() {
+    let empty = LLMEndpointConfiguration.sanitized([])
+    let sanitized = LLMEndpointConfiguration.sanitized([
+        LLMEndpointConfiguration(id: "", name: "", endpoint: "", model: "")
+    ])
+
+    #expect(empty.count == 1)
+    #expect(sanitized.count == 1)
+    #expect(sanitized[0].name == "LLM 1")
+    #expect(sanitized[0].endpoint == LLMEndpointConfiguration.defaultEndpoint)
+    #expect(sanitized[0].model == LLMEndpointConfiguration.defaultModel)
+    #expect(!sanitized[0].id.isEmpty)
+}
+
+@Test func legacyRemoteLLMEndpointDefaultsToOpenAICompatibleProvider() throws {
+    let data = """
+    {"id":"remote","name":"Remote","endpoint":"https://example.com/api","model":"model"}
+    """.data(using: .utf8)!
+
+    let configuration = try JSONDecoder().decode(LLMEndpointConfiguration.self, from: data)
+
+    #expect(configuration.provider == .openAICompatible)
+}
+
+@Test func legacyOpenRouterLLMEndpointDefaultsToOpenRouterProvider() throws {
+    let data = """
+    {"id":"openrouter","name":"OpenRouter","endpoint":"https://openrouter.ai/api","model":"openrouter/free"}
+    """.data(using: .utf8)!
+
+    let configuration = try JSONDecoder().decode(LLMEndpointConfiguration.self, from: data)
+
+    #expect(configuration.provider == .openRouter)
+}
+
+@Test func openRouterModelRepairsMismatchedOpenCodeEndpoint() {
+    let sanitized = LLMEndpointConfiguration.sanitized([
+        LLMEndpointConfiguration(
+            id: "openrouter",
+            name: "OpenRouter",
+            provider: .openAICompatible,
+            endpoint: "https://opencode.ai/zen",
+            model: "openrouter/free"
+        )
+    ])
+
+    #expect(sanitized[0].provider == .openRouter)
+    #expect(sanitized[0].endpoint == LLMProviderKind.openRouter.defaultEndpoint)
+    #expect(sanitized[0].model == "openrouter/free")
+}
+
+@Test func legacyLocalLLMEndpointDefaultsToOllamaProvider() throws {
+    let data = """
+    {"id":"local","name":"Local","endpoint":"http://localhost:11434","model":"model"}
+    """.data(using: .utf8)!
+
+    let configuration = try JSONDecoder().decode(LLMEndpointConfiguration.self, from: data)
+
+    #expect(configuration.provider == .ollama)
+}
+
+@Test func summaryOrganizerGroupsSentencesIntoParagraphs() {
+    let paragraphs = SummaryCoordinator.organizeIntoParagraphs(
+        sentences: [
+            "First sentence.",
+            "Second sentence.",
+            "Third sentence.",
+            "Fourth sentence."
+        ],
+        prompt: "concise summary"
+    )
+
+    #expect(paragraphs == [
+        "First sentence. Second sentence. Third sentence.",
+        "Fourth sentence."
+    ])
+}
+
+@Test func summaryPromptDefaultIsEditableInstructionText() {
+    #expect(SummaryPrompt.defaultTemplate.contains("Summarize the recording"))
+    #expect(SummaryPrompt.defaultTemplate.contains("paragraphs"))
+}
+
 @Test func transcriptDocumentKeepsFinalAndInterimText() {
     var document = TranscriptDocument()
     document.apply(TranscriptSegment(text: "hello", isFinal: true))
@@ -162,26 +268,46 @@ import Testing
 @Test func factCheckCoordinatorSuppressesDuplicateSentences() async {
     let service = FakeFactCheckService()
     let coordinator = FactCheckCoordinator(service: service)
-    let endpoint = URL(string: "http://localhost:11434")!
+    let llm = LLMEndpointConfiguration.defaultConfiguration(
+        endpoint: "http://localhost:11434",
+        model: "test-model"
+    )
 
     coordinator.enqueueTranscriptSegment(
         TranscriptSegment(text: "The Earth orbits the Sun.", isFinal: true),
         enabled: true,
-        endpoint: endpoint,
-        model: "test-model",
+        llm: llm,
         promptTemplate: FactCheckPrompt.defaultTemplate
     )
     coordinator.enqueueTranscriptSegment(
         TranscriptSegment(text: "  The Earth orbits the Sun.  ", isFinal: true),
         enabled: true,
-        endpoint: endpoint,
-        model: "test-model",
+        llm: llm,
         promptTemplate: FactCheckPrompt.defaultTemplate
     )
 
     try? await Task.sleep(nanoseconds: 50_000_000)
 
     #expect(coordinator.items.count == 1)
+}
+
+@MainActor
+@Test func factCheckCoordinatorDoesNotQueueWhenDisabled() async {
+    let service = FakeFactCheckService()
+    let coordinator = FactCheckCoordinator(service: service)
+    let llm = LLMEndpointConfiguration.defaultConfiguration(
+        endpoint: "http://localhost:11434",
+        model: "test-model"
+    )
+
+    coordinator.enqueueTranscriptSegment(
+        TranscriptSegment(text: "The Earth orbits the Sun.", isFinal: true),
+        enabled: false,
+        llm: llm,
+        promptTemplate: FactCheckPrompt.defaultTemplate
+    )
+
+    #expect(coordinator.items.isEmpty)
 }
 
 @MainActor
@@ -246,7 +372,7 @@ private final class FakeMicrophonePermissionProvider: MicrophonePermissionProvid
 }
 
 private struct FakeFactCheckService: FactCheckService {
-    func factCheck(sentence: String, endpoint: URL, model: String, promptTemplate: String) async throws -> FactCheckResult {
+    func factCheck(sentence: String, llm: LLMEndpointConfiguration, promptTemplate: String) async throws -> FactCheckResult {
         FactCheckResult(
             sentence: sentence,
             verdict: .supported,

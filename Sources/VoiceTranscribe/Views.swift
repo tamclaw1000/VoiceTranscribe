@@ -35,8 +35,8 @@ struct ContentView: View {
             Text(appModel.userMessage ?? "")
         }
         .task {
-            // Auto-open Settings on first launch if permissions are missing.
-            if appModel.needsPermissionsSetup {
+            let requestedSystemPermissions = await appModel.runFirstLaunchPermissionFlowIfNeeded()
+            if !requestedSystemPermissions && appModel.needsPermissionsSetup {
                 showSettings = true
             }
         }
@@ -105,14 +105,17 @@ struct ContentView: View {
                 ? "Transcription engine, permissions, and more"
                 : "Microphone or speech recognition permissions are missing — open Settings to grant them")
 
+            AIToggleControl(isOn: aiEnabledBinding)
+
             if !permissionsOK {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                 Text("Microphone & Speech access required")
                     .font(.caption)
                     .foregroundStyle(.orange)
-                Spacer()
             }
+
+            Spacer()
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
@@ -135,11 +138,27 @@ struct ContentView: View {
                 interim: appModel.transcription.interimSegment,
                 factChecks: appModel.factCheck.items,
                 sourceName: appModel.transcriptSourceName,
-                isFactCheckEnabled: appModel.settings.factCheckEnabled,
+                isFactCheckEnabled: appModel.settings.isFactCheckActive,
                 isFactChecking: appModel.factCheck.isRunning,
                 buffer: appModel.transcription.bufferSnapshot,
-                isTranscribing: appModel.transcription.isTranscribing
+                isTranscribing: appModel.transcription.isTranscribing,
+                aiEnabled: aiEnabledBinding,
+                hasTranscriptText: !appModel.transcription.transcriptText
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty,
+                onSaveToFile: appModel.saveTranscriptToFile,
+                onCopyText: appModel.copyTranscriptText
             )
+
+            Divider()
+
+            SummaryPanel(
+                paragraphs: appModel.summary.paragraphs,
+                sentenceCount: appModel.summary.sentenceCount,
+                onSaveToFile: appModel.saveSummaryToFile,
+                onCopyText: appModel.copySummaryText
+            )
+            .frame(minHeight: 130, maxHeight: 190)
 
             if !appModel.completedRecordings.isEmpty {
                 Divider()
@@ -147,6 +166,13 @@ struct ContentView: View {
                     .frame(height: 140)
             }
         }
+    }
+
+    private var aiEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { appModel.settings.aiEnabled },
+            set: { appModel.setAIEnabled($0) }
+        )
     }
 }
 
@@ -318,6 +344,22 @@ private struct PermissionStatusView: View {
     }
 }
 
+private struct AIToggleControl: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            Label(isOn ? "AI On" : "AI Off", systemImage: "sparkles")
+                .font(.callout.weight(.semibold))
+        }
+        .toggleStyle(.switch)
+        .fixedSize()
+        .help(isOn ? "AI fact-checking is enabled" : "AI fact-checking is disabled")
+        .accessibilityLabel("AI features")
+        .accessibilityValue(isOn ? "On" : "Off")
+    }
+}
+
 // MARK: - Settings Sheet
 
 private struct SettingsSheet: View {
@@ -326,7 +368,6 @@ private struct SettingsSheet: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            // Header
             HStack {
                 Label("Settings", systemImage: "gearshape")
                     .font(.title2.bold())
@@ -343,7 +384,38 @@ private struct SettingsSheet: View {
 
             Divider()
 
-            // Transcription engine
+            HStack(alignment: .top, spacing: 18) {
+                ScrollView {
+                    leftSettingsColumn
+                        .padding(.trailing, 2)
+                }
+                .frame(width: 430)
+
+                Divider()
+
+                ScrollView {
+                    rightSettingsColumn
+                        .padding(.leading, 2)
+                }
+                .frame(width: 470)
+            }
+        }
+        .padding()
+        .frame(width: 960, height: 680)
+        .alert("VoiceTranscribe", isPresented: Binding(
+            get: { appModel.userMessage != nil },
+            set: { if !$0 { appModel.userMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {
+                appModel.userMessage = nil
+            }
+        } message: {
+            Text(appModel.userMessage ?? "")
+        }
+    }
+
+    private var leftSettingsColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Transcription Engine", systemImage: "text.bubble")
@@ -369,13 +441,11 @@ private struct SettingsSheet: View {
                 }
             }
 
-            // Permissions
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Permissions", systemImage: "lock.shield")
                         .font(.headline)
 
-                    // Mic
                     HStack {
                         PermissionStatusView(
                             title: "Microphone",
@@ -392,7 +462,6 @@ private struct SettingsSheet: View {
                         .disabled(appModel.permissionService.microphoneStatus == .authorized)
                     }
 
-                    // Speech
                     HStack {
                         PermissionStatusView(
                             title: "Speech Recognition",
@@ -409,7 +478,6 @@ private struct SettingsSheet: View {
                         .disabled(appModel.permissionService.speechStatus == .authorized)
                     }
 
-                    // System Settings shortcut
                     Divider()
                     Button {
                         appModel.permissionService.openSystemPrivacySettings()
@@ -424,20 +492,68 @@ private struct SettingsSheet: View {
 
             GroupBox {
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("Fact Checking", systemImage: "checkmark.seal")
+                    Label("Summary", systemImage: "doc.text.magnifyingglass")
                         .font(.headline)
 
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Summary Prompt")
+                                .font(.caption.weight(.semibold))
+                            Spacer()
+                            Button("Reset") {
+                                appModel.settings.resetSummaryPrompt()
+                            }
+                            .font(.caption)
+                            .buttonStyle(.link)
+                        }
+
+                        TextEditor(text: $appModel.settings.summaryPrompt)
+                            .font(.caption.monospaced())
+                            .frame(minHeight: 120)
+                            .scrollContentBackground(.hidden)
+                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.secondary.opacity(0.18))
+                            )
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var rightSettingsColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("AI Fact Checking", systemImage: "sparkles")
+                        .font(.headline)
+
+                    Toggle("Enable AI features", isOn: aiEnabledBinding)
                     Toggle("Fact-check finalized transcript sentences", isOn: $appModel.settings.factCheckEnabled)
+                        .disabled(!appModel.settings.aiEnabled)
 
-                    TextField("Ollama endpoint", text: $appModel.settings.ollamaEndpoint)
-                        .textFieldStyle(.roundedBorder)
+                    HStack {
+                        Button {
+                            appModel.testSelectedLLMPlainPrompt()
+                        } label: {
+                            Label("Test Prompt", systemImage: "message")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!appModel.settings.aiEnabled)
 
-                    TextField("Ollama model", text: $appModel.settings.ollamaModel)
-                        .textFieldStyle(.roundedBorder)
+                        Button {
+                            appModel.testSelectedLLMFactCheck()
+                        } label: {
+                            Label("Test Fact Check", systemImage: "network")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!appModel.settings.aiEnabled)
+                    }
 
-                    Text("Default model: igorls/gemma-4-12B-it-heretic-GGUF")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    LLMEndpointSettingsView(compact: true)
+                        .environmentObject(appModel)
 
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
@@ -453,7 +569,7 @@ private struct SettingsSheet: View {
 
                         TextEditor(text: $appModel.settings.ollamaFactCheckPrompt)
                             .font(.caption.monospaced())
-                            .frame(minHeight: 150)
+                            .frame(minHeight: 190)
                             .scrollContentBackground(.hidden)
                             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                             .overlay(
@@ -461,20 +577,17 @@ private struct SettingsSheet: View {
                                     .stroke(Color.secondary.opacity(0.18))
                             )
                     }
-
-                    Button {
-                        appModel.testOllamaFactCheck()
-                    } label: {
-                        Label("Test Ollama", systemImage: "network")
-                    }
-                    .buttonStyle(.bordered)
                 }
             }
-
-            Spacer()
         }
-        .padding()
-        .frame(width: 540, height: 740)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var aiEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { appModel.settings.aiEnabled },
+            set: { appModel.setAIEnabled($0) }
+        )
     }
 
     private func microphoneStatusText(_ status: AVAuthorizationStatus) -> String {
@@ -495,6 +608,96 @@ private struct SettingsSheet: View {
         case .notDetermined: return "Not Requested"
         @unknown default:  return "Unknown"
         }
+    }
+}
+
+private struct LLMEndpointSettingsView: View {
+    @EnvironmentObject private var appModel: AppModel
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 8 : 12) {
+            Picker("Selected LLM", selection: $appModel.settings.selectedLLMEndpointID) {
+                ForEach(appModel.settings.llmEndpoints) { endpoint in
+                    Text(endpoint.displayName).tag(endpoint.id)
+                }
+            }
+
+            ForEach(appModel.settings.llmEndpoints) { endpoint in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        TextField("Name", text: stringBinding(for: endpoint, keyPath: \.name))
+                            .textFieldStyle(.roundedBorder)
+                        Button {
+                            appModel.settings.removeLLMEndpoint(id: endpoint.id)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .disabled(appModel.settings.llmEndpoints.count <= 1)
+                        .help("Remove this LLM")
+                    }
+
+                    Picker("API Type", selection: providerBinding(for: endpoint)) {
+                        ForEach(LLMProviderKind.allCases) { provider in
+                            Text(provider.displayName).tag(provider)
+                        }
+                    }
+
+                    TextField("Endpoint URL", text: stringBinding(for: endpoint, keyPath: \.endpoint))
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Model", text: stringBinding(for: endpoint, keyPath: \.model))
+                        .textFieldStyle(.roundedBorder)
+                    SecureField("API Key", text: stringBinding(for: endpoint, keyPath: \.apiKey))
+                        .textFieldStyle(.roundedBorder)
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.18))
+                )
+            }
+
+            Button {
+                appModel.settings.addLLMEndpoint()
+            } label: {
+                Label("Add LLM", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private func stringBinding(
+        for endpoint: LLMEndpointConfiguration,
+        keyPath: WritableKeyPath<LLMEndpointConfiguration, String>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                appModel.settings.llmEndpoint(id: endpoint.id)?[keyPath: keyPath] ?? ""
+            },
+            set: { value in
+                var updated = appModel.settings.llmEndpoint(id: endpoint.id) ?? endpoint
+                updated[keyPath: keyPath] = value
+                appModel.settings.updateLLMEndpoint(updated)
+            }
+        )
+    }
+
+    private func providerBinding(for endpoint: LLMEndpointConfiguration) -> Binding<LLMProviderKind> {
+        Binding(
+            get: {
+                appModel.settings.llmEndpoint(id: endpoint.id)?.provider ?? .ollama
+            },
+            set: { provider in
+                var updated = appModel.settings.llmEndpoint(id: endpoint.id) ?? endpoint
+                updated.provider = provider
+                if updated.endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || LLMProviderKind.allCases.map(\.defaultEndpoint).contains(updated.endpoint) {
+                    updated.endpoint = provider.defaultEndpoint
+                }
+                appModel.settings.updateLLMEndpoint(updated)
+            }
+        )
     }
 }
 
@@ -574,6 +777,10 @@ private struct TranscriptFactCheckPanel: View {
     let isFactChecking: Bool
     let buffer: TranscriptionBufferSnapshot
     let isTranscribing: Bool
+    @Binding var aiEnabled: Bool
+    let hasTranscriptText: Bool
+    let onSaveToFile: () -> Void
+    let onCopyText: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -581,6 +788,24 @@ private struct TranscriptFactCheckPanel: View {
                 Label("Live Transcript", systemImage: "text.alignleft")
                     .font(.headline)
                 Spacer()
+                AIToggleControl(isOn: $aiEnabled)
+
+                Button {
+                    onCopyText()
+                } label: {
+                    Label("CopyText", systemImage: "doc.on.doc")
+                }
+                .disabled(!hasTranscriptText)
+                .help("Copy transcript text to the clipboard")
+
+                Button {
+                    onSaveToFile()
+                } label: {
+                    Label("SaveToFile", systemImage: "square.and.arrow.down")
+                }
+                .disabled(!hasTranscriptText)
+                .help("Save transcript text to a file")
+
                 HStack(spacing: 6) {
                     Circle()
                         .fill(factCheckStatusColor)
@@ -593,67 +818,51 @@ private struct TranscriptFactCheckPanel: View {
                     .frame(width: 260)
             }
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-                        GridRow {
-                            Text("Timestamp")
-                                .frame(width: 76, alignment: .leading)
-                            Text("Audio Source")
-                                .frame(width: 150, alignment: .leading)
-                            Text("Text")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+            ScrollView {
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                    GridRow {
+                        Text("Timestamp")
+                            .frame(width: 76, alignment: .leading)
+                        Text("Audio Source")
+                            .frame(width: 150, alignment: .leading)
+                        Text("Text")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
-                        Divider()
-                            .gridCellColumns(3)
+                    Divider()
+                        .gridCellColumns(3)
 
-                        if finalized.isEmpty && interim == nil {
-                            ContentUnavailableView(
-                                "No Transcript",
-                                systemImage: "text.bubble",
-                                description: Text("Start transcription to see speech as it is processed.")
+                    if finalized.isEmpty && interim == nil {
+                        ContentUnavailableView(
+                            "No Transcript",
+                            systemImage: "text.bubble",
+                            description: Text("Start transcription to see speech as it is processed.")
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 180)
+                        .gridCellColumns(3)
+                    } else {
+                        ForEach(finalized) { segment in
+                            transcriptRows(
+                                segment: segment,
+                                sourceName: sourceName,
+                                factChecks: factChecks(for: segment),
+                                isInterim: false
                             )
-                            .frame(maxWidth: .infinity, minHeight: 180)
-                            .gridCellColumns(3)
-                        } else {
-                            ForEach(finalized) { segment in
-                                transcriptRows(
-                                    segment: segment,
-                                    sourceName: sourceName,
-                                    factChecks: factChecks(for: segment),
-                                    isInterim: false
-                                )
-                                .id(segment.id)
-                            }
-                            if let interim {
-                                transcriptRows(
-                                    segment: interim,
-                                    sourceName: sourceName,
-                                    factChecks: [],
-                                    isInterim: true
-                                )
-                                .id("interim")
-                            }
                         }
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom)
-                }
-                .onChange(of: finalized.count) {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        if let last = finalized.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
+                        if let interim {
+                            transcriptRows(
+                                segment: interim,
+                                sourceName: sourceName,
+                                factChecks: [],
+                                isInterim: true
+                            )
                         }
                     }
                 }
-                .onChange(of: interim?.text) {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("interim", anchor: .bottom)
-                    }
-                }
+                .padding(.horizontal)
+                .padding(.bottom)
             }
         }
         .padding()
@@ -709,7 +918,7 @@ private struct TranscriptFactCheckPanel: View {
     private func factCheckDetail(for item: FactCheckItem) -> some View {
         switch item.state {
         case .queued:
-            return factCheckDetail(label: "Fact Check", badge: "Queued", color: .secondary, text: "Waiting for Ollama.")
+            return factCheckDetail(label: "Fact Check", badge: "Queued", color: .secondary, text: "Waiting for the selected LLM.")
         case .checking:
             return factCheckDetail(label: "Fact Check", badge: "Checking", color: .orange, text: "Fact-check request in progress.")
         case .failed(let message):
@@ -794,6 +1003,66 @@ private struct TranscriptFactCheckPanel: View {
     }()
 }
 
+private struct SummaryPanel: View {
+    let paragraphs: [String]
+    let sentenceCount: Int
+    let onSaveToFile: () -> Void
+    let onCopyText: () -> Void
+
+    private var hasSummaryText: Bool {
+        !paragraphs.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Recording Summary", systemImage: "doc.text.magnifyingglass")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    onCopyText()
+                } label: {
+                    Label("CopyText", systemImage: "doc.on.doc")
+                }
+                .disabled(!hasSummaryText)
+                .help("Copy summary text to the clipboard")
+
+                Button {
+                    onSaveToFile()
+                } label: {
+                    Label("SaveToFile", systemImage: "square.and.arrow.down")
+                }
+                .disabled(!hasSummaryText)
+                .help("Save summary text to a file")
+
+                Text("\(sentenceCount) sentences")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if paragraphs.isEmpty {
+                ContentUnavailableView(
+                    "No Summary Yet",
+                    systemImage: "doc.text",
+                    description: Text("Finalized transcript sentences will be organized here as the recording grows.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 90)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                            Text(paragraph)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(.trailing, 4)
+                }
+            }
+        }
+        .padding()
+    }
+}
+
 private struct TranscriptionStatusView: View {
     let buffer: TranscriptionBufferSnapshot
     let isTranscribing: Bool
@@ -872,58 +1141,94 @@ struct SettingsView: View {
     @EnvironmentObject private var appModel: AppModel
 
     var body: some View {
-        Form {
-            Section("Output") {
-                HStack {
-                    TextField("Folder", text: $appModel.settings.outputFolderPath)
-                    Button {
-                        chooseOutputFolder()
-                    } label: {
-                        Label("Choose", systemImage: "folder")
-                    }
-                }
-
-                Picker("Audio Format", selection: Binding(
-                    get: { appModel.settings.audioOutputFormat },
-                    set: { appModel.settings.audioOutputFormat = $0 }
-                )) {
-                    ForEach(AudioOutputFormat.allCases) { format in
-                        Text(format.displayName).tag(format)
-                    }
-                }
+        HStack(alignment: .top, spacing: 18) {
+            ScrollView {
+                settingsLeftColumn
+                    .padding(.trailing, 2)
             }
+            .frame(width: 430)
 
-            Section("Transcription") {
-                Picker("Engine", selection: Binding(
-                    get: { appModel.settings.transcriptionEngine },
-                    set: { newEngine in
-                        appModel.transcription.setEngine(newEngine)
-                        appModel.settings.transcriptionEngine = newEngine
-                    }
-                )) {
-                    ForEach(TranscriptionEngineKind.allCases) { engine in
-                        Text(engine.displayName).tag(engine)
-                    }
-                }
-                .disabled(appModel.transcription.isTranscribing)
-                Toggle("Save transcripts automatically", isOn: $appModel.settings.saveTranscriptsAutomatically)
+            Divider()
+
+            ScrollView {
+                settingsRightColumn
+                    .padding(.leading, 2)
             }
+            .frame(width: 470)
+        }
+        .padding()
+    }
 
-            Section("Fact Checking") {
-                Toggle("Fact-check finalized sentences", isOn: $appModel.settings.factCheckEnabled)
-                TextField("Ollama Endpoint", text: $appModel.settings.ollamaEndpoint)
-                TextField("Ollama Model", text: $appModel.settings.ollamaModel)
-                VStack(alignment: .leading, spacing: 6) {
+    private var settingsLeftColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Output", systemImage: "folder")
+                        .font(.headline)
+
                     HStack {
-                        Text("Prompt Template")
-                        Spacer()
-                        Button("Reset") {
-                            appModel.settings.resetFactCheckPrompt()
+                        TextField("Folder", text: $appModel.settings.outputFolderPath)
+                            .textFieldStyle(.roundedBorder)
+                        Button {
+                            chooseOutputFolder()
+                        } label: {
+                            Label("Choose", systemImage: "folder")
                         }
                     }
-                    TextEditor(text: $appModel.settings.ollamaFactCheckPrompt)
+
+                    Picker("Audio Format", selection: Binding(
+                        get: { appModel.settings.audioOutputFormat },
+                        set: { appModel.settings.audioOutputFormat = $0 }
+                    )) {
+                        ForEach(AudioOutputFormat.allCases) { format in
+                            Text(format.displayName).tag(format)
+                        }
+                    }
+                }
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Transcription", systemImage: "text.bubble")
+                        .font(.headline)
+
+                    Picker("Engine", selection: Binding(
+                        get: { appModel.settings.transcriptionEngine },
+                        set: { newEngine in
+                            appModel.transcription.setEngine(newEngine)
+                            appModel.settings.transcriptionEngine = newEngine
+                        }
+                    )) {
+                        ForEach(TranscriptionEngineKind.allCases) { engine in
+                            Text(engine.displayName).tag(engine)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                    .disabled(appModel.transcription.isTranscribing)
+
+                    Toggle("Save transcripts automatically", isOn: $appModel.settings.saveTranscriptsAutomatically)
+                }
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Summary", systemImage: "doc.text.magnifyingglass")
+                        .font(.headline)
+
+                    HStack {
+                        Text("Summary Prompt")
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Button("Reset") {
+                            appModel.settings.resetSummaryPrompt()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.link)
+                    }
+
+                    TextEditor(text: $appModel.settings.summaryPrompt)
                         .font(.caption.monospaced())
-                        .frame(minHeight: 180)
+                        .frame(minHeight: 150)
                         .scrollContentBackground(.hidden)
                         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                         .overlay(
@@ -931,24 +1236,84 @@ struct SettingsView: View {
                                 .stroke(Color.secondary.opacity(0.18))
                         )
                 }
-                Button {
-                    appModel.testOllamaFactCheck()
-                } label: {
-                    Label("Test Ollama", systemImage: "network")
-                }
             }
 
-            Section("Visualization") {
-                Slider(
-                    value: $appModel.settings.visualizationSensitivity,
-                    in: 0.25...3.0,
-                    step: 0.25
-                ) {
-                    Text("Sensitivity")
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Visualization", systemImage: "waveform")
+                        .font(.headline)
+                    Slider(
+                        value: $appModel.settings.visualizationSensitivity,
+                        in: 0.25...3.0,
+                        step: 0.25
+                    ) {
+                        Text("Sensitivity")
+                    }
                 }
             }
         }
-        .padding()
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var settingsRightColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("AI Fact Checking", systemImage: "sparkles")
+                        .font(.headline)
+
+                    Toggle("Enable AI features", isOn: Binding(
+                        get: { appModel.settings.aiEnabled },
+                        set: { appModel.setAIEnabled($0) }
+                    ))
+                    Toggle("Fact-check finalized sentences", isOn: $appModel.settings.factCheckEnabled)
+                        .disabled(!appModel.settings.aiEnabled)
+
+                    HStack {
+                        Button {
+                            appModel.testSelectedLLMPlainPrompt()
+                        } label: {
+                            Label("Test Prompt", systemImage: "message")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!appModel.settings.aiEnabled)
+
+                        Button {
+                            appModel.testSelectedLLMFactCheck()
+                        } label: {
+                            Label("Test Fact Check", systemImage: "network")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!appModel.settings.aiEnabled)
+                    }
+
+                    LLMEndpointSettingsView(compact: true)
+                        .environmentObject(appModel)
+
+                    HStack {
+                        Text("Prompt Template")
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Button("Reset") {
+                            appModel.settings.resetFactCheckPrompt()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.link)
+                    }
+
+                    TextEditor(text: $appModel.settings.ollamaFactCheckPrompt)
+                        .font(.caption.monospaced())
+                        .frame(minHeight: 210)
+                        .scrollContentBackground(.hidden)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.secondary.opacity(0.18))
+                        )
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func chooseOutputFolder() {

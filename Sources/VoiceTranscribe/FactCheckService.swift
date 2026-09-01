@@ -39,6 +39,7 @@ enum FactCheckState: Equatable {
 struct FactCheckItem: Identifiable, Equatable {
     let id: UUID
     let sentence: String
+    let llm: LLMEndpointConfiguration
     let promptTemplate: String
     var state: FactCheckState
     let createdAt: Date
@@ -46,12 +47,14 @@ struct FactCheckItem: Identifiable, Equatable {
     init(
         id: UUID = UUID(),
         sentence: String,
+        llm: LLMEndpointConfiguration,
         promptTemplate: String,
         state: FactCheckState = .queued,
         createdAt: Date = Date()
     ) {
         self.id = id
         self.sentence = sentence
+        self.llm = llm
         self.promptTemplate = promptTemplate
         self.state = state
         self.createdAt = createdAt
@@ -117,44 +120,218 @@ struct FactCheckResult: Codable, Equatable {
 }
 
 protocol FactCheckService {
-    func factCheck(sentence: String, endpoint: URL, model: String, promptTemplate: String) async throws -> FactCheckResult
+    func factCheck(sentence: String, llm: LLMEndpointConfiguration, promptTemplate: String) async throws -> FactCheckResult
 }
 
 struct OllamaFactCheckService: FactCheckService {
     var timeout: TimeInterval = 60
 
-    func factCheck(sentence: String, endpoint: URL, model: String, promptTemplate: String) async throws -> FactCheckResult {
-        let url = endpoint.appendingPathComponent("api/generate")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = timeout
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(OllamaGenerateRequest(
-            model: model,
-            prompt: FactCheckPrompt.render(template: promptTemplate, sentence: sentence),
-            stream: false,
-            format: "json",
-            options: OllamaGenerateOptions(temperature: 0.1)
-        ))
+    func factCheck(sentence: String, llm: LLMEndpointConfiguration, promptTemplate: String) async throws -> FactCheckResult {
+        let prompt = FactCheckPrompt.render(template: promptTemplate, sentence: sentence)
+        let raw = try await generate(prompt: prompt, llm: llm, wantsJSON: true, traceEvent: "factCheck.request.started")
+        let result = Self.parseResult(raw, fallbackSentence: sentence)
+        Trace.event("factCheck.response.received", [
+            "provider": llm.provider.rawValue,
+            "verdict": result.verdict.rawValue,
+            "confidence": result.confidence.rawValue,
+            "usedRawResponse": result.rawResponse != nil
+        ])
+        return result
+    }
 
-        Trace.event("factCheck.request.started", ["model": model, "sentence": sentence.prefix(120)])
+    func generate(
+        prompt: String,
+        llm: LLMEndpointConfiguration,
+        wantsJSON: Bool = false,
+        traceEvent: String = "llm.test.request.started"
+    ) async throws -> String {
+        let request: URLRequest
+        switch llm.provider {
+        case .ollama:
+            request = try ollamaRequest(llm: llm, prompt: prompt, wantsJSON: wantsJSON)
+        case .openAICompatible, .openRouter:
+            request = try openAICompatibleRequest(llm: llm, prompt: prompt, wantsJSON: wantsJSON)
+        case .anthropic:
+            request = try anthropicRequest(llm: llm, prompt: prompt)
+        case .gemini:
+            request = try geminiRequest(llm: llm, prompt: prompt, wantsJSON: wantsJSON)
+        }
+
+        Trace.event(traceEvent, [
+            "provider": llm.provider.rawValue,
+            "model": llm.model,
+            "prompt": prompt.prefix(120)
+        ])
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let http = response as? HTTPURLResponse else {
             throw FactCheckError.invalidResponse
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw FactCheckError.httpStatus(http.statusCode)
+            let body = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw FactCheckError.httpStatus(http.statusCode, body)
         }
 
-        let generated = try JSONDecoder().decode(OllamaGenerateResponse.self, from: data)
-        let result = Self.parseResult(generated.response, fallbackSentence: sentence)
-        Trace.event("factCheck.response.received", [
-            "verdict": result.verdict.rawValue,
-            "confidence": result.confidence.rawValue,
-            "usedRawResponse": result.rawResponse != nil
+        let raw = try responseText(from: data, provider: llm.provider)
+        Trace.event("llm.response.received", [
+            "provider": llm.provider.rawValue,
+            "chars": raw.count
         ])
-        return result
+        return raw
+    }
+
+    private func ollamaRequest(llm: LLMEndpointConfiguration, prompt: String, wantsJSON: Bool) throws -> URLRequest {
+        let url = llm.endpointURL.appendingPathComponent("api/generate")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(OllamaGenerateRequest(
+            model: llm.model,
+            prompt: prompt,
+            stream: false,
+            format: wantsJSON ? "json" : nil,
+            options: OllamaGenerateOptions(temperature: 0.1)
+        ))
+        addAuthorization(to: &request, apiKey: llm.apiKey, style: .bearer)
+        return request
+    }
+
+    private func openAICompatibleRequest(llm: LLMEndpointConfiguration, prompt: String, wantsJSON: Bool) throws -> URLRequest {
+        let url = chatCompletionsURL(from: llm.endpointURL)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        addAuthorization(to: &request, apiKey: llm.apiKey, style: .bearer)
+        if llm.provider == .openRouter {
+            request.setValue("VoiceTranscribe", forHTTPHeaderField: "X-Title")
+        }
+        request.httpBody = try JSONEncoder().encode(OpenAIChatCompletionRequest(
+            model: llm.model,
+            messages: [
+                OpenAIChatMessage(role: "user", content: prompt)
+            ],
+            temperature: 0.1,
+            responseFormat: wantsJSON ? OpenAIResponseFormat(type: "json_object") : nil
+        ))
+        return request
+    }
+
+    private func chatCompletionsURL(from endpointURL: URL) -> URL {
+        let components = endpointURL.pathComponents.filter { $0 != "/" }
+        if components.suffix(3) == ["v1", "chat", "completions"] {
+            return endpointURL
+        }
+        if components.last == "v1" {
+            return endpointURL
+                .appendingPathComponent("chat")
+                .appendingPathComponent("completions")
+        }
+        return endpointURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("chat")
+            .appendingPathComponent("completions")
+    }
+
+    private func anthropicRequest(llm: LLMEndpointConfiguration, prompt: String) throws -> URLRequest {
+        let url = llm.endpointURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("messages")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        addAuthorization(to: &request, apiKey: llm.apiKey, style: .anthropic)
+        request.httpBody = try JSONEncoder().encode(AnthropicMessagesRequest(
+            model: llm.model,
+            maxTokens: 1000,
+            messages: [
+                AnthropicMessage(role: "user", content: prompt)
+            ],
+            temperature: 0.1
+        ))
+        return request
+    }
+
+    private func geminiRequest(llm: LLMEndpointConfiguration, prompt: String, wantsJSON: Bool) throws -> URLRequest {
+        let modelPath = llm.model.hasPrefix("models/") ? llm.model : "models/\(llm.model)"
+        var components = URLComponents(
+            url: llm.endpointURL
+                .appendingPathComponent("v1beta")
+                .appendingPathComponent("\(modelPath):generateContent"),
+            resolvingAgainstBaseURL: false
+        )
+        let key = llm.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty {
+            components?.queryItems = [URLQueryItem(name: "key", value: key)]
+        }
+        guard let url = components?.url else {
+            throw FactCheckError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(GeminiGenerateContentRequest(
+            contents: [
+                GeminiContent(parts: [GeminiPart(text: prompt)])
+            ],
+            generationConfig: GeminiGenerationConfig(
+                temperature: 0.1,
+                responseMimeType: wantsJSON ? "application/json" : nil
+            )
+        ))
+        return request
+    }
+
+    private func responseText(from data: Data, provider: LLMProviderKind) throws -> String {
+        switch provider {
+        case .ollama:
+            return try JSONDecoder().decode(OllamaGenerateResponse.self, from: data).response
+        case .openAICompatible, .openRouter:
+            return try JSONDecoder().decode(OpenAIChatCompletionResponse.self, from: data)
+                .choices
+                .first?
+                .message
+                .content ?? ""
+        case .anthropic:
+            return try JSONDecoder().decode(AnthropicMessagesResponse.self, from: data)
+                .content
+                .filter { $0.type == "text" }
+                .map(\.text)
+                .joined(separator: "\n")
+        case .gemini:
+            return try JSONDecoder().decode(GeminiGenerateContentResponse.self, from: data)
+                .candidates
+                .first?
+                .content
+                .parts
+                .map(\.text)
+                .joined(separator: "\n") ?? ""
+        }
+    }
+
+    private enum AuthorizationStyle {
+        case bearer
+        case anthropic
+    }
+
+    private func addAuthorization(to request: inout URLRequest, apiKey: String, style: AuthorizationStyle) {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return
+        }
+
+        switch style {
+        case .bearer:
+            request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
+        case .anthropic:
+            request.setValue(trimmed, forHTTPHeaderField: "x-api-key")
+        }
     }
 
     static func prompt(for sentence: String) -> String {
@@ -283,8 +460,7 @@ final class FactCheckCoordinator: ObservableObject {
     func enqueueTranscriptSegment(
         _ segment: TranscriptSegment,
         enabled: Bool,
-        endpoint: URL,
-        model: String,
+        llm: LLMEndpointConfiguration,
         promptTemplate: String
     ) {
         guard enabled, segment.isFinal else {
@@ -292,35 +468,44 @@ final class FactCheckCoordinator: ObservableObject {
         }
 
         for sentence in Self.completeSentences(in: segment.text) {
-            enqueue(sentence: sentence, endpoint: endpoint, model: model, promptTemplate: promptTemplate)
+            enqueue(sentence: sentence, llm: llm, promptTemplate: promptTemplate)
         }
     }
 
-    private func enqueue(sentence: String, endpoint: URL, model: String, promptTemplate: String) {
+    private func enqueue(sentence: String, llm: LLMEndpointConfiguration, promptTemplate: String) {
         let normalized = Self.normalizedSentence(sentence)
         guard !normalized.isEmpty, !seenSentences.contains(normalized) else {
             return
         }
 
         seenSentences.insert(normalized)
-        let item = FactCheckItem(sentence: sentence, promptTemplate: promptTemplate)
+        let item = FactCheckItem(
+            sentence: sentence,
+            llm: llm,
+            promptTemplate: promptTemplate
+        )
         items.append(item)
-        Trace.event("factCheck.queued", ["id": item.id.uuidString, "sentence": sentence.prefix(120)])
-        startProcessing(endpoint: endpoint, model: model)
+        Trace.event("factCheck.queued", [
+            "id": item.id.uuidString,
+            "provider": llm.provider.rawValue,
+            "model": llm.model,
+            "sentence": sentence.prefix(120)
+        ])
+        startProcessing()
     }
 
-    private func startProcessing(endpoint: URL, model: String) {
+    private func startProcessing() {
         guard processingTask == nil else {
             return
         }
 
         processingTask = Task { [weak self] in
             guard let self else { return }
-            await self.processQueue(endpoint: endpoint, model: model)
+            await self.processQueue()
         }
     }
 
-    private func processQueue(endpoint: URL, model: String) async {
+    private func processQueue() async {
         isRunning = true
 
         while !Task.isCancelled, let next = nextQueuedItem() {
@@ -329,8 +514,7 @@ final class FactCheckCoordinator: ObservableObject {
             do {
                 let result = try await service.factCheck(
                     sentence: next.sentence,
-                    endpoint: endpoint,
-                    model: model,
+                    llm: next.llm,
                     promptTemplate: next.promptTemplate
                 )
                 guard !Task.isCancelled else { return }
@@ -400,17 +584,21 @@ final class FactCheckCoordinator: ObservableObject {
 
 enum FactCheckError: LocalizedError {
     case invalidResponse
-    case httpStatus(Int)
+    case httpStatus(Int, String?)
     case malformedJSON
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
-            return "Ollama returned an invalid response."
-        case .httpStatus(let status):
-            return "Ollama returned HTTP \(status)."
+            return "The LLM endpoint returned an invalid response."
+        case .httpStatus(let status, let body):
+            let trimmed = body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !trimmed.isEmpty else {
+                return "The LLM endpoint returned HTTP \(status)."
+            }
+            return "The LLM endpoint returned HTTP \(status): \(trimmed)"
         case .malformedJSON:
-            return "Ollama returned malformed JSON."
+            return "The LLM endpoint returned malformed JSON."
         }
     }
 }
@@ -419,7 +607,7 @@ private struct OllamaGenerateRequest: Encodable {
     let model: String
     let prompt: String
     let stream: Bool
-    let format: String
+    let format: String?
     let options: OllamaGenerateOptions
 }
 
@@ -429,4 +617,94 @@ private struct OllamaGenerateOptions: Encodable {
 
 private struct OllamaGenerateResponse: Decodable {
     let response: String
+}
+
+private struct OpenAIChatCompletionRequest: Encodable {
+    let model: String
+    let messages: [OpenAIChatMessage]
+    let temperature: Double
+    let responseFormat: OpenAIResponseFormat?
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case messages
+        case temperature
+        case responseFormat = "response_format"
+    }
+}
+
+private struct OpenAIChatMessage: Codable {
+    let role: String
+    let content: String
+}
+
+private struct OpenAIResponseFormat: Encodable {
+    let type: String
+}
+
+private struct OpenAIChatCompletionResponse: Decodable {
+    let choices: [OpenAIChoice]
+}
+
+private struct OpenAIChoice: Decodable {
+    let message: OpenAIChatMessage
+}
+
+private struct AnthropicMessagesRequest: Encodable {
+    let model: String
+    let maxTokens: Int
+    let messages: [AnthropicMessage]
+    let temperature: Double
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case maxTokens = "max_tokens"
+        case messages
+        case temperature
+    }
+}
+
+private struct AnthropicMessage: Codable {
+    let role: String
+    let content: String
+}
+
+private struct AnthropicMessagesResponse: Decodable {
+    let content: [AnthropicContentBlock]
+}
+
+private struct AnthropicContentBlock: Decodable {
+    let type: String
+    let text: String
+}
+
+private struct GeminiGenerateContentRequest: Encodable {
+    let contents: [GeminiContent]
+    let generationConfig: GeminiGenerationConfig
+}
+
+private struct GeminiContent: Codable {
+    let parts: [GeminiPart]
+}
+
+private struct GeminiPart: Codable {
+    let text: String
+}
+
+private struct GeminiGenerationConfig: Encodable {
+    let temperature: Double
+    let responseMimeType: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case temperature
+        case responseMimeType = "response_mime_type"
+    }
+}
+
+private struct GeminiGenerateContentResponse: Decodable {
+    let candidates: [GeminiCandidate]
+}
+
+private struct GeminiCandidate: Decodable {
+    let content: GeminiContent
 }

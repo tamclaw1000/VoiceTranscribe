@@ -891,3 +891,293 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 
 - [x] Bump `CFBundleShortVersionString` to `2.0.4`.
 - [x] Bump `CFBundleVersion` to `22`.
+
+## 42. v2.0.5. Running Recording Summary
+
+### 42a. Summary State
+
+- [x] Add a summary coordinator owned by `AppModel`.
+- [x] Accrue finalized transcript sentences into summary state.
+- [x] Suppress duplicate finalized sentences before summarizing.
+- [x] Organize accrued sentences into readable paragraphs.
+- [x] Reset summary state when a new microphone transcription session starts.
+- [x] Reset summary state when a new file transcription session starts.
+
+### 42b. Summary UI
+
+- [x] Add a Recording Summary section under the transcript/fact-check grid.
+- [x] Show a clear empty state before finalized transcript sentences exist.
+- [x] Show the number of accrued sentences.
+- [x] Render summary paragraphs in a scrollable section.
+- [x] Stop forcing transcript scroll position when new text is appended.
+
+### 42c. Settings
+
+- [x] Add a persisted summary prompt/instruction setting.
+- [x] Add a summary prompt editor to the Settings popup.
+- [x] Add a summary prompt editor to the full Settings view.
+- [x] Add a reset action for the default summary prompt.
+
+### 42d. Tests and Version
+
+- [x] Add tests for summary paragraph grouping.
+- [x] Add tests for default summary prompt content.
+- [x] Bump `CFBundleShortVersionString` to `2.0.5`.
+- [x] Bump `CFBundleVersion` to `23`.
+
+## 43. v2.0.6. First-Launch Permission Relaunch
+
+### 43a. Startup Permission Flow
+
+- [x] Add an app startup permission flow owned by `AppModel`.
+- [x] Request the native microphone permission dialog on launch when macOS reports a not-determined state.
+- [x] Request the native speech-recognition permission dialog on launch when macOS reports a not-determined state.
+- [x] Continue to request native dialogs if a rebuilt/resigned app returns to not-determined permissions.
+- [x] Preserve the existing device-touch permission fallback before capture starts.
+
+### 43b. Automatic Restart
+
+- [x] Relaunch the packaged `.app` automatically after startup permission dialogs complete.
+- [x] Persist permission-flow state before restarting to avoid restart loops.
+- [x] Show a manual restart message when running outside an `.app` bundle.
+- [x] Trace first-launch permission and app-restart events.
+
+### 43c. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.0.6`.
+- [x] Bump `CFBundleVersion` to `24`.
+
+## 44. v2.0.7. Stop Fact-Checking Transcript Fragments
+
+### 44a. Regression Cause
+
+- [x] Confirmed via `/tmp/VoiceTranscribe.log` that FluidAudio partial text was being committed as finalized transcript text every 50 characters.
+- [x] Confirmed the length-based commit path added punctuation to fragments, making them look like complete sentences.
+- [x] Confirmed those artificial sentences were then queued for fact-checking.
+
+### 44b. Fix
+
+- [x] Remove length-based finalization from FluidAudio partial callbacks.
+- [x] Keep FluidAudio partial callback output as interim transcript text only.
+- [x] Preserve final transcript/fact-check flow for actual EOU callback and final drain output.
+- [x] Update requirements so partial transcript fragments must not be fact-checked.
+
+### 44c. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.0.7`.
+- [x] Bump `CFBundleVersion` to `25`.
+
+## 45. v2.0.8. Transcript Export Actions
+
+### 45a. Recording Transcript Save
+
+- [x] Save the recording transcript whenever transcript text exists, even if transcription was stopped before recording.
+- [x] Preserve the existing shared basename for recording audio, transcript text, and metadata files.
+
+### 45b. Manual Transcript Export
+
+- [x] Add `CopyText` to copy the current transcript text to the clipboard.
+- [x] Add `SaveToFile` to export the current transcript text through a save panel.
+- [x] Disable transcript export actions until transcript text is available.
+
+### 45c. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.0.8`.
+- [x] Bump `CFBundleVersion` to `26`.
+
+## 46. v2.0.9. Summary Export Actions
+
+### 46a. Manual Summary Export
+
+- [x] Add `CopyText` to copy the current recording summary to the clipboard.
+- [x] Add `SaveToFile` to export the current recording summary through a save panel.
+- [x] Disable summary export actions until summary text is available.
+
+### 46b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.0.9`.
+- [x] Bump `CFBundleVersion` to `27`.
+
+## 47. v2.1.0. Multiple LLM Endpoints
+
+### 47a. LLM Configuration
+
+- [x] Add a persisted list of LLM endpoint configurations, each with name, endpoint URL, and model.
+- [x] Migrate the previous single Ollama endpoint/model settings into the default LLM entry.
+- [x] Track the selected LLM endpoint independently from the configured endpoint list.
+- [x] Sanitize empty endpoint lists and blank endpoint fields back to usable defaults.
+
+### 47b. Fact-Check Routing
+
+- [x] Route live fact-check requests through the selected LLM endpoint.
+- [x] Store endpoint and model on queued fact-check items so existing queued work keeps its original routing.
+- [x] Update the connectivity test to target the selected LLM.
+
+### 47c. Settings UI
+
+- [x] Replace single Ollama endpoint/model fields with an editable LLM list.
+- [x] Add a selected-LLM picker.
+- [x] Add controls to add and remove configured LLM endpoints.
+
+### 47d. Tests and Version
+
+- [x] Add tests for LLM endpoint defaults and sanitization.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.1.0`.
+- [x] Bump `CFBundleVersion` to `28`.
+
+## 48. v2.1.1. Two-Column Settings Sheet
+
+### 48a. Settings Layout
+
+- [x] Split the Settings sheet into left and right columns.
+- [x] Keep transcription, permissions, and summary settings on the left.
+- [x] Move LLM fact-checking configuration to the right column.
+- [x] Add independent scrolling for each column so the dialog fits shorter screens.
+
+### 48b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.1.1`.
+- [x] Bump `CFBundleVersion` to `29`.
+
+## 49. v2.2.0. LLM Provider API Types
+
+### 49a. Provider Configuration
+
+- [x] Add an API type to each configured LLM endpoint.
+- [x] Support Ollama, OpenAI-compatible chat completions, Anthropic Messages, and Gemini generateContent endpoints.
+- [x] Add an optional API key field to each LLM endpoint configuration.
+- [x] Infer OpenAI-compatible routing for legacy remote LLM endpoints and Ollama routing for legacy local endpoints.
+
+### 49b. Provider Routing
+
+- [x] Route fact-check requests through provider-specific URL paths, headers, request bodies, and response parsers.
+- [x] Preserve existing Ollama `/api/generate` behavior.
+- [x] Use bearer auth for OpenAI-compatible endpoints.
+- [x] Use `x-api-key` plus `anthropic-version` for Anthropic endpoints.
+- [x] Use Gemini `models/{model}:generateContent` requests with API-key query support.
+
+### 49c. Tests and Version
+
+- [x] Add tests for legacy local and remote provider inference.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.2.0`.
+- [x] Bump `CFBundleVersion` to `30`.
+
+## 50. v2.2.1. Plain LLM Prompt Test
+
+### 50a. LLM Diagnostics
+
+- [x] Add a selected-LLM prompt test using `Hello, what is 10 * 20?`.
+- [x] Reuse provider-specific LLM routing without fact-check JSON parsing.
+- [x] Display the raw selected-LLM response in the app message.
+- [x] Keep the existing fact-check test as a separate diagnostic action.
+
+### 50b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.2.1`.
+- [x] Bump `CFBundleVersion` to `31`.
+
+## 51. v2.2.2. LLM Test Diagnostics
+
+### 51a. Settings Test UX
+
+- [x] Move LLM test buttons to the top of the LLM settings panel.
+- [x] Present LLM test results from the Settings sheet so results appear before closing the modal.
+
+### 51b. Request Diagnostics
+
+- [x] Keep JSON response formatting for fact-check requests.
+- [x] Do not force JSON response formatting for the plain arithmetic prompt test.
+- [x] Include LLM HTTP response bodies in surfaced HTTP errors.
+
+### 51c. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.2.2`.
+- [x] Bump `CFBundleVersion` to `32`.
+
+## 52. v2.2.3. OpenRouter Endpoint Repair
+
+### 52a. OpenRouter Configuration
+
+- [x] Add OpenRouter as a first-class LLM API type with default endpoint `https://openrouter.ai/api`.
+- [x] Detect legacy OpenRouter endpoints when loading saved LLM configurations.
+- [x] Repair mismatched profiles that saved an OpenRouter model against an OpenCode endpoint.
+
+### 52b. Request Routing
+
+- [x] Route OpenRouter through OpenAI-compatible chat completions.
+- [x] Accept OpenAI-compatible base URLs that already include `/v1` or `/v1/chat/completions`.
+- [x] Preserve `openrouter/free` as the model ID without rewriting the slash.
+
+### 52c. Tests and Version
+
+- [x] Add tests for OpenRouter provider inference and endpoint repair.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.2.3`.
+- [x] Bump `CFBundleVersion` to `33`.
+
+## 53. v2.2.4. AI Toggle
+
+### 53a. Global AI Control
+
+- [x] Add a persisted `aiEnabled` setting.
+- [x] Add a top-bar AI toggle for quick access.
+- [x] Add AI enable toggles to the Settings fact-checking sections.
+
+### 53b. Fact-Check Gating
+
+- [x] Gate live LLM fact-checking behind both the global AI toggle and the fact-check toggle.
+- [x] Disable fact-check test buttons when AI is off.
+- [x] Return a clear message if an LLM test is invoked while AI is disabled.
+
+### 53c. Tests and Version
+
+- [x] Add tests for effective AI/fact-check state.
+- [x] Add tests for disabled fact-check queue behavior.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.2.4`.
+- [x] Bump `CFBundleVersion` to `34`.
+
+## 54. v2.2.5. AI Toggle Visibility
+
+### 54a. Main Window
+
+- [x] Move the global AI toggle next to the Settings button so it is not hidden at the far right edge of the split view.
+- [x] Add the same labelled AI switch to the live transcript/fact-check header.
+- [x] Keep both switches bound to the same persisted `aiEnabled` setting.
+
+### 54b. Version
+
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.2.5`.
+- [x] Bump `CFBundleVersion` to `35`.
+
+## 55. v2.2.6. Split Menu Settings Window
+
+### 55a. macOS Settings View
+
+- [x] Split the macOS app Settings/options window into two scrollable columns.
+- [x] Move output, transcription, summary, and visualization controls to the left column.
+- [x] Move AI, LLM endpoint, test, and fact-check prompt controls to the right column.
+- [x] Widen the app Settings scene so it does not render as the old single long page.
+
+### 55b. Version
+
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.2.6`.
+- [x] Bump `CFBundleVersion` to `36`.
+
+## 56. v2.2.7. Restart and Menu Settings Repair
+
+### 56a. Relaunch Flow
+
+- [x] Fix automatic restart after permission prompts so it launches a fresh app instance.
+- [x] Avoid activating the current app instance and then terminating it.
+- [x] Trace successful fresh-instance launch attempts.
+
+### 56b. Version
+
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.2.7`.
+- [x] Bump `CFBundleVersion` to `37`.

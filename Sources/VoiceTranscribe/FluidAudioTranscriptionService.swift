@@ -14,19 +14,10 @@ final class FluidAudioTranscriptionService: TranscriptionService {
     private var manager: StreamingEouAsrManager?
     private var onSegment: ((TranscriptSegment) -> Void)?
 
-    /// Tracks the end index (in the accumulated transcript) of text already
-    /// committed as finalized segments.  Used to avoid re-emitting duplicate
-    /// text when the partial callback delivers growing accumulated text.
-    private var committedEndIndex: String.Index?
-
-    /// Minimum new-character count before committing a live sentence.
-    private static let minSentenceChars = 50
-
     // MARK: - TranscriptionService
 
     func start(onSegment: @escaping (TranscriptSegment) -> Void) async throws {
         self.onSegment = onSegment
-        self.committedEndIndex = nil
 
         let mgr = StreamingEouAsrManager(
             chunkSize: chunkSize,
@@ -43,8 +34,9 @@ final class FluidAudioTranscriptionService: TranscriptionService {
             }
             let punctuated = Self.addSentencePunctuation(trimmed)
             Trace.event("fluidAudio.eou.punctuated", ["text": punctuated])
-            Task { @MainActor in
-                self.onSegment?(TranscriptSegment(text: punctuated, isFinal: true))
+            let onSegment = self.onSegment
+            Task { @MainActor [onSegment] in
+                onSegment?(TranscriptSegment(text: punctuated, isFinal: true))
             }
         }
 
@@ -53,18 +45,8 @@ final class FluidAudioTranscriptionService: TranscriptionService {
             guard !trimmed.isEmpty, let self else { return }
             Trace.event("fluidAudio.partial", ["text": trimmed.prefix(80)])
 
-            // Split accumulated text at NaturalLanguage sentence boundaries
-            // so the user sees punctuated sentences in real time, even when
-            // the Parakeet EOU model never fires.
-            let (finals, interim) = self.splitSentences(trimmed)
-            for sentence in finals {
-                Trace.event("fluidAudio.sentence", ["text": sentence])
-                Task { @MainActor in
-                    self.onSegment?(TranscriptSegment(text: sentence, isFinal: true))
-                }
-            }
             Task { @MainActor in
-                self.onSegment?(TranscriptSegment(text: interim, isFinal: false))
+                self.onSegment?(TranscriptSegment(text: trimmed, isFinal: false))
             }
         }
 
@@ -108,8 +90,9 @@ final class FluidAudioTranscriptionService: TranscriptionService {
                 let punctuated = Self.addSentencePunctuation(trimmed)
                 Trace.event("fluidAudio.stop.punctuated", ["text": punctuated])
                 let segment = TranscriptSegment(text: punctuated, isFinal: true)
-                await MainActor.run {
-                    self?.onSegment?(segment)
+                let onSegment = self?.onSegment
+                await MainActor.run { [onSegment] in
+                    onSegment?(segment)
                 }
             } else {
                 Trace.event("fluidAudio.stop.empty")
@@ -174,55 +157,6 @@ final class FluidAudioTranscriptionService: TranscriptionService {
     }
 
     // MARK: - Post-processing
-
-    /// Commit accumulated transcript in sentence-sized chunks during live
-    /// transcription.  Unlike `NLTokenizer` (which needs punctuation to find
-    /// boundaries), this simply commits new text once enough has accumulated.
-    ///
-    /// Returns one finalized sentence when the new uncommitted portion exceeds
-    /// `minSentenceChars`, plus a trailing interim fragment with the remainder.
-    private func splitSentences(_ text: String) -> (finals: [String], interim: String) {
-        let startIndex = committedEndIndex ?? text.startIndex
-
-        // Nothing new to commit.
-        guard startIndex < text.endIndex else {
-            return ([], text)
-        }
-
-        let newText = String(text[startIndex...]).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Don't commit tiny fragments — wait until we have a meaningful chunk.
-        guard newText.count >= Self.minSentenceChars else {
-            return ([], text)
-        }
-
-        // Find a good split point: prefer the last whitespace after minSentenceChars
-        // so we don't split mid-word.
-        var splitIndex = newText.index(newText.startIndex, offsetBy: min(newText.count, Self.minSentenceChars))
-        if let space = newText[splitIndex...].firstIndex(of: " ") {
-            splitIndex = space
-        } else if splitIndex < newText.endIndex {
-            // No space found — split at the exact boundary.
-            splitIndex = newText.index(newText.startIndex, offsetBy: Self.minSentenceChars)
-        }
-
-        let committed = String(newText[..<splitIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let remainder = String(newText[splitIndex...]).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !committed.isEmpty else {
-            return ([], text)
-        }
-
-        // Advance the committed index past what we just emitted.
-        let committedRange = text.range(of: committed, range: startIndex..<text.endIndex)
-        committedEndIndex = committedRange?.upperBound ?? text.index(startIndex, offsetBy: committed.count)
-
-        let punctuated = Self.addSentencePunctuation(committed)
-        Trace.event("fluidAudio.sentence", ["text": punctuated])
-
-        let interim = remainder.isEmpty ? "" : remainder
-        return ([punctuated], interim)
-    }
 
     /// Add basic sentence punctuation to raw ASR output.
     ///

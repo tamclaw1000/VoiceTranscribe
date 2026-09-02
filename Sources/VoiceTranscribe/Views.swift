@@ -8,7 +8,11 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            sourceList
+            VStack(spacing: 0) {
+                sourceList
+                Divider()
+                AppVersionFooter()
+            }
                 .navigationTitle("VoiceTranscribe")
                 .toolbar {
                     Button {
@@ -147,6 +151,7 @@ struct ContentView: View {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .isEmpty,
                 onSaveToFile: appModel.saveTranscriptToFile,
+                onExportMarkdown: appModel.saveTranscriptMarkdownToFile,
                 onCopyText: appModel.copyTranscriptText
             )
 
@@ -173,6 +178,21 @@ struct ContentView: View {
             get: { appModel.settings.aiEnabled },
             set: { appModel.setAIEnabled($0) }
         )
+    }
+}
+
+private struct AppVersionFooter: View {
+    var body: some View {
+        Text(AppVersion.displayText())
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.bar)
+            .accessibilityLabel("Application version")
+            .accessibilityValue(AppVersion.displayText())
     }
 }
 
@@ -780,6 +800,7 @@ private struct TranscriptFactCheckPanel: View {
     @Binding var aiEnabled: Bool
     let hasTranscriptText: Bool
     let onSaveToFile: () -> Void
+    let onExportMarkdown: () -> Void
     let onCopyText: () -> Void
 
     var body: some View {
@@ -805,6 +826,14 @@ private struct TranscriptFactCheckPanel: View {
                 }
                 .disabled(!hasTranscriptText)
                 .help("Save transcript text to a file")
+
+                Button {
+                    onExportMarkdown()
+                } label: {
+                    Label("ExportMarkdown", systemImage: "doc.richtext")
+                }
+                .disabled(!hasTranscriptText)
+                .help("Export transcript, summary, and fact-check results as Markdown")
 
                 HStack(spacing: 6) {
                     Circle()

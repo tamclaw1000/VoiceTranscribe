@@ -46,6 +46,13 @@ import Testing
     #expect(buffer.droppedCount == 1)
 }
 
+@Test func appVersionFormatsVersionAndBuild() {
+    #expect(AppVersion.displayText(shortVersion: "2.2.9", build: "39") == "Version 2.2.9 (39)")
+    #expect(AppVersion.displayText(shortVersion: "2.2.9", build: nil) == "Version 2.2.9")
+    #expect(AppVersion.displayText(shortVersion: nil, build: "39") == "Build 39")
+    #expect(AppVersion.displayText(shortVersion: " ", build: " ") == "Version unavailable")
+}
+
 @MainActor
 @Test func audioDisplayLevelMakesQuietInputVisible() {
     let quiet = AudioCaptureService.displayLevel(forRMS: 0.01, peak: 0.03)
@@ -190,6 +197,78 @@ import Testing
     #expect(document.finalized.map(\.text) == ["hello", "world"])
     #expect(document.interim == nil)
     #expect(document.plainText == "hello\nworld")
+}
+
+@Test func markdownExportIncludesDetailsRecordingSummaryAndFactChecks() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+    let second = start.addingTimeInterval(3)
+    let end = start.addingTimeInterval(7)
+    let llm = LLMEndpointConfiguration.defaultConfiguration()
+    let factCheck = FactCheckItem(
+        sentence: "The Earth orbits the Sun.",
+        llm: llm,
+        promptTemplate: FactCheckPrompt.defaultTemplate,
+        state: .completed(FactCheckResult(
+            sentence: "The Earth orbits the Sun.",
+            verdict: .supported,
+            confidence: .high,
+            explanation: "This is a basic astronomical fact."
+        )),
+        createdAt: start
+    )
+
+    let markdown = MarkdownExportService.makeDocument(
+        context: MarkdownExportContext(
+            sourceName: "BlackHole 2ch",
+            location: "",
+            startDate: start,
+            endDate: end,
+            exportedAt: end,
+            transcriptionEngine: "FluidAudio",
+            aiEnabled: true,
+            factCheckEnabled: true,
+            llmName: "Local Ollama",
+            llmProvider: "Ollama",
+            llmEndpoint: "http://localhost:11434",
+            llmModel: "igorls/gemma-4-12B-it-heretic-GGUF",
+            factCheckPrompt: "Fact-check {{sentence}}",
+            summaryPrompt: "Summarize this recording.",
+            audioURL: URL(fileURLWithPath: "/tmp/recording.m4a"),
+            transcriptURL: URL(fileURLWithPath: "/tmp/recording.txt"),
+            metadataURL: URL(fileURLWithPath: "/tmp/recording.json")
+        ),
+        finalizedSegments: [
+            TranscriptSegment(text: "The Earth orbits the Sun.", timestamp: start, isFinal: true),
+            TranscriptSegment(text: "Pipe | characters are escaped.", timestamp: second, isFinal: true)
+        ],
+        factChecks: [factCheck],
+        summaryParagraphs: ["The recording discusses astronomy."],
+        calendar: calendar
+    )
+
+    #expect(markdown.contains("# DETAILS"))
+    #expect(markdown.contains("- Location of recording: Not specified"))
+    #expect(markdown.contains("# RECORDING"))
+    #expect(markdown.contains("| date time | length | text | AI result |"))
+    #expect(markdown.contains("| 2026-05-28 07:33:17 | 0:03 | The Earth orbits the Sun. | Verdict: Supported<br>Confidence: High<br>This is a basic astronomical fact. |"))
+    #expect(markdown.contains("Pipe \\| characters are escaped."))
+    #expect(markdown.contains("# SUMMARY"))
+    #expect(markdown.contains("The recording discusses astronomy."))
+    #expect(!markdown.contains("# FACT CHECKS"))
+    #expect(markdown.contains("# AI RESULTS"))
+    #expect(markdown.contains("- AI enabled: Yes"))
+    #expect(markdown.contains("- LLM provider: Ollama"))
+    #expect(markdown.contains("- LLM model: igorls/gemma-4-12B-it-heretic-GGUF"))
+    #expect(markdown.contains("## Summary Result"))
+    #expect(!markdown.contains("## Fact-Check Results"))
+    #expect(markdown.contains("## Fact-Check Prompt"))
+    #expect(markdown.contains("Fact-check {{sentence}}"))
+    #expect(markdown.contains("## Summary Prompt"))
+    #expect(markdown.contains("Summarize this recording."))
+    #expect(markdown.contains("# FILES"))
+    #expect(markdown.contains("`/tmp/recording.m4a`"))
 }
 
 @Test func factCheckSentenceExtractionRequiresCompleteSentences() {

@@ -1181,3 +1181,79 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify the test suite passes.
 - [x] Bump `CFBundleShortVersionString` to `2.2.7`.
 - [x] Bump `CFBundleVersion` to `37`.
+
+## 57. v2.2.8. Markdown Transcript Export
+
+### 57a. Requirements
+
+- [x] Add Markdown export for the current transcript session.
+- [x] Include a `# DETAILS` section with recording time, location, source, duration, transcription engine, and export timestamp.
+- [x] Include a `# RECORDING` section with a Markdown table: `date time | length | text`.
+- [x] Include the current summary when summary text is available.
+- [x] Include fact-check results when fact-check items are available.
+- [x] Include related audio, transcript, and metadata file paths when a recording session exists.
+- [x] Use `Not specified` for location until the app collects recording location explicitly.
+- [x] Escape Markdown table delimiters and line breaks in exported transcript and fact-check text.
+
+### 57b. Implementation
+
+- [x] Add `MarkdownExportService` and `MarkdownExportContext`.
+- [x] Compute transcript row length from the next segment timestamp or session end time.
+- [x] Add `AppModel.saveTranscriptMarkdownToFile()`.
+- [x] Add an Export Markdown button to the combined transcript/fact-check pane.
+- [x] Add unit coverage for Markdown export details, recording table, summary, fact checks, file paths, and table escaping.
+
+### 57c. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.2.8`.
+- [x] Bump `CFBundleVersion` to `38`.
+
+## 58. v2.2.9. Sidebar Version Footer
+
+### 58a. Left Pane UI
+
+- [x] Show the current application version at the bottom of the left source pane.
+- [x] Read version and build from the app bundle instead of hardcoding display text.
+- [x] Keep the source list scrollable while the version footer remains pinned.
+- [x] Add unit coverage for version display formatting.
+
+### 58b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.2.9`.
+- [x] Bump `CFBundleVersion` to `39`.
+
+## 59. v2.3.0. AI Results in Markdown Export
+
+### 59a. Export Content
+
+- [x] Add a dedicated `# AI RESULTS` section to Markdown exports.
+- [x] Include AI enabled and fact-check enabled state.
+- [x] Include selected LLM display name, provider, endpoint, and model.
+- [x] Include generated summary output.
+- [x] Include generated fact-check output.
+- [x] Include the fact-check prompt used at export time.
+- [x] Include the summary prompt used at export time.
+- [x] Exclude API keys from exported Markdown.
+
+### 59b. Tests and Version
+
+- [x] Update Markdown export tests for AI result metadata and prompts.
+- [x] Bump `CFBundleShortVersionString` to `2.3.0`.
+- [x] Bump `CFBundleVersion` to `40`.
+
+## 60. v2.3.1. Single-Table AI Export
+
+### 60a. Markdown Format
+
+- [x] Move sentence-level fact-check output into the main `# RECORDING` table.
+- [x] Add an `AI result` column beside each transcript row.
+- [x] Remove the separate `# FACT CHECKS` table from Markdown export.
+- [x] Remove the duplicate fact-check results list from `# AI RESULTS`.
+- [x] Keep AI endpoint metadata, selected model, and prompts in `# AI RESULTS`.
+- [x] Update requirements to require one recording table for transcript and AI result output.
+
+### 60b. Tests and Version
+
+- [x] Update Markdown export tests for the single-table format.
+- [x] Bump `CFBundleShortVersionString` to `2.3.1`.
+- [x] Bump `CFBundleVersion` to `41`.

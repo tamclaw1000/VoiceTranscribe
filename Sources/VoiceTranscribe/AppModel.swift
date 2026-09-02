@@ -522,6 +522,73 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func saveTranscriptMarkdownToFile() {
+        let text = transcription.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            userMessage = "There is no transcript text to export."
+            return
+        }
+
+        let context = markdownExportContext()
+        let markdown = MarkdownExportService.makeDocument(
+            context: context,
+            finalizedSegments: transcription.segments,
+            factChecks: factCheck.items,
+            summaryParagraphs: summary.paragraphs
+        )
+
+        let panel = NSSavePanel()
+        try? FileManager.default.createDirectory(at: settings.outputFolder, withIntermediateDirectories: true)
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.canCreateDirectories = true
+        panel.directoryURL = settings.outputFolder
+        panel.nameFieldStringValue = "\(FileNamer.startTimestamp(Date()))-\(FileNamer.sourceSlug(transcriptSourceName)).md"
+        panel.message = "Export the current transcript, summary, and fact-check results as Markdown."
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        do {
+            try markdown.write(to: url, atomically: true, encoding: .utf8)
+            Trace.file("transcript.markdownExported", path: url.path, extra: ["chars": markdown.count])
+            userMessage = "Markdown exported to \(url.lastPathComponent)."
+        } catch {
+            Trace.event("transcript.markdownExportError", [
+                "path": url.path,
+                "error": error.localizedDescription
+            ])
+            userMessage = "Could not export Markdown: \(error.localizedDescription)"
+        }
+    }
+
+    private func markdownExportContext() -> MarkdownExportContext {
+        let session = recordingService.activeSession ?? completedRecordings.first
+        let fallbackStart = transcription.segments.first?.timestamp
+        let fallbackEnd = transcription.segments.last?.timestamp
+        let selectedLLM = settings.selectedLLMEndpoint
+
+        return MarkdownExportContext(
+            sourceName: transcriptSourceName,
+            location: "Not specified",
+            startDate: session?.startDate ?? fallbackStart,
+            endDate: session?.endDate ?? fallbackEnd,
+            exportedAt: Date(),
+            transcriptionEngine: transcription.engineName,
+            aiEnabled: settings.aiEnabled,
+            factCheckEnabled: settings.factCheckEnabled,
+            llmName: selectedLLM.displayName,
+            llmProvider: selectedLLM.provider.displayName,
+            llmEndpoint: selectedLLM.endpoint,
+            llmModel: selectedLLM.model,
+            factCheckPrompt: settings.ollamaFactCheckPrompt,
+            summaryPrompt: settings.summaryPrompt,
+            audioURL: session?.audioURL,
+            transcriptURL: session?.transcriptURL,
+            metadataURL: session?.metadataURL
+        )
+    }
+
     func copySummaryText() {
         let text = summary.paragraphs.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {

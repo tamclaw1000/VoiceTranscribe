@@ -264,6 +264,45 @@ Each output should include or reference:
 - Audio format.
 - Transcription engine.
 
+### 9.1 Markdown Export
+
+The app must allow the user to export the current transcript session to a Markdown file.
+
+The Markdown export must include:
+
+- Details section.
+- Recording section.
+- Recording date and time.
+- Recording location when known, or `Not specified` when the app has not collected a location.
+- Recording table with one row per finalized transcript segment.
+
+Required Markdown shape:
+
+```markdown
+# DETAILS
+
+- Time of recording: start and end time
+- Location of recording: location or Not specified
+
+# RECORDING
+
+| date time | length | text | AI result |
+| --- | ---: | --- | --- |
+```
+
+The export should also include these sections when data is available:
+
+- Summary: the current paragraph-form recording summary.
+- AI result column: sentence-level fact-check results shown in the app, aligned with the transcript row they belong to.
+- AI results: generated summary output, active AI endpoint metadata, selected model, and prompts used for generation.
+- Files: paths to related audio, transcript, and metadata files.
+- Audio source and transcription engine.
+- Export timestamp.
+
+The app must escape Markdown table delimiters in transcript and fact-check text so exported tables remain readable.
+
+The Markdown export must not create a second fact-check table. Fact-check results belong in the single `# RECORDING` table. The AI results section must make clear whether AI and fact-checking were enabled at export time, which provider/model was selected, and what fact-check and summary prompts were used. API keys must not be exported.
+
 ## 10. Error Handling
 
 The app must handle:

@@ -1,6 +1,6 @@
 # VoiceTranscribe Implementation Checklist
 
-This checklist converts `VoiceTranscribe-REQUIREMENTS.md` into implementation work for a native Swift macOS application.
+This checklist converts `REQUIREMENTS.md` into implementation work for a native Swift macOS application.
 
 ## 1. Project Setup
 
@@ -1385,3 +1385,49 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify the test suite passes.
 - [x] Bump `CFBundleShortVersionString` to `2.4.4`.
 - [x] Bump `CFBundleVersion` to `47`.
+
+## 67. v2.4.5. Batched Prompt Questions
+
+### 67a. Global Model Batching
+
+- [x] Add a batch AI processing request path for multiple prompt questions targeting the same model.
+- [x] Enable prompt batching when the global prompt model option is active.
+- [x] Keep one visible AI result row per prompt while sending a single combined LLM request.
+- [x] Parse combined JSON batch responses back into individual prompt results.
+- [x] Fall back to per-item failures when a batch response omits a prompt result.
+
+### 67b. Queue Behavior
+
+- [x] Reserve queued batch groups before awaiting the LLM so workers do not split one batch into separate calls.
+- [x] Batch only when every queued prompt question is routed to the same LLM endpoint.
+- [x] Preserve the existing three-worker queue limit for separate sentences and non-batched prompt work.
+
+### 67c. Tests and Version
+
+- [x] Add coverage proving three prompt questions are sent as one batch call.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.5`.
+- [x] Bump `CFBundleVersion` to `48`.
+
+## 68. v2.4.6. Prompt State Substitution
+
+### 68a. Prompt State
+
+- [x] Add `{{prompt-state}}` substitution support.
+- [x] Maintain accumulated state independently for each prompt template.
+- [x] Update prompt state from each successful prompt response.
+- [x] Clear prompt state when AI processing state is reset for a new session.
+
+### 68b. Queue Ordering
+
+- [x] Inject current prompt state immediately before sending each AI request.
+- [x] Serialize concurrent calls for prompt templates that use `{{prompt-state}}`.
+- [x] Preserve batching and three-worker concurrency for prompts that do not use prompt state.
+
+### 68c. Tests and Version
+
+- [x] Add coverage for `{{prompt-state}}` rendering.
+- [x] Add coverage for state accrual between successive prompt calls.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.6`.
+- [x] Bump `CFBundleVersion` to `49`.

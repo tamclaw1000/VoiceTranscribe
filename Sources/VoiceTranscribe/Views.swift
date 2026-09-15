@@ -851,7 +851,7 @@ private struct AIPromptTemplateSettingsView: View {
                     HStack {
                         Text("Template")
                             .font(.caption.weight(.semibold))
-                            .help("Supports {{sentence}}, {{conversation}}, {{last-3}}, {{last-5}}, and {{last-10}}.")
+                            .help("Supports {{sentence}}, {{conversation}}, {{last-3}}, {{last-5}}, {{last-10}}, and {{prompt-state}}.")
                         Spacer()
                         Button("Reset") {
                             appModel.resetAIPromptTemplate(id: promptTemplate.id)

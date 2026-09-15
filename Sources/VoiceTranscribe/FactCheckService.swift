@@ -44,6 +44,7 @@ struct FactCheckItem: Identifiable, Equatable {
     let promptTemplateName: String
     let promptTemplate: String
     let promptContext: FactCheckPromptContext
+    let batchGroupID: String?
     var state: FactCheckState
     let createdAt: Date
 
@@ -55,6 +56,7 @@ struct FactCheckItem: Identifiable, Equatable {
         promptTemplateName: String = AIPromptTemplateConfiguration.defaultName,
         promptTemplate: String,
         promptContext: FactCheckPromptContext = .empty,
+        batchGroupID: String? = nil,
         state: FactCheckState = .queued,
         createdAt: Date = Date()
     ) {
@@ -65,8 +67,24 @@ struct FactCheckItem: Identifiable, Equatable {
         self.promptTemplateName = promptTemplateName
         self.promptTemplate = promptTemplate
         self.promptContext = promptContext
+        self.batchGroupID = batchGroupID
         self.state = state
         self.createdAt = createdAt
+    }
+
+    func withPromptState(_ promptState: String) -> FactCheckItem {
+        FactCheckItem(
+            id: id,
+            sentence: sentence,
+            llm: llm,
+            promptTemplateID: promptTemplateID,
+            promptTemplateName: promptTemplateName,
+            promptTemplate: promptTemplate,
+            promptContext: promptContext.withPromptState(promptState),
+            batchGroupID: batchGroupID,
+            state: state,
+            createdAt: createdAt
+        )
     }
 }
 
@@ -135,6 +153,23 @@ protocol FactCheckService {
         promptTemplate: String,
         promptContext: FactCheckPromptContext
     ) async throws -> FactCheckResult
+
+    func factCheckBatch(items: [FactCheckItem]) async throws -> [UUID: FactCheckResult]
+}
+
+extension FactCheckService {
+    func factCheckBatch(items: [FactCheckItem]) async throws -> [UUID: FactCheckResult] {
+        var results: [UUID: FactCheckResult] = [:]
+        for item in items {
+            results[item.id] = try await factCheck(
+                sentence: item.sentence,
+                llm: item.llm,
+                promptTemplate: item.promptTemplate,
+                promptContext: item.promptContext
+            )
+        }
+        return results
+    }
 }
 
 struct OllamaFactCheckService: FactCheckService {
@@ -160,6 +195,31 @@ struct OllamaFactCheckService: FactCheckService {
             "usedRawResponse": result.rawResponse != nil
         ])
         return result
+    }
+
+    func factCheckBatch(items: [FactCheckItem]) async throws -> [UUID: FactCheckResult] {
+        guard items.count > 1, let llm = items.first?.llm else {
+            var results: [UUID: FactCheckResult] = [:]
+            for item in items {
+                results[item.id] = try await factCheck(
+                    sentence: item.sentence,
+                    llm: item.llm,
+                    promptTemplate: item.promptTemplate,
+                    promptContext: item.promptContext
+                )
+            }
+            return results
+        }
+
+        let prompt = BatchFactCheckPrompt.render(items: items)
+        let raw = try await generate(prompt: prompt, llm: llm, wantsJSON: true, traceEvent: "factCheck.batch.request.started")
+        let results = BatchFactCheckPrompt.parse(raw, items: items)
+        Trace.event("factCheck.batch.response.received", [
+            "provider": llm.provider.rawValue,
+            "items": items.count,
+            "results": results.count
+        ])
+        return results
     }
 
     func generate(
@@ -363,6 +423,7 @@ struct OllamaFactCheckService: FactCheckService {
 enum FactCheckPrompt {
     static let sentencePlaceholder = "{{sentence}}"
     static let conversationPlaceholder = "{{conversation}}"
+    static let promptStatePlaceholder = "{{prompt-state}}"
 
     static let defaultTemplate = """
         You are fact-checking one sentence from a live speech transcript. The transcript may contain recognition errors.
@@ -396,6 +457,7 @@ enum FactCheckPrompt {
 
         let usesSupportedPlaceholder = rendered.contains(sentencePlaceholder)
             || rendered.contains(conversationPlaceholder)
+            || rendered.contains(promptStatePlaceholder)
             || rendered.contains("{{last-3}}")
             || rendered.contains("{{last-3}")
             || rendered.contains("{{last-5}}")
@@ -407,6 +469,10 @@ enum FactCheckPrompt {
         rendered = rendered.replacingOccurrences(
             of: conversationPlaceholder,
             with: promptContext.formattedConversation()
+        )
+        rendered = rendered.replacingOccurrences(
+            of: promptStatePlaceholder,
+            with: promptContext.promptState
         )
         for count in [3, 5, 10] {
             rendered = rendered.replacingOccurrences(
@@ -430,6 +496,10 @@ enum FactCheckPrompt {
         \(sentence)
         """
     }
+
+    static func containsPromptStatePlaceholder(in template: String) -> Bool {
+        template.contains(promptStatePlaceholder)
+    }
 }
 
 struct FactCheckPromptContext: Equatable {
@@ -441,12 +511,13 @@ struct FactCheckPromptContext: Equatable {
     static let empty = FactCheckPromptContext(entries: [])
 
     var entries: [Entry]
+    var promptState: String
 
     var isEmpty: Bool {
-        entries.isEmpty
+        entries.isEmpty && promptState.isEmpty
     }
 
-    init(entries: [Entry]) {
+    init(entries: [Entry], promptState: String = "") {
         self.entries = entries
             .map { entry in
                 Entry(
@@ -455,14 +526,19 @@ struct FactCheckPromptContext: Equatable {
                 )
             }
             .filter { !$0.text.isEmpty }
+        self.promptState = promptState.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    init(segments: [TranscriptSegment]) {
+    init(segments: [TranscriptSegment], promptState: String = "") {
         self.init(entries: segments.flatMap { segment in
             let sentences = FactCheckCoordinator.completeSentences(in: segment.text)
             let texts = sentences.isEmpty ? [segment.text] : sentences
             return texts.map { Entry(timestamp: segment.timestamp, text: $0) }
-        })
+        }, promptState: promptState)
+    }
+
+    func withPromptState(_ promptState: String) -> FactCheckPromptContext {
+        FactCheckPromptContext(entries: entries, promptState: promptState)
     }
 
     func formattedConversation(limit: Int? = nil) -> String {
@@ -484,6 +560,115 @@ struct FactCheckPromptContext: Equatable {
         formatter.dateFormat = "HH:mm:ss"
         return formatter
     }()
+}
+
+enum BatchFactCheckPrompt {
+    private struct Question: Codable {
+        var id: String
+        var name: String
+        var prompt: String
+    }
+
+    private struct RequestPayload: Codable {
+        var questions: [Question]
+    }
+
+    private struct ResponsePayload: Codable {
+        var answers: [Answer]
+    }
+
+    private struct Answer: Codable {
+        var id: String
+        var response: String
+    }
+
+    static func render(items: [FactCheckItem]) -> String {
+        let questions = items.map { item in
+            Question(
+                id: item.id.uuidString,
+                name: item.promptTemplateName,
+                prompt: FactCheckPrompt.render(
+                    template: item.promptTemplate,
+                    sentence: item.sentence,
+                    context: item.promptContext
+                )
+            )
+        }
+        let payload = RequestPayload(questions: questions)
+        let encoded = (try? JSONEncoder().encode(payload))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? #"{"questions":[]}"#
+
+        return """
+        You will answer multiple independent AI processing prompts for the same transcript point.
+
+        For each question, follow that question's prompt exactly. Do not merge questions together. Return only valid JSON matching this schema:
+        {
+          "answers": [
+            {
+              "id": "question id",
+              "response": "complete answer for that question"
+            }
+          ]
+        }
+
+        The response string may contain JSON or plain text if the individual question asks for it.
+
+        Questions:
+        \(encoded)
+        """
+    }
+
+    static func parse(_ raw: String, items: [FactCheckItem]) -> [UUID: FactCheckResult] {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        for candidate in jsonCandidates(from: trimmed) {
+            guard let data = candidate.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode(ResponsePayload.self, from: data) else {
+                continue
+            }
+
+            let responseByID = Dictionary(uniqueKeysWithValues: decoded.answers.map { ($0.id, $0.response) })
+            return Dictionary(uniqueKeysWithValues: items.map { item in
+                let response = responseByID[item.id.uuidString]
+                    ?? "Batch response did not include an answer for \(item.promptTemplateName)."
+                return (item.id, OllamaFactCheckService.parseResult(response, fallbackSentence: item.sentence))
+            })
+        }
+
+        return Dictionary(uniqueKeysWithValues: items.map { item in
+            let result = FactCheckResult(
+                sentence: item.sentence,
+                verdict: .unverifiable,
+                confidence: .low,
+                explanation: trimmed.isEmpty ? "The batch AI response was empty." : trimmed,
+                rawResponse: trimmed.isEmpty ? "The batch AI response was empty." : trimmed
+            )
+            return (item.id, result)
+        })
+    }
+
+    private static func jsonCandidates(from raw: String) -> [String] {
+        var candidates = [raw]
+
+        if raw.hasPrefix("```") {
+            let lines = raw.split(separator: "\n", omittingEmptySubsequences: false)
+            let withoutFence = lines
+                .dropFirst()
+                .dropLast(lines.last?.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("```") == true ? 1 : 0)
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !withoutFence.isEmpty {
+                candidates.append(withoutFence)
+            }
+        }
+
+        if let start = raw.firstIndex(of: "{"),
+           let end = raw.lastIndex(of: "}"),
+           start <= end {
+            candidates.append(String(raw[start...end]))
+        }
+
+        return candidates
+    }
 }
 
 extension OllamaFactCheckService {
@@ -554,6 +739,8 @@ final class FactCheckCoordinator: ObservableObject {
     private var seenSentences = Set<String>()
     private var workerTasks: [Task<Void, Never>] = []
     private var activeWorkerCount = 0
+    private var promptStates: [String: String] = [:]
+    private var activePromptStateTemplateIDs = Set<String>()
     private let maxConcurrentRequests = 3
 
     init(service: FactCheckService = OllamaFactCheckService()) {
@@ -566,6 +753,8 @@ final class FactCheckCoordinator: ObservableObject {
         activeWorkerCount = 0
         items = []
         seenSentences = []
+        promptStates = [:]
+        activePromptStateTemplateIDs = []
         isRunning = false
         lastError = nil
     }
@@ -576,7 +765,8 @@ final class FactCheckCoordinator: ObservableObject {
         promptTemplates: [AIPromptTemplateConfiguration],
         llmEndpoints: [LLMEndpointConfiguration],
         fallbackLLM: LLMEndpointConfiguration,
-        conversation: [TranscriptSegment] = []
+        conversation: [TranscriptSegment] = [],
+        batchPrompts: Bool = false
     ) {
         guard enabled, segment.isFinal else {
             return
@@ -585,10 +775,23 @@ final class FactCheckCoordinator: ObservableObject {
         let conversationSegments = conversation.isEmpty ? [segment] : conversation
         let promptContext = FactCheckPromptContext(segments: conversationSegments)
         let endpointByID = Dictionary(uniqueKeysWithValues: llmEndpoints.map { ($0.id, $0) })
+        let enabledPromptTemplates = promptTemplates.filter(\.isEnabled)
+        let promptRoutes = enabledPromptTemplates.map { promptTemplate in
+            (promptTemplate: promptTemplate, llm: endpointByID[promptTemplate.llmEndpointID] ?? fallbackLLM)
+        }
+        let canBatchPrompts = batchPrompts
+            && promptRoutes.count > 1
+            && Set(promptRoutes.map { $0.llm.id }).count == 1
         for sentence in Self.completeSentences(in: segment.text) {
-            for promptTemplate in promptTemplates where promptTemplate.isEnabled {
-                let llm = endpointByID[promptTemplate.llmEndpointID] ?? fallbackLLM
-                enqueue(sentence: sentence, llm: llm, promptTemplate: promptTemplate, promptContext: promptContext)
+            let batchGroupID = canBatchPrompts ? UUID().uuidString : nil
+            for route in promptRoutes {
+                enqueue(
+                    sentence: sentence,
+                    llm: route.llm,
+                    promptTemplate: route.promptTemplate,
+                    promptContext: promptContext,
+                    batchGroupID: batchGroupID
+                )
             }
         }
     }
@@ -597,7 +800,8 @@ final class FactCheckCoordinator: ObservableObject {
         sentence: String,
         llm: LLMEndpointConfiguration,
         promptTemplate: AIPromptTemplateConfiguration,
-        promptContext: FactCheckPromptContext
+        promptContext: FactCheckPromptContext,
+        batchGroupID: String?
     ) {
         let normalized = Self.normalizedSentence(sentence)
         let dedupeKey = "\(promptTemplate.id)|\(normalized)"
@@ -612,7 +816,8 @@ final class FactCheckCoordinator: ObservableObject {
             promptTemplateID: promptTemplate.id,
             promptTemplateName: promptTemplate.displayName,
             promptTemplate: promptTemplate.template,
-            promptContext: promptContext
+            promptContext: promptContext,
+            batchGroupID: batchGroupID
         )
         items.append(item)
         Trace.event("factCheck.queued", [
@@ -638,7 +843,7 @@ final class FactCheckCoordinator: ObservableObject {
     }
 
     private var hasQueuedItem: Bool {
-        nextQueuedItem() != nil
+        !nextQueuedBatch().isEmpty
     }
 
     private func processQueueWorker() async {
@@ -651,45 +856,115 @@ final class FactCheckCoordinator: ObservableObject {
             }
         }
 
-        while !Task.isCancelled, let next = nextQueuedItem() {
-            update(id: next.id, state: .checking)
+        while !Task.isCancelled {
+            let batch = nextQueuedBatch()
+            guard !batch.isEmpty else {
+                return
+            }
+            let statefulPromptIDs = promptStateTemplateIDs(in: batch)
+            activePromptStateTemplateIDs.formUnion(statefulPromptIDs)
+            let batchWithState = batch.map { item in
+                item.withPromptState(promptStates[item.promptTemplateID] ?? "")
+            }
 
+            for item in batchWithState {
+                update(id: item.id, state: .checking)
+            }
             do {
-                let result = try await service.factCheck(
-                    sentence: next.sentence,
-                    llm: next.llm,
-                    promptTemplate: next.promptTemplate,
-                    promptContext: next.promptContext
-                )
-                guard !Task.isCancelled else { return }
-                update(id: next.id, state: .completed(result))
-                Trace.event("factCheck.completed", [
-                    "id": next.id.uuidString,
-                    "promptTemplate": next.promptTemplateName,
-                    "verdict": result.verdict.rawValue,
-                    "confidence": result.confidence.rawValue
-                ])
+                let results = try await service.factCheckBatch(items: batchWithState)
+                if Task.isCancelled {
+                    releasePromptStateTemplates(statefulPromptIDs)
+                    return
+                }
+                for item in batchWithState {
+                    guard let result = results[item.id] else {
+                        let message = "The AI batch response did not include \(item.promptTemplateName)."
+                        update(id: item.id, state: .failed(message))
+                        continue
+                    }
+                    update(id: item.id, state: .completed(result))
+                    updatePromptStateIfNeeded(for: item, result: result)
+                    Trace.event("factCheck.completed", [
+                        "id": item.id.uuidString,
+                        "promptTemplate": item.promptTemplateName,
+                        "batchSize": batchWithState.count,
+                        "verdict": result.verdict.rawValue,
+                        "confidence": result.confidence.rawValue
+                    ])
+                }
             } catch {
                 guard !Task.isCancelled else { return }
                 let message = error.localizedDescription
                 lastError = message
-                update(id: next.id, state: .failed(message))
-                Trace.event("factCheck.failed", [
-                    "id": next.id.uuidString,
-                    "promptTemplate": next.promptTemplateName,
-                    "error": message
-                ])
+                for item in batchWithState {
+                    update(id: item.id, state: .failed(message))
+                    Trace.event("factCheck.failed", [
+                        "id": item.id.uuidString,
+                        "promptTemplate": item.promptTemplateName,
+                        "batchSize": batchWithState.count,
+                        "error": message
+                    ])
+                }
             }
+            releasePromptStateTemplates(statefulPromptIDs)
         }
     }
 
-    private func nextQueuedItem() -> FactCheckItem? {
-        items.first {
-            if case .queued = $0.state {
+    private func nextQueuedBatch() -> [FactCheckItem] {
+        guard let first = items.first(where: {
+            if case .queued = $0.state, canStart($0) {
+                return true
+            }
+            return false
+        }) else {
+            return []
+        }
+
+        guard let batchGroupID = first.batchGroupID else {
+            return [first]
+        }
+
+        return items.filter { item in
+            guard item.batchGroupID == batchGroupID else {
+                return false
+            }
+            if case .queued = item.state, canStart(item) {
                 return true
             }
             return false
         }
+    }
+
+    private func canStart(_ item: FactCheckItem) -> Bool {
+        guard FactCheckPrompt.containsPromptStatePlaceholder(in: item.promptTemplate) else {
+            return true
+        }
+        return !activePromptStateTemplateIDs.contains(item.promptTemplateID)
+    }
+
+    private func promptStateTemplateIDs(in items: [FactCheckItem]) -> Set<String> {
+        Set(items.compactMap { item in
+            FactCheckPrompt.containsPromptStatePlaceholder(in: item.promptTemplate)
+                ? item.promptTemplateID
+                : nil
+        })
+    }
+
+    private func releasePromptStateTemplates(_ ids: Set<String>) {
+        activePromptStateTemplateIDs.subtract(ids)
+    }
+
+    private func updatePromptStateIfNeeded(for item: FactCheckItem, result: FactCheckResult) {
+        guard FactCheckPrompt.containsPromptStatePlaceholder(in: item.promptTemplate) else {
+            return
+        }
+
+        let nextState = result.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
+        promptStates[item.promptTemplateID] = nextState
+        Trace.event("factCheck.promptState.updated", [
+            "promptTemplate": item.promptTemplateName,
+            "chars": nextState.count
+        ])
     }
 
     private func update(id: UUID, state: FactCheckState) {

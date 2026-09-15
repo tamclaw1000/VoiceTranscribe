@@ -433,6 +433,23 @@ import Testing
     #expect(context.formattedConversation() == "[00:00:42] One.\n[00:00:42] Two.")
 }
 
+@Test func factCheckPromptTemplateReplacesPromptStatePlaceholder() {
+    let context = FactCheckPromptContext(
+        entries: [.init(timestamp: Date(), text: "New item.")],
+        promptState: "- Existing item"
+    )
+
+    let prompt = FactCheckPrompt.render(
+        template: "Update state:\n{{prompt-state}}\nFrom:\n{{sentence}}",
+        sentence: "New item.",
+        context: context
+    )
+
+    #expect(prompt.contains("Update state:\n- Existing item"))
+    #expect(prompt.contains("From:\nNew item."))
+    #expect(!prompt.contains("{{prompt-state}}"))
+}
+
 @Test func ollamaFactCheckParserAcceptsMissingNotes() {
     let raw = """
     {"sentence":"The Earth orbits the Sun.","verdict":"supported","confidence":"high","explanation":"This is a basic astronomical fact."}
@@ -559,6 +576,82 @@ import Testing
 }
 
 @MainActor
+@Test func factCheckCoordinatorBatchesPromptQuestionsWhenEnabled() async {
+    let probe = BatchFactCheckProbe()
+    let service = BatchProbeFactCheckService(probe: probe)
+    let coordinator = FactCheckCoordinator(service: service)
+    let llm = LLMEndpointConfiguration.defaultConfiguration(
+        endpoint: "http://localhost:11434",
+        model: "test-model"
+    )
+    let prompts = (1...3).map { index in
+        AIPromptTemplateConfiguration(
+            id: "prompt-\(index)",
+            name: "Question \(index)",
+            llmEndpointID: llm.id,
+            template: "Answer question \(index): {{sentence}}",
+            isEnabled: true
+        )
+    }
+
+    coordinator.enqueueTranscriptSegment(
+        TranscriptSegment(text: "The Earth orbits the Sun.", isFinal: true),
+        enabled: true,
+        promptTemplates: prompts,
+        llmEndpoints: [llm],
+        fallbackLLM: llm,
+        batchPrompts: true
+    )
+
+    try? await Task.sleep(nanoseconds: 80_000_000)
+
+    let snapshot = await probe.snapshot()
+    #expect(snapshot.singleCalls == 0)
+    #expect(snapshot.batchCalls == 1)
+    #expect(snapshot.batchSizes == [3])
+    #expect(coordinator.items.count == 3)
+    #expect(coordinator.items.allSatisfy {
+        if case .completed = $0.state {
+            return true
+        }
+        return false
+    })
+}
+
+@MainActor
+@Test func factCheckCoordinatorAccruesPromptStateBetweenPromptCalls() async {
+    let probe = PromptStateProbe()
+    let service = PromptStateFactCheckService(probe: probe)
+    let coordinator = FactCheckCoordinator(service: service)
+    let llm = LLMEndpointConfiguration.defaultConfiguration(
+        endpoint: "http://localhost:11434",
+        model: "test-model"
+    )
+    let promptTemplate = AIPromptTemplateConfiguration(
+        id: "action-items",
+        name: "Action Items",
+        llmEndpointID: llm.id,
+        template: "Update prompt-state=\"{{prompt-state}}\" from \"{{sentence}}\".",
+        isEnabled: true
+    )
+
+    coordinator.enqueueTranscriptSegment(
+        TranscriptSegment(text: "First action. Second action.", isFinal: true),
+        enabled: true,
+        promptTemplates: [promptTemplate],
+        llmEndpoints: [llm],
+        fallbackLLM: llm
+    )
+
+    try? await Task.sleep(nanoseconds: 140_000_000)
+
+    let states = await probe.states()
+    #expect(states.count == 2)
+    #expect(states[0] == "")
+    #expect(states[1] == "state-1")
+}
+
+@MainActor
 @Test func factCheckCoordinatorLimitsConcurrentRequestsToThree() async {
     let probe = ConcurrentFactCheckProbe()
     let service = SlowFactCheckService(probe: probe)
@@ -677,6 +770,93 @@ private actor ConcurrentFactCheckProbe {
 
     func maxObserved() -> Int {
         maximum
+    }
+}
+
+private actor BatchFactCheckProbe {
+    private var singleCalls = 0
+    private var batchCalls = 0
+    private var batchSizes: [Int] = []
+
+    func recordSingleCall() {
+        singleCalls += 1
+    }
+
+    func recordBatchCall(size: Int) {
+        batchCalls += 1
+        batchSizes.append(size)
+    }
+
+    func snapshot() -> (singleCalls: Int, batchCalls: Int, batchSizes: [Int]) {
+        (singleCalls, batchCalls, batchSizes)
+    }
+}
+
+private struct BatchProbeFactCheckService: FactCheckService {
+    let probe: BatchFactCheckProbe
+
+    func factCheck(
+        sentence: String,
+        llm: LLMEndpointConfiguration,
+        promptTemplate: String,
+        promptContext: FactCheckPromptContext
+    ) async throws -> FactCheckResult {
+        await probe.recordSingleCall()
+        return FactCheckResult(
+            sentence: sentence,
+            verdict: .supported,
+            confidence: .high,
+            explanation: "Single result."
+        )
+    }
+
+    func factCheckBatch(items: [FactCheckItem]) async throws -> [UUID: FactCheckResult] {
+        await probe.recordBatchCall(size: items.count)
+        return Dictionary(uniqueKeysWithValues: items.map { item in
+            (
+                item.id,
+                FactCheckResult(
+                    sentence: item.sentence,
+                    verdict: .supported,
+                    confidence: .high,
+                    explanation: "Batch result for \(item.promptTemplateName)."
+                )
+            )
+        })
+    }
+}
+
+private actor PromptStateProbe {
+    private var receivedStates: [String] = []
+
+    func record(_ state: String) -> Int {
+        receivedStates.append(state)
+        return receivedStates.count
+    }
+
+    func states() -> [String] {
+        receivedStates
+    }
+}
+
+private struct PromptStateFactCheckService: FactCheckService {
+    let probe: PromptStateProbe
+
+    func factCheck(
+        sentence: String,
+        llm: LLMEndpointConfiguration,
+        promptTemplate: String,
+        promptContext: FactCheckPromptContext
+    ) async throws -> FactCheckResult {
+        let index = await probe.record(promptContext.promptState)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        return FactCheckResult(
+            sentence: sentence,
+            verdict: .unverifiable,
+            confidence: .low,
+            explanation: "state-\(index)",
+            rawResponse: "state-\(index)"
+        )
     }
 }
 

@@ -162,7 +162,8 @@ final class AppModel: ObservableObject {
                 fallbackLLM: self.settings.useGlobalPromptLLM
                     ? self.settings.globalPromptLLMEndpoint
                     : self.settings.selectedLLMEndpoint,
-                conversation: self.transcription.segments
+                conversation: self.transcription.segments,
+                batchPrompts: self.settings.useGlobalPromptLLM
             )
             self.summary.enqueueTranscriptSegment(segment, prompt: self.settings.summaryPrompt)
         }

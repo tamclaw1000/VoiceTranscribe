@@ -1,157 +1,92 @@
-# VoiceTranscribe — Application Review
+# VoiceTranscribe Application Review
 
-**Date:** 2026-05-31  
-**Version:** 1.3.4 (Build 8)  
-**Reviewer:** Oswald (via Codex)
+**Date:** 2026-09-15
+**Version:** 2.4.6 (Build 49)
+**Reviewer:** Codex
 
----
+## Build And Tests
 
-## Build & Tests: ✅ Pass
+- `swift test` passed: 42 tests.
+- `./scripts/package-app.sh` completed and produced `dist/VoiceTranscribe.app`.
+- `git diff --check` passed after the v2.4.6 implementation work.
 
-- `swift build` — clean, 0.13s
-- `swift test` — all 10 tests pass
+## Current Feature State
 
----
+VoiceTranscribe is now a transcription and AI processing app rather than a single-purpose fact-checking prototype. The main flow supports audio source selection, live levels, recording, transcription, recording summaries, Markdown export, and configurable prompt-driven AI processing.
 
-## What's Good
+The main window uses a left source pane with microphone, file-source, and prompt-template controls. The detail area is split into tabs for Live Transcript, Recording Summary, and Recent Recordings. The Live Transcript tab includes copy, save, Markdown export, and auto-scroll controls. The Recording Summary tab includes copy and save controls.
 
-### Architecture Is Clean
+## AI Processing
 
-Single capture path fans out to three independent consumers (listen, record, transcribe) via a consumer registry pattern. Good separation: `AudioCaptureService` owns capture, `RecordingService` owns file I/O, `TranscriptionCoordinator` owns transcription lifecycle. All services are `@MainActor` where appropriate.
+AI processing is controlled by named prompt templates. Each enabled prompt runs against finalized complete transcript sentences. Disabling all prompts disables AI processing.
 
-### SpeechTranscriber Migration Is Solid
+Implemented behavior:
 
-Moving from the broken-on-macOS-26 `SFSpeechRecognizer` to `SpeechAnalyzer` + `SpeechTranscriber` was the right call. Format conversion, model installation, and proper async stream setup are all handled correctly.
+- Multiple named prompt templates with add, edit, remove, reset, and enable controls.
+- Per-prompt model selection.
+- A global prompt-model toggle that routes all prompts through one selected model.
+- Batching of multiple prompt questions into one LLM call when a global prompt model is active.
+- A processing queue capped at three simultaneous LLM calls.
+- Per-template `{{prompt-state}}` accumulation for stateful prompts.
+- Timestamped transcript context placeholders: `{{conversation}}`, `{{last-3}}`, `{{last-5}}`, and `{{last-10}}`.
+- Provider support for Ollama, OpenAI-compatible chat completions, OpenRouter, Anthropic Messages, and Gemini `generateContent`.
+- LLM diagnostics for the selected endpoint using `Hello, what is 10 * 20?`.
 
-### Buffer Copying Discipline
+Historical Swift names still include `FactCheck` in several types and trace events, but visible UI should say "AI Processing".
 
-Every buffer is deep-copied at every boundary — tap → process, process → consumers, consumer → async writer/analyzer. This is correct and necessary for Core Audio tap callbacks.
+## Documentation State
 
-### Trace Infrastructure Is Excellent
+The durable docs now reflect the current app:
 
-JSON-line logging to `/tmp/VoiceTranscribe.log` with synchronous writes and stderr echo covers every lifecycle event, button press, audio level sample, and error. Great for debugging.
+- `README.md`: current overview, features, AI processing, prompt placeholders, exports, build/test/package/launch commands, and logs.
+- `REQUIREMENTS.md`: updated AI processing requirements, tabbed settings, prompt templates, LLM providers, batching, prompt state, auto-scroll, and Markdown export behavior.
+- `IMPLEMENTATION.md`: current versioned implementation checklist through v2.4.6.
+- `AGENTS.md`: current handoff notes, architecture, AI gotchas, key files, and version history.
 
-### Lazy Permission Model Is Well Thought Out
+## Remaining Risks
 
-Device enumeration never triggers a mic prompt. `authorizeFirstRecordingDeviceTouch()` requests once, caches the result, and never re-prompts. Mock provider enables testability.
+Device removal during active capture remains a high-priority runtime risk. The requirements and checklist still call this out as incomplete for listen, record, and transcription paths.
 
-### ObservableObject Forwarding Fix (v1.3.1)
+Transcription backpressure is still incomplete. The app has bounded visualization behavior and non-blocking file writing, but slow transcription consumers can still require more explicit throttling or dropping behavior.
 
-This is documented clearly in AGENTS.md and correctly implemented with Combine subscriptions in `AppModel.init()`.
+Output-path validation and low-disk-space handling remain incomplete. Disk write failures are surfaced, but proactive validation would make long recordings safer.
 
-### Documentation Is Thorough
+Filename collision avoidance is still open. Current timestamp/source basenames are usually unique, but a counter or UUID suffix should be added before overwriting an existing destination.
 
-REQUIREMENTS.md, IMPLEMENTATION.md (with 26 versioned sections), and AGENTS.md provide clear project knowledge.
+`visualizationSensitivity` is still persisted and shown in Settings, but the display-level calculation remains hardcoded in `AudioCaptureService.displayLevel(forRMS:peak:)`.
 
----
+## Test Gaps
 
-## Issues & Gaps
+The current test suite has good coverage for pure utilities, Markdown export, permission behavior, prompt substitution, LLM request routing, prompt enablement, batching, prompt state, and AI queue concurrency.
 
-### 1. Dead Setting: `visualizationSensitivity`
+Higher-risk areas still need integration or UI coverage:
 
-**Severity: Medium**
+- Capture lifecycle with mock audio.
+- Recording file creation and finalization.
+- Transcription pipeline behavior under load.
+- Permission-denied and rebuild/relaunch flows.
+- Device unplug during active capture.
+- Long recording performance.
 
-Defined in `AppSettings`, has a UI slider, but **never applied anywhere**. The display level calculation in `AudioCaptureService.displayLevel(forRMS:peak:)` is hardcoded:
-
-```swift
-return min(pow(blended, 0.35), 1.0)
-```
-
-Needs to accept a sensitivity/multiplier parameter and plumb `settings.visualizationSensitivity` through.
-
-### 2. Device Removal During Active Capture
-
-**Severity: High**
-
-If a USB mic is unplugged during capture, `AVAudioEngine` will likely fire an error or stop the tap. There's no handler for `AVAudioEngineConfigurationChange` or `audioEngineConfigurationChange` notification, and no observer on the selected `AudioDeviceID`. The app would surface a cryptic error or hang rather than cleanly stopping and notifying the user.
-
-### 3. Transcription Buffer Overflow Is Measured but Not Acted On
-
-**Severity: Medium**
-
-`TranscriptionCoordinator.consume()` caps `queuedDuration` at 10s for display purposes, but **continues to feed buffers to the transcription service regardless**. If the analyzer is backlogged, buffers pile up unbounded in memory. The requirements call for explicit backpressure handling. At minimum, the app should drop or throttle buffers when the queue is full.
-
-### 4. Missing Integration Tests
-
-**Severity: Medium**
-
-All 10 tests are unit tests for pure functions and permission behavior. Missing:
-
-- Integration test of capture lifecycle with mock audio
-- Integration test of recording file creation
-- Integration test of transcription pipeline
-- UI tests for permission denied states
-- Performance/stress tests for long recordings
-
-### 5. RecordingService Doesn't Prevent Collisions
-
-**Severity: Low**
-
-`moveReplacingExisting` just clobbers the destination. If two recordings finish in the same second (unlikely but possible with the 7-char end timestamp at tenths precision), one silently overwrites the other. Append a counter or UUID when a collision is detected.
-
-### 6. `analyzer.finalizeAndFinishThroughEndOfInput()` Is Fire-and-Forget
-
-**Severity: Low**
-
-In `AppleSpeechTranscriptionService.stop()`:
-
-```swift
-Task {
-    try? await analyzer?.finalizeAndFinishThroughEndOfInput()
-}
-```
-
-The `stop()` method returns before the analyzer finishes. If a user hits Transcribe again quickly, the new `start()` → `stop()` call sets `self.analyzer = nil` while the previous Task still has a reference. The old analyzer reference survives (retained by the Task), so this is safe, but the finalization is not guaranteed to complete before a new session starts. Consider tracking with a task handle and awaiting it.
-
-### 7. Unchecked Implementation Items
-
-A fair number of checklist items from `IMPLEMENTATION.md` remain open:
-
-| Category | Count Open |
-|----------|-----------|
-| Device removal / error handling | 5 |
-| Testing (integration, UI, stress) | 13 |
-| Performance measurement | 8 |
-| Packaging & release | 5 |
-| Version 1 completion criteria | 10 |
-
-The most impactful gaps: device removal during active capture, low disk space detection, unsupported device format handling, and validation of inaccessible output folders.
-
----
-
-## File-by-File Notes
+## File Notes
 
 | File | Notes |
 |------|-------|
-| `AppModel.swift` | Clean orchestrator. Combine subscriptions correct. `ensureCapture()` permission gating is good. |
-| `AudioCaptureService.swift` | Solid capture. `displayLevel()` needs sensitivity. Metrics handle all PCM formats. Consumer fan-out correct. |
-| `AudioDeviceService.swift` | 2s polling is pragmatic. Transport type labels are complete. Missing: Core Audio property listener notifications for device changes. |
-| `RecordingService.swift` | Async writer on `.utility` queue is correct. PCM config (16-bit interleaved) is VLC-compatible. Missing: collision handling. |
-| `TranscriptionService.swift` | SpeechTranscriber pipeline is well done. Format conversion, model install, async stream orchestration all correct. | 
-| `PermissionService.swift` | Lazy model is well implemented. Mock support enables testing. `openSystemPrivacySettings()` uses correct URL. |
-| `Trace.swift` | Excellent. Synchronous writes, stderr echo, sorted keys. Covers all key events. |
-| `Models.swift` | Clean data types. `TranscriptionBufferSnapshot.fillFraction` is properly clamped. |
-| `Utilities.swift` | `FileNamer` handles slug generation and timestamp formatting correctly. `BoundedBuffer` tracks drops. `TranscriptDocument` merges correctly. |
-| `AppSettings.swift` | Clean `@AppStorage` usage. `visualizationSensitivity` is stored but unused. |
-| `Views.swift` | Good SwiftUI composition. SourceRow is clear. GraphPanel canvas rendering is efficient. TranscriptPanel auto-scroll is smart. SettingsView has proper folder picker. |
-| `Tests/VoiceTranscribeTests.swift` | 10 good unit tests with fake permission provider. Missing integration and UI tests. |
+| `AppModel.swift` | Central orchestrator for source actions, settings mutations, transcript handling, summary generation, AI queue reset, export, and nested object forwarding. |
+| `AudioCaptureService.swift` | Owns AVAudioEngine tap, copied buffer fan-out, metrics, and graph history. `visualizationSensitivity` is not yet applied. |
+| `AudioDeviceService.swift` | CoreAudio enumeration and polling. Active-device removal handling remains the main gap. |
+| `RecordingService.swift` | Async file writing, basename generation, metadata, transcript save path. Needs collision protection and stronger disk-space handling. |
+| `TranscriptionService.swift` | SpeechTranscriber pipeline and FluidAudio integration path. Analyzer ordering and buffer copying remain critical. |
+| `FactCheckService.swift` | Despite the historical name, this owns AI processing clients, provider adapters, prompt substitutions, batching, queueing, and prompt state. |
+| `MarkdownExportService.swift` | Exports details, transcript rows with AI results, summary, AI metadata/prompts, and file references without API keys. |
+| `AppSettings.swift` | Persists audio, transcript, LLM endpoint, prompt template, global prompt model, and auto-scroll settings. |
+| `Views.swift` | Main SwiftUI surface, tabbed detail area, tabbed settings, prompt controls, LLM controls, transcript and summary actions. |
+| `Tests/VoiceTranscribeTests.swift` | 42 tests, including recent AI processing behavior. |
 
----
+## Top Priorities
 
-## Summary
-
-VoiceTranscribe is a well-structured v1 with solid fundamentals. The code quality is good — clean architecture, proper concurrency discipline, good tracing, and clear documentation.
-
-**Top priorities before real-world use:**
-
-1. Handle device removal during active capture (crash risk)
-2. Fix dead `visualizationSensitivity` setting
-3. Add buffer backpressure for transcription overflow (memory risk)
-4. Detect and handle low disk space
-
-**Nice-to-have for v1.4+:**
-
-5. Integration tests for capture/recording/transcription pipelines
-6. Performance benchmarks for long recordings
-7. App icon and notarization
-8. Filename collision avoidance
+1. Handle device removal during active capture.
+2. Add explicit transcription backpressure behavior.
+3. Validate output folders and low disk space before long recordings.
+4. Apply `visualizationSensitivity` to the graph display calculation or remove the setting.
+5. Add integration/UI tests for capture, recording, permissions, and long-running sessions.

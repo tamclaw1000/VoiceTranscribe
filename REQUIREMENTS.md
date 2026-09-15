@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-VoiceTranscribe is a native macOS application written in Swift. It enumerates available sound-input sources, lets the user listen to input visually, record selected sources, and display a live transcript while audio is being processed.
+VoiceTranscribe is a native macOS application written in Swift. It enumerates available sound-input sources, lets the user listen to input visually, record selected sources, display a live transcript while audio is being processed, summarize recordings, and run configurable AI processing prompts over finalized transcript text.
 
 The application must prioritize a fast, responsive user experience. Audio capture should run continuously once a source is active, using internal buffering so UI updates, file writes, and transcription work do not block real-time input.
 
@@ -14,6 +14,8 @@ The application must prioritize a fast, responsive user experience. Audio captur
 - Record audio continuously using an internal buffer.
 - Write recording and transcription output to files with start and end timestamps.
 - Display a live transcript as speech is processed.
+- Run one or more user-configured AI processing prompts against finalized complete sentences.
+- Support multiple configurable LLM endpoints and provider API shapes.
 - Keep capture, visualization, file writing, and transcription responsive under normal desktop load.
 
 ## 3. Target Platform
@@ -158,7 +160,8 @@ The live transcript view must:
 - Update incrementally without blocking audio capture.
 - Preserve finalized text once confirmed.
 - Visually distinguish active/interim text from finalized text.
-- Preserve the user's scroll position as new transcript text is appended.
+- Allow the user to toggle whether the transcript automatically scrolls to the newest text.
+- Preserve the user's scroll position as new transcript text is appended when auto-scroll is off or the user is reviewing earlier text.
 - Show a clear empty state before speech is detected.
 
 Optional transcript metadata:
@@ -176,7 +179,7 @@ The summary section must:
 
 - Accrue finalized transcript sentences as they arrive.
 - Organize accumulated sentences into readable paragraphs.
-- Update without blocking audio capture, recording, transcription, or fact-checking.
+- Update without blocking audio capture, recording, transcription, or AI processing.
 - Reset when a new transcription session starts.
 - Provide an editable summary prompt or instruction field in Settings.
 - Persist the summary prompt across launches.
@@ -293,15 +296,15 @@ Required Markdown shape:
 The export should also include these sections when data is available:
 
 - Summary: the current paragraph-form recording summary.
-- AI result column: sentence-level fact-check results shown in the app, aligned with the transcript row they belong to.
-- AI results: generated summary output, active AI endpoint metadata, selected model, and prompts used for generation.
+- AI result column: sentence-level AI processing results shown in the app, aligned with the transcript row they belong to.
+- AI results: generated summary output, effective AI endpoint metadata, selected or global prompt model, and prompt templates used for generation.
 - Files: paths to related audio, transcript, and metadata files.
 - Audio source and transcription engine.
 - Export timestamp.
 
-The app must escape Markdown table delimiters in transcript and fact-check text so exported tables remain readable.
+The app must escape Markdown table delimiters in transcript and AI result text so exported tables remain readable.
 
-The Markdown export must not create a second fact-check table. Fact-check results belong in the single `# RECORDING` table. The AI results section must make clear whether AI and fact-checking were enabled at export time, which provider/model was selected, and what fact-check and summary prompts were used. API keys must not be exported.
+The Markdown export must not create a second AI result table. AI processing results belong in the single `# RECORDING` table. The AI results section must make clear whether any AI prompts were enabled at export time, which provider/model was selected or globally overridden, and what AI processing and summary prompts were used. API keys must not be exported.
 
 ## 10. Error Handling
 
@@ -321,15 +324,13 @@ Errors should be presented in plain language and should not crash the app.
 
 ## 11. Settings
 
-The app should include settings for:
+The app should include tabbed settings for:
 
-- Default output folder.
-- Preferred audio format.
-- Preferred transcription engine.
-- Whether to save transcripts automatically.
-- Whether to start transcription automatically when recording.
-- Visualization sensitivity.
-- Retention or cleanup policy for temporary buffers.
+- General: default output folder, preferred audio format, preferred transcription engine, transcript saving behavior, recording/transcription startup behavior, visualization sensitivity, permissions, and summary prompt.
+- LLM Models: multiple named model endpoints, selected diagnostic model, API type, base endpoint URL, model name, optional API key, provider-specific test actions, and a global prompt-model toggle and picker.
+- Prompt Templates: multiple named prompts, enabled state, editable template text, reset action, add/remove controls, and per-prompt model assignment when the global prompt model is off.
+- Live Transcript: an auto-scroll toggle for following speech as transcript text is appended.
+- Retention or cleanup policy for temporary buffers, if temporary files are used.
 
 ## 12. Non-Goals for Initial Version
 
@@ -386,50 +387,54 @@ Each source row shows:
 - A Record checkbox with filename display when active.
 - Active state indicator.
 
-## 15. v2.0.0 Fact-Check Pane
+## 15. AI Processing
 
-### 15.1 Fact-Check Pane Placement
+### 15.1 AI Processing Placement
 
-The main window must display transcript and fact-check output in a single combined pane.
+The main window must display transcript and AI processing output in a single combined Live Transcript tab.
 
 The combined pane should:
 
 - Remain visually associated with the live transcript.
-- Show fact-check results in the same order as the transcribed sentences.
+- Show AI processing results in the same order as the transcribed sentences.
 - Preserve results after the related transcript sentence is finalized.
-- Clearly show pending, checking, completed, and failed states.
-- Avoid blocking live transcription, audio capture, or recording.
+- Clearly show pending, running, completed, and failed states.
+- Avoid blocking live transcription, audio capture, recording, or summary updates.
 
 Transcript entries must use a grid layout:
 
 - Line 1: Timestamp | Audio Source | Text
-- Line 2: blank timestamp/source columns | Fact Check result
+- Line 2: blank timestamp/source columns | AI Processing result
 
-### 15.2 Sentence-Level Fact Checking
+### 15.2 Sentence-Level AI Processing
 
-The app must fact-check finalized transcript sentences.
+The app must process finalized transcript sentences with every enabled prompt template.
 
 When a full sentence is available:
 
 - Extract the finalized sentence from the transcript stream.
-- Queue the sentence for fact-checking.
-- Send only complete sentences to the fact-check engine.
-- Do not fact-check live partial transcript fragments.
-- Do not synthesize punctuation on partial transcript fragments just to make them eligible for fact-checking.
-- Avoid repeatedly fact-checking the same sentence.
-- Display the original sentence with its fact-check result.
+- Queue the sentence for every enabled prompt template.
+- Send only complete sentences to the AI processing engine.
+- Do not process live partial transcript fragments.
+- Do not synthesize punctuation on partial transcript fragments just to make them eligible for AI processing.
+- Avoid repeatedly processing the same sentence for the same prompt template.
+- Display one visible AI result row per prompt template and sentence.
+- Treat disabling all prompt templates as disabling AI processing.
+- Limit AI processing to no more than three simultaneous LLM calls.
+- When the global prompt model is enabled and multiple prompt templates target the same sentence, combine those questions into one LLM request and map the response back to individual prompt rows.
 
-Fact-check output should include:
+AI processing output may include:
 
-- Verdict, such as supported, questionable, false, unverifiable, or not factual.
-- Short explanation.
-- Confidence or certainty level when available.
-- Any notable assumptions or missing context.
-- Error state if the local model fails or times out.
+- Fact-check verdicts and explanations.
+- Summaries.
+- Action items.
+- Topic extraction.
+- Any other user-defined prompt result.
+- Error state if the configured model fails or times out.
 
-### 15.3 Local LLM Fact-Check Engine
+### 15.3 LLM Endpoint Configuration
 
-Fact-checking must use a local Ollama-compatible LLM endpoint by default.
+AI processing must use a local Ollama-compatible LLM endpoint by default.
 
 The default local model must be:
 
@@ -442,24 +447,37 @@ The app must:
 - Connect to a local Ollama HTTP API endpoint.
 - Allow the user to configure multiple named LLM endpoints.
 - Store each LLM endpoint with a display name, API type, base endpoint URL, model name, and optional API key.
-- Allow the user to select which configured LLM endpoint is used for fact-check requests.
-- Use the selected LLM endpoint and model for fact-check requests.
-- Support Ollama-compatible, OpenAI-compatible, Anthropic Messages, and Gemini generateContent API shapes.
-- Let the user view and edit the prompt template used for fact-check requests.
-- Persist the prompt template across launches.
-- Provide a way to restore the default fact-check prompt.
-- Keep fact-checking local by default.
-- Process fact-check requests asynchronously.
-- Limit concurrent fact-check requests so the UI remains responsive.
-- Surface a clear status when Ollama is unavailable, the model is missing, or a request times out.
+- Allow each prompt template to select its own LLM endpoint.
+- Allow a global prompt model override that routes every enabled prompt through the same selected endpoint.
+- Support Ollama-compatible, OpenAI-compatible, OpenRouter, Anthropic Messages, and Gemini generateContent API shapes.
+- Keep OpenAI-compatible request bodies minimal for compatibility with proxies and routers.
+- Keep AI processing local by default.
+- Process AI requests asynchronously.
+- Limit concurrent AI requests so the UI remains responsive.
+- Surface a clear status when an endpoint is unavailable, the model is missing, authentication fails, or a request times out.
 
-### 15.4 Fact-Check Prompt Requirements
+### 15.4 Prompt Template Requirements
 
-Each fact-check request must use a prompt that asks the model to evaluate the factual correctness of the transcribed sentence.
+Prompt templates must be named, user-editable in Settings, persisted across launches, and resettable to defaults. If an edited prompt does not include any supported placeholder, the app must append the transcript sentence automatically before sending the request.
 
-The prompt must be user-editable in Settings. If the edited prompt does not include a sentence placeholder, the app must append the transcript sentence automatically before sending the request to Ollama.
+Supported prompt placeholders:
 
-The prompt must instruct the model to:
+- `{{sentence}}`: the current finalized sentence.
+- `{{conversation}}`: the full finalized transcript context, timestamped line by line.
+- `{{last-3}}`: the last three timestamped transcript entries.
+- `{{last-5}}`: the last five timestamped transcript entries.
+- `{{last-10}}`: the last ten timestamped transcript entries.
+- `{{prompt-state}}`: the previous successful output for this prompt template.
+
+Conversation context entries must be annotated with timestamps, for example:
+
+```text
+[10:46:12] Some finalized sentence.
+```
+
+`{{prompt-state}}` must be maintained independently for each prompt template, updated from successful responses, cleared when a new AI processing session starts, and injected immediately before each request. Prompt templates that use `{{prompt-state}}` must be serialized per template so successive calls do not race with stale state.
+
+A fact-check-style prompt should instruct the model to:
 
 - Treat the sentence as a possibly imperfect transcript.
 - Check only factual claims present in the sentence.
@@ -487,5 +505,4 @@ Recommended response schema:
 - Should transcription be local-only, Apple Speech-based, cloud-based, or pluggable?
 - Should `HHMMSSS` in the filename mean seven total characters or millisecond precision?
 - Should transcripts be saved automatically for every recording or only when Transcribe is active?
-- Should fact-check results be saved alongside transcripts and recording metadata?
-- Should the fact-check pane support multiple named prompt presets?
+- Should AI processing results be saved in recording metadata sidecars in addition to Markdown exports?

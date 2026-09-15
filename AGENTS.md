@@ -148,6 +148,11 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.4 | 47 | Added timestamped conversation prompt placeholders for AI processing |
+| 2.4.3 | 46 | Fixed LLM model list refresh, enabled new prompts by default, and added a global model override for all prompts |
+| 2.4.2 | 45 | Fixed prompt-template mutations to refresh the UI immediately |
+| 2.4.1 | 44 | Moved Settings options into General, LLM Models, and Prompt Templates tabs |
+| 2.4.0 | 43 | Added multiple named AI prompt templates, per-prompt model selection, prompt toggles, three-call AI queue, and transcript auto-scroll |
 | 2.3.2 | 42 | Simplified OpenAI-compatible LLM requests, normalized saved endpoint strings, and moved main panels into tabs |
 | 2.3.1 | 41 | Combined transcript and AI result output into one Markdown recording table |
 | 2.3.0 | 40 | Added AI result metadata, prompts, summary, and fact-check output to Markdown exports |

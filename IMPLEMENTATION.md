@@ -1280,3 +1280,108 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify the test suite passes.
 - [x] Bump `CFBundleShortVersionString` to `2.3.2`.
 - [x] Bump `CFBundleVersion` to `42`.
+
+## 62. v2.4.0. Multi-Prompt AI Processing
+
+### 62a. Prompt Templates
+
+- [x] Add multiple named AI prompt templates.
+- [x] Store prompt templates with their enabled state and selected LLM endpoint.
+- [x] Migrate the existing fact-check prompt into the new prompt-template list.
+- [x] Add prompt-template creation, deletion, editing, reset, and model assignment controls.
+
+### 62b. Main Window Layout
+
+- [x] Replace the global AI on/off switch with per-prompt toggles.
+- [x] Move prompt toggles into the left pane with Microphones and File Sources.
+- [x] Split Settings into general settings, LLM model configuration, and prompt-template columns.
+- [x] Rename visible fact-check labels to AI Processing.
+- [x] Add a persisted transcript auto-scroll toggle.
+
+### 62c. Processing Queue
+
+- [x] Fan out each finalized complete sentence to every enabled prompt template.
+- [x] Route each prompt through its selected LLM endpoint.
+- [x] Deduplicate queued work by prompt template and normalized sentence.
+- [x] Process queued AI calls with up to three concurrent workers.
+
+### 62d. Tests and Version
+
+- [x] Add coverage for prompt-template enablement, multi-prompt fan-out, and three-call concurrency.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.0`.
+- [x] Bump `CFBundleVersion` to `43`.
+
+## 63. v2.4.1. Tabbed Settings Options
+
+### 63a. Settings Layout
+
+- [x] Replace the three-column Settings sheet with General, LLM Models, and Prompt Templates tabs.
+- [x] Apply the same tabbed options layout to the standalone Settings window.
+- [x] Keep each tab vertically scrollable so long model and prompt lists fit smaller screens.
+
+### 63b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.1`.
+- [x] Bump `CFBundleVersion` to `44`.
+
+## 64. v2.4.2. Prompt Template Refresh Fix
+
+### 64a. Prompt Template UI
+
+- [x] Forward `AppSettings.objectWillChange` through `AppModel` so settings-backed lists refresh.
+- [x] Route prompt-template add, remove, reset, and edit actions through `AppModel`.
+- [x] Explicitly publish prompt-template mutations before writing computed `@AppStorage` JSON state.
+- [x] Trace prompt-template add, remove, and reset actions.
+
+### 64b. Tests and Version
+
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.2`.
+- [x] Bump `CFBundleVersion` to `45`.
+
+## 65. v2.4.3. Global Prompt Model Override
+
+### 65a. Model and Prompt Refresh
+
+- [x] Route LLM endpoint add, edit, remove, and selected-model changes through `AppModel`.
+- [x] Explicitly publish LLM endpoint mutations before writing computed `@AppStorage` JSON state.
+- [x] Enable newly added prompt templates by default.
+
+### 65b. Global Prompt Model
+
+- [x] Add a persisted toggle for using one model across all prompts.
+- [x] Add a global prompt-model picker in the LLM Models tab.
+- [x] Disable per-prompt model pickers while the global prompt model is active.
+- [x] Route live AI processing and Markdown export metadata through the effective prompt model.
+- [x] Show global model status in the prompt sidebar and prompt editor.
+
+### 65c. Tests and Version
+
+- [x] Add coverage for global model override routing.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.3`.
+- [x] Bump `CFBundleVersion` to `46`.
+
+## 66. v2.4.4. Conversation Prompt Placeholders
+
+### 66a. Prompt Context
+
+- [x] Add a timestamped AI prompt context built from finalized transcript segments.
+- [x] Split finalized transcript segments into timestamped sentence entries for prompt context.
+- [x] Pass conversation context into every queued AI processing request.
+
+### 66b. Template Substitutions
+
+- [x] Keep `{{sentence}}` substitution support.
+- [x] Add `{{conversation}}` substitution for the full timestamped transcript context.
+- [x] Add `{{last-3}}`, `{{last-5}}`, and `{{last-10}}` substitutions for recent timestamped transcript entries.
+- [x] Accept the malformed `{{last-3}` variant as a forgiving alias.
+- [x] Add prompt editor tooltip documentation for supported placeholders.
+
+### 66c. Tests and Version
+
+- [x] Add coverage for conversation, last-N, malformed last-3, and segment splitting substitutions.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.4`.
+- [x] Bump `CFBundleVersion` to `47`.

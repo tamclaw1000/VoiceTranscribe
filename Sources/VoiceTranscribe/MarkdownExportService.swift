@@ -90,8 +90,7 @@ enum MarkdownExportService {
         lines.append("")
         lines.append("# AI RESULTS")
         lines.append("")
-        lines.append("- AI enabled: \(context.aiEnabled ? "Yes" : "No")")
-        lines.append("- Fact checking enabled: \(context.factCheckEnabled ? "Yes" : "No")")
+        lines.append("- AI processing enabled: \(context.aiEnabled ? "Yes" : "No")")
         lines.append("- LLM endpoint: \(context.llmName)")
         lines.append("- LLM provider: \(context.llmProvider)")
         lines.append("- LLM base URL: \(context.llmEndpoint)")
@@ -104,7 +103,7 @@ enum MarkdownExportService {
             lines.append(contentsOf: summary)
         }
 
-        appendPromptSection(title: "Fact-Check Prompt", prompt: context.factCheckPrompt, to: &lines)
+        appendPromptSection(title: "AI Processing Prompts", prompt: context.factCheckPrompt, to: &lines)
         appendPromptSection(title: "Summary Prompt", prompt: context.summaryPrompt, to: &lines)
     }
 
@@ -177,15 +176,18 @@ enum MarkdownExportService {
     }
 
     private static func factCheckText(for item: FactCheckItem) -> String {
+        let prefix = item.promptTemplateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? ""
+            : "\(item.promptTemplateName): "
         switch item.state {
         case .queued:
-            return "Queued"
+            return "\(prefix)Queued"
         case .checking:
-            return "Checking"
+            return "\(prefix)Checking"
         case .failed(let message):
-            return "Failed: \(message)"
+            return "\(prefix)Failed: \(message)"
         case .completed(let result):
-            return result.displayText
+            return "\(prefix)\(result.displayText)"
         }
     }
 

@@ -40,7 +40,10 @@ struct FactCheckItem: Identifiable, Equatable {
     let id: UUID
     let sentence: String
     let llm: LLMEndpointConfiguration
+    let promptTemplateID: String
+    let promptTemplateName: String
     let promptTemplate: String
+    let promptContext: FactCheckPromptContext
     var state: FactCheckState
     let createdAt: Date
 
@@ -48,14 +51,20 @@ struct FactCheckItem: Identifiable, Equatable {
         id: UUID = UUID(),
         sentence: String,
         llm: LLMEndpointConfiguration,
+        promptTemplateID: String = AIPromptTemplateConfiguration.defaultID,
+        promptTemplateName: String = AIPromptTemplateConfiguration.defaultName,
         promptTemplate: String,
+        promptContext: FactCheckPromptContext = .empty,
         state: FactCheckState = .queued,
         createdAt: Date = Date()
     ) {
         self.id = id
         self.sentence = sentence
         self.llm = llm
+        self.promptTemplateID = promptTemplateID
+        self.promptTemplateName = promptTemplateName
         self.promptTemplate = promptTemplate
+        self.promptContext = promptContext
         self.state = state
         self.createdAt = createdAt
     }
@@ -120,14 +129,28 @@ struct FactCheckResult: Codable, Equatable {
 }
 
 protocol FactCheckService {
-    func factCheck(sentence: String, llm: LLMEndpointConfiguration, promptTemplate: String) async throws -> FactCheckResult
+    func factCheck(
+        sentence: String,
+        llm: LLMEndpointConfiguration,
+        promptTemplate: String,
+        promptContext: FactCheckPromptContext
+    ) async throws -> FactCheckResult
 }
 
 struct OllamaFactCheckService: FactCheckService {
     var timeout: TimeInterval = 60
 
-    func factCheck(sentence: String, llm: LLMEndpointConfiguration, promptTemplate: String) async throws -> FactCheckResult {
-        let prompt = FactCheckPrompt.render(template: promptTemplate, sentence: sentence)
+    func factCheck(
+        sentence: String,
+        llm: LLMEndpointConfiguration,
+        promptTemplate: String,
+        promptContext: FactCheckPromptContext
+    ) async throws -> FactCheckResult {
+        let prompt = FactCheckPrompt.render(
+            template: promptTemplate,
+            sentence: sentence,
+            context: promptContext
+        )
         let raw = try await generate(prompt: prompt, llm: llm, wantsJSON: true, traceEvent: "factCheck.request.started")
         let result = Self.parseResult(raw, fallbackSentence: sentence)
         Trace.event("factCheck.response.received", [
@@ -339,6 +362,7 @@ struct OllamaFactCheckService: FactCheckService {
 
 enum FactCheckPrompt {
     static let sentencePlaceholder = "{{sentence}}"
+    static let conversationPlaceholder = "{{conversation}}"
 
     static let defaultTemplate = """
         You are fact-checking one sentence from a live speech transcript. The transcript may contain recognition errors.
@@ -358,11 +382,45 @@ enum FactCheckPrompt {
         {{sentence}}
         """
 
-    static func render(template: String, sentence: String) -> String {
+    static func render(
+        template: String,
+        sentence: String,
+        context: FactCheckPromptContext = .empty
+    ) -> String {
         let trimmed = template.trimmingCharacters(in: .whitespacesAndNewlines)
         let base = trimmed.isEmpty ? defaultTemplate : template
-        if base.contains(sentencePlaceholder) {
-            return base.replacingOccurrences(of: sentencePlaceholder, with: sentence)
+        let promptContext = context.isEmpty
+            ? FactCheckPromptContext(entries: [.init(timestamp: Date(), text: sentence)])
+            : context
+        var rendered = base
+
+        let usesSupportedPlaceholder = rendered.contains(sentencePlaceholder)
+            || rendered.contains(conversationPlaceholder)
+            || rendered.contains("{{last-3}}")
+            || rendered.contains("{{last-3}")
+            || rendered.contains("{{last-5}}")
+            || rendered.contains("{{last-5}")
+            || rendered.contains("{{last-10}}")
+            || rendered.contains("{{last-10}")
+
+        rendered = rendered.replacingOccurrences(of: sentencePlaceholder, with: sentence)
+        rendered = rendered.replacingOccurrences(
+            of: conversationPlaceholder,
+            with: promptContext.formattedConversation()
+        )
+        for count in [3, 5, 10] {
+            rendered = rendered.replacingOccurrences(
+                of: "{{last-\(count)}}",
+                with: promptContext.formattedConversation(limit: count)
+            )
+            rendered = rendered.replacingOccurrences(
+                of: "{{last-\(count)}",
+                with: promptContext.formattedConversation(limit: count)
+            )
+        }
+
+        if usesSupportedPlaceholder {
+            return rendered
         }
 
         return """
@@ -372,6 +430,60 @@ enum FactCheckPrompt {
         \(sentence)
         """
     }
+}
+
+struct FactCheckPromptContext: Equatable {
+    struct Entry: Equatable {
+        var timestamp: Date
+        var text: String
+    }
+
+    static let empty = FactCheckPromptContext(entries: [])
+
+    var entries: [Entry]
+
+    var isEmpty: Bool {
+        entries.isEmpty
+    }
+
+    init(entries: [Entry]) {
+        self.entries = entries
+            .map { entry in
+                Entry(
+                    timestamp: entry.timestamp,
+                    text: entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            }
+            .filter { !$0.text.isEmpty }
+    }
+
+    init(segments: [TranscriptSegment]) {
+        self.init(entries: segments.flatMap { segment in
+            let sentences = FactCheckCoordinator.completeSentences(in: segment.text)
+            let texts = sentences.isEmpty ? [segment.text] : sentences
+            return texts.map { Entry(timestamp: segment.timestamp, text: $0) }
+        })
+    }
+
+    func formattedConversation(limit: Int? = nil) -> String {
+        let selectedEntries: [Entry]
+        if let limit {
+            selectedEntries = Array(entries.suffix(max(0, limit)))
+        } else {
+            selectedEntries = entries
+        }
+
+        return selectedEntries
+            .map { "[\(Self.timestampFormatter.string(from: $0.timestamp))] \($0.text)" }
+            .joined(separator: "\n")
+    }
+
+    private static let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 }
 
 extension OllamaFactCheckService {
@@ -440,15 +552,18 @@ final class FactCheckCoordinator: ObservableObject {
 
     private let service: FactCheckService
     private var seenSentences = Set<String>()
-    private var processingTask: Task<Void, Never>?
+    private var workerTasks: [Task<Void, Never>] = []
+    private var activeWorkerCount = 0
+    private let maxConcurrentRequests = 3
 
     init(service: FactCheckService = OllamaFactCheckService()) {
         self.service = service
     }
 
     func reset() {
-        processingTask?.cancel()
-        processingTask = nil
+        workerTasks.forEach { $0.cancel() }
+        workerTasks = []
+        activeWorkerCount = 0
         items = []
         seenSentences = []
         isRunning = false
@@ -458,33 +573,51 @@ final class FactCheckCoordinator: ObservableObject {
     func enqueueTranscriptSegment(
         _ segment: TranscriptSegment,
         enabled: Bool,
-        llm: LLMEndpointConfiguration,
-        promptTemplate: String
+        promptTemplates: [AIPromptTemplateConfiguration],
+        llmEndpoints: [LLMEndpointConfiguration],
+        fallbackLLM: LLMEndpointConfiguration,
+        conversation: [TranscriptSegment] = []
     ) {
         guard enabled, segment.isFinal else {
             return
         }
 
+        let conversationSegments = conversation.isEmpty ? [segment] : conversation
+        let promptContext = FactCheckPromptContext(segments: conversationSegments)
+        let endpointByID = Dictionary(uniqueKeysWithValues: llmEndpoints.map { ($0.id, $0) })
         for sentence in Self.completeSentences(in: segment.text) {
-            enqueue(sentence: sentence, llm: llm, promptTemplate: promptTemplate)
+            for promptTemplate in promptTemplates where promptTemplate.isEnabled {
+                let llm = endpointByID[promptTemplate.llmEndpointID] ?? fallbackLLM
+                enqueue(sentence: sentence, llm: llm, promptTemplate: promptTemplate, promptContext: promptContext)
+            }
         }
     }
 
-    private func enqueue(sentence: String, llm: LLMEndpointConfiguration, promptTemplate: String) {
+    private func enqueue(
+        sentence: String,
+        llm: LLMEndpointConfiguration,
+        promptTemplate: AIPromptTemplateConfiguration,
+        promptContext: FactCheckPromptContext
+    ) {
         let normalized = Self.normalizedSentence(sentence)
-        guard !normalized.isEmpty, !seenSentences.contains(normalized) else {
+        let dedupeKey = "\(promptTemplate.id)|\(normalized)"
+        guard !normalized.isEmpty, !seenSentences.contains(dedupeKey) else {
             return
         }
 
-        seenSentences.insert(normalized)
+        seenSentences.insert(dedupeKey)
         let item = FactCheckItem(
             sentence: sentence,
             llm: llm,
-            promptTemplate: promptTemplate
+            promptTemplateID: promptTemplate.id,
+            promptTemplateName: promptTemplate.displayName,
+            promptTemplate: promptTemplate.template,
+            promptContext: promptContext
         )
         items.append(item)
         Trace.event("factCheck.queued", [
             "id": item.id.uuidString,
+            "promptTemplate": promptTemplate.displayName,
             "provider": llm.provider.rawValue,
             "model": llm.model,
             "sentence": sentence.prefix(120)
@@ -493,18 +626,30 @@ final class FactCheckCoordinator: ObservableObject {
     }
 
     private func startProcessing() {
-        guard processingTask == nil else {
-            return
-        }
-
-        processingTask = Task { [weak self] in
-            guard let self else { return }
-            await self.processQueue()
+        while activeWorkerCount < maxConcurrentRequests, hasQueuedItem {
+            activeWorkerCount += 1
+            isRunning = true
+            let task = Task { [weak self] in
+                guard let self else { return }
+                await self.processQueueWorker()
+            }
+            workerTasks.append(task)
         }
     }
 
-    private func processQueue() async {
-        isRunning = true
+    private var hasQueuedItem: Bool {
+        nextQueuedItem() != nil
+    }
+
+    private func processQueueWorker() async {
+        defer {
+            activeWorkerCount = max(0, activeWorkerCount - 1)
+            workerTasks.removeAll { $0.isCancelled }
+            if activeWorkerCount == 0 {
+                workerTasks = []
+                isRunning = false
+            }
+        }
 
         while !Task.isCancelled, let next = nextQueuedItem() {
             update(id: next.id, state: .checking)
@@ -513,12 +658,14 @@ final class FactCheckCoordinator: ObservableObject {
                 let result = try await service.factCheck(
                     sentence: next.sentence,
                     llm: next.llm,
-                    promptTemplate: next.promptTemplate
+                    promptTemplate: next.promptTemplate,
+                    promptContext: next.promptContext
                 )
                 guard !Task.isCancelled else { return }
                 update(id: next.id, state: .completed(result))
                 Trace.event("factCheck.completed", [
                     "id": next.id.uuidString,
+                    "promptTemplate": next.promptTemplateName,
                     "verdict": result.verdict.rawValue,
                     "confidence": result.confidence.rawValue
                 ])
@@ -527,12 +674,13 @@ final class FactCheckCoordinator: ObservableObject {
                 let message = error.localizedDescription
                 lastError = message
                 update(id: next.id, state: .failed(message))
-                Trace.event("factCheck.failed", ["id": next.id.uuidString, "error": message])
+                Trace.event("factCheck.failed", [
+                    "id": next.id.uuidString,
+                    "promptTemplate": next.promptTemplateName,
+                    "error": message
+                ])
             }
         }
-
-        isRunning = false
-        processingTask = nil
     }
 
     private func nextQueuedItem() -> FactCheckItem? {

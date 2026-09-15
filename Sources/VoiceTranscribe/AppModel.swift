@@ -153,18 +153,25 @@ final class AppModel: ObservableObject {
         transcription = TranscriptionCoordinator(service: AppModel.makeInitialService())
         transcription.onFinalSegment = { [weak self] segment in
             guard let self else { return }
-            let llm = self.settings.selectedLLMEndpoint
+            let enabledPromptTemplates = self.settings.effectiveEnabledAIPromptTemplates
             self.factCheck.enqueueTranscriptSegment(
                 segment,
                 enabled: self.settings.isFactCheckActive,
-                llm: llm,
-                promptTemplate: self.settings.ollamaFactCheckPrompt
+                promptTemplates: enabledPromptTemplates,
+                llmEndpoints: self.settings.llmEndpoints,
+                fallbackLLM: self.settings.useGlobalPromptLLM
+                    ? self.settings.globalPromptLLMEndpoint
+                    : self.settings.selectedLLMEndpoint,
+                conversation: self.transcription.segments
             )
             self.summary.enqueueTranscriptSegment(segment, prompt: self.settings.summaryPrompt)
         }
 
         // Propagate nested ObservableObject changes so SwiftUI re-renders
-        // when captureService, recordingService, or transcription state changes.
+        // when settings and child services change.
+        settings.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
         captureService.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
@@ -206,45 +213,142 @@ final class AppModel: ObservableObject {
     }
 
     func setAIEnabled(_ enabled: Bool) {
-        guard settings.aiEnabled != enabled else {
-            return
+        objectWillChange.send()
+        var promptTemplates = settings.aiPromptTemplates
+        for index in promptTemplates.indices {
+            promptTemplates[index].isEnabled = enabled
         }
-
-        settings.aiEnabled = enabled
-        Trace.event("settings.aiToggled", ["enabled": enabled])
-        if !enabled {
+        settings.aiPromptTemplates = promptTemplates
+        Trace.event("settings.aiPromptsToggled", ["enabled": enabled])
+        if !settings.isFactCheckActive {
             factCheck.reset()
         }
     }
 
-    func testSelectedLLMFactCheck() {
-        guard settings.aiEnabled else {
-            userMessage = "AI is disabled. Turn on AI to test fact-checking."
+    func updateLLMEndpoint(_ endpoint: LLMEndpointConfiguration) {
+        objectWillChange.send()
+        settings.updateLLMEndpoint(endpoint)
+    }
+
+    func addLLMEndpoint() {
+        objectWillChange.send()
+        let beforeCount = settings.llmEndpoints.count
+        settings.addLLMEndpoint()
+        let afterCount = settings.llmEndpoints.count
+        Trace.event("settings.llmAdded", [
+            "beforeCount": beforeCount,
+            "afterCount": afterCount
+        ])
+    }
+
+    func removeLLMEndpoint(id: String) {
+        let llmName = settings.llmEndpoint(id: id)?.displayName ?? "unknown"
+        objectWillChange.send()
+        settings.removeLLMEndpoint(id: id)
+        Trace.event("settings.llmRemoved", ["llm": llmName])
+    }
+
+    func setSelectedLLMEndpointID(_ id: String) {
+        objectWillChange.send()
+        settings.selectedLLMEndpointID = id
+        let llmName = settings.llmEndpoint(id: id)?.displayName ?? "unknown"
+        Trace.event("settings.selectedLLMChanged", ["llm": llmName])
+    }
+
+    func setUseGlobalPromptLLM(_ enabled: Bool) {
+        objectWillChange.send()
+        settings.useGlobalPromptLLM = enabled
+        Trace.event("settings.globalPromptLLMToggled", [
+            "enabled": enabled,
+            "llm": settings.globalPromptLLMEndpoint.displayName
+        ])
+    }
+
+    func setGlobalPromptLLMEndpointID(_ id: String) {
+        objectWillChange.send()
+        settings.globalPromptLLMEndpointID = id
+        let llmName = settings.llmEndpoint(id: id)?.displayName ?? "unknown"
+        Trace.event("settings.globalPromptLLMChanged", ["llm": llmName])
+    }
+
+    func setAIPromptEnabled(id: String, enabled: Bool) {
+        guard var promptTemplate = settings.aiPromptTemplates.first(where: { $0.id == id }) else {
             return
         }
 
+        objectWillChange.send()
+        promptTemplate.isEnabled = enabled
+        settings.updateAIPromptTemplate(promptTemplate)
+        Trace.event("settings.aiPromptToggled", [
+            "promptTemplate": promptTemplate.displayName,
+            "enabled": enabled
+        ])
+
+        if !settings.isFactCheckActive {
+            factCheck.reset()
+        }
+    }
+
+    func updateAIPromptTemplate(_ promptTemplate: AIPromptTemplateConfiguration) {
+        objectWillChange.send()
+        settings.updateAIPromptTemplate(promptTemplate)
+        if !settings.isFactCheckActive {
+            factCheck.reset()
+        }
+    }
+
+    func addAIPromptTemplate() {
+        objectWillChange.send()
+        let beforeCount = settings.aiPromptTemplates.count
+        settings.addAIPromptTemplate()
+        let afterCount = settings.aiPromptTemplates.count
+        Trace.event("settings.aiPromptAdded", [
+            "beforeCount": beforeCount,
+            "afterCount": afterCount
+        ])
+    }
+
+    func removeAIPromptTemplate(id: String) {
+        let promptName = settings.aiPromptTemplates.first { $0.id == id }?.displayName ?? "unknown"
+        objectWillChange.send()
+        settings.removeAIPromptTemplate(id: id)
+        Trace.event("settings.aiPromptRemoved", ["promptTemplate": promptName])
+        if !settings.isFactCheckActive {
+            factCheck.reset()
+        }
+    }
+
+    func resetAIPromptTemplate(id: String) {
+        objectWillChange.send()
+        settings.resetAIPromptTemplate(id: id)
+        let promptName = settings.aiPromptTemplates.first { $0.id == id }?.displayName ?? "unknown"
+        Trace.event("settings.aiPromptReset", ["promptTemplate": promptName])
+    }
+
+    func testSelectedLLMFactCheck() {
         Task { [weak self] in
             guard let self else { return }
-            let llm = self.settings.selectedLLMEndpoint
+            let promptTemplate = self.settings.enabledAIPromptTemplates.first
+                ?? self.settings.aiPromptTemplates.first
+                ?? AIPromptTemplateConfiguration.defaultConfiguration(llmEndpointID: self.settings.selectedLLMEndpointID)
+            let llm = self.settings.effectiveLLMEndpoint(for: promptTemplate)
             do {
                 let result = try await OllamaFactCheckService(timeout: 15).factCheck(
                     sentence: "The Earth orbits the Sun.",
                     llm: llm,
-                    promptTemplate: self.settings.ollamaFactCheckPrompt
+                    promptTemplate: promptTemplate.template,
+                    promptContext: FactCheckPromptContext(entries: [
+                        .init(timestamp: Date(), text: "The Earth orbits the Sun.")
+                    ])
                 )
-                self.userMessage = "\(llm.displayName) fact-check succeeded: \(result.verdict.displayName)."
+                self.userMessage = "\(promptTemplate.displayName) on \(llm.displayName) succeeded: \(result.verdict.displayName)."
             } catch {
-                self.userMessage = "\(llm.displayName) fact-check failed: \(error.localizedDescription)"
+                self.userMessage = "\(promptTemplate.displayName) on \(llm.displayName) failed: \(error.localizedDescription)"
             }
         }
     }
 
     func testSelectedLLMPlainPrompt() {
-        guard settings.aiEnabled else {
-            userMessage = "AI is disabled. Turn on AI to test the selected LLM."
-            return
-        }
-
         Task { [weak self] in
             guard let self else { return }
             let llm = self.settings.selectedLLMEndpoint
@@ -346,9 +450,7 @@ final class AppModel: ObservableObject {
                 Trace.event("transcribe.capture.ensuring", ["source": source.name])
                 try await self.ensureCapture(for: source)
                 self.transcriptSourceName = source.name
-                if self.settings.isFactCheckActive {
-                    self.factCheck.reset()
-                }
+                self.factCheck.reset()
                 self.summary.reset()
                 Trace.event("transcribe.service.starting", [
                     "source": source.name,
@@ -543,7 +645,7 @@ final class AppModel: ObservableObject {
         panel.canCreateDirectories = true
         panel.directoryURL = settings.outputFolder
         panel.nameFieldStringValue = "\(FileNamer.startTimestamp(Date()))-\(FileNamer.sourceSlug(transcriptSourceName)).md"
-        panel.message = "Export the current transcript, summary, and fact-check results as Markdown."
+        panel.message = "Export the current transcript, summary, and AI processing results as Markdown."
 
         guard panel.runModal() == .OK, let url = panel.url else {
             return
@@ -566,7 +668,15 @@ final class AppModel: ObservableObject {
         let session = recordingService.activeSession ?? completedRecordings.first
         let fallbackStart = transcription.segments.first?.timestamp
         let fallbackEnd = transcription.segments.last?.timestamp
-        let selectedLLM = settings.selectedLLMEndpoint
+        let selectedLLM = settings.useGlobalPromptLLM
+            ? settings.globalPromptLLMEndpoint
+            : settings.selectedLLMEndpoint
+        let promptTemplateDetails = settings.effectiveAIPromptTemplates
+            .map { promptTemplate -> String in
+                let llm = settings.effectiveLLMEndpoint(for: promptTemplate)
+                return "\(promptTemplate.displayName) [\(promptTemplate.isEnabled ? "enabled" : "disabled")] on \(llm.displayName):\n\(promptTemplate.template)"
+            }
+            .joined(separator: "\n\n")
 
         return MarkdownExportContext(
             sourceName: transcriptSourceName,
@@ -575,13 +685,13 @@ final class AppModel: ObservableObject {
             endDate: session?.endDate ?? fallbackEnd,
             exportedAt: Date(),
             transcriptionEngine: transcription.engineName,
-            aiEnabled: settings.aiEnabled,
-            factCheckEnabled: settings.factCheckEnabled,
+            aiEnabled: settings.isFactCheckActive,
+            factCheckEnabled: settings.isFactCheckActive,
             llmName: selectedLLM.displayName,
             llmProvider: selectedLLM.provider.displayName,
             llmEndpoint: selectedLLM.endpoint,
             llmModel: selectedLLM.model,
-            factCheckPrompt: settings.ollamaFactCheckPrompt,
+            factCheckPrompt: promptTemplateDetails,
             summaryPrompt: settings.summaryPrompt,
             audioURL: session?.audioURL,
             transcriptURL: session?.transcriptURL,
@@ -713,9 +823,7 @@ final class AppModel: ObservableObject {
 
             do {
                 try await self.transcription.start()
-                if self.settings.isFactCheckActive {
-                    self.factCheck.reset()
-                }
+                self.factCheck.reset()
                 self.summary.reset()
                 Trace.event("fileTranscribe.started", [
                     "file": source.name,

@@ -152,6 +152,21 @@ import Testing
     #expect(sanitized[0].model == "openrouter/free")
 }
 
+@Test func llmEndpointConfigurationNormalizesEscapedSlashesFromStoredDefaults() {
+    let sanitized = LLMEndpointConfiguration.sanitized([
+        LLMEndpointConfiguration(
+            id: "openrouter",
+            name: "OpenRouter",
+            provider: .openRouter,
+            endpoint: #"https:\/\/openrouter.ai\/api\/v1"#,
+            model: #"openrouter\/free"#
+        )
+    ])
+
+    #expect(sanitized[0].endpoint == "https://openrouter.ai/api/v1")
+    #expect(sanitized[0].model == "openrouter/free")
+}
+
 @Test func legacyLocalLLMEndpointDefaultsToOllamaProvider() throws {
     let data = """
     {"id":"local","name":"Local","endpoint":"http://localhost:11434","model":"model"}

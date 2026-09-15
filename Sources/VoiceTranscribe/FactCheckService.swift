@@ -198,7 +198,7 @@ struct OllamaFactCheckService: FactCheckService {
         return request
     }
 
-    private func openAICompatibleRequest(llm: LLMEndpointConfiguration, prompt: String, wantsJSON: Bool) throws -> URLRequest {
+    private func openAICompatibleRequest(llm: LLMEndpointConfiguration, prompt: String, wantsJSON _: Bool) throws -> URLRequest {
         let url = chatCompletionsURL(from: llm.endpointURL)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -212,9 +212,7 @@ struct OllamaFactCheckService: FactCheckService {
             model: llm.model,
             messages: [
                 OpenAIChatMessage(role: "user", content: prompt)
-            ],
-            temperature: 0.1,
-            responseFormat: wantsJSON ? OpenAIResponseFormat(type: "json_object") : nil
+            ]
         ))
         return request
     }
@@ -622,24 +620,11 @@ private struct OllamaGenerateResponse: Decodable {
 private struct OpenAIChatCompletionRequest: Encodable {
     let model: String
     let messages: [OpenAIChatMessage]
-    let temperature: Double
-    let responseFormat: OpenAIResponseFormat?
-
-    private enum CodingKeys: String, CodingKey {
-        case model
-        case messages
-        case temperature
-        case responseFormat = "response_format"
-    }
 }
 
 private struct OpenAIChatMessage: Codable {
     let role: String
     let content: String
-}
-
-private struct OpenAIResponseFormat: Encodable {
-    let type: String
 }
 
 private struct OpenAIChatCompletionResponse: Decodable {

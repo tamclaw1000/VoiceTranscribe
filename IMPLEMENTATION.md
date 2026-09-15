@@ -1257,3 +1257,26 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Update Markdown export tests for the single-table format.
 - [x] Bump `CFBundleShortVersionString` to `2.3.1`.
 - [x] Bump `CFBundleVersion` to `41`.
+
+## 61. v2.3.2. LLM Compatibility and Tabbed Panels
+
+### 61a. LLM Compatibility
+
+- [x] Normalize literal escaped slashes in saved LLM endpoint and model values.
+- [x] Simplify OpenAI-compatible request bodies to `model` plus `messages`.
+- [x] Stop sending protocol-level `response_format` and `temperature` parameters to OpenAI-compatible providers.
+- [x] Verify configured OpenRouter, LiteLLM, DeepSeek, and OpenAI endpoints respond successfully with the simplified request shape.
+
+### 61b. Main Window Layout
+
+- [x] Shrink the voice chart height.
+- [x] Move Live Transcript into a tab.
+- [x] Move Recording Summary into a tab.
+- [x] Move Recent Recordings into a tab with an empty state.
+
+### 61c. Tests and Version
+
+- [x] Add coverage for escaped-slash LLM configuration normalization.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.3.2`.
+- [x] Bump `CFBundleVersion` to `42`.

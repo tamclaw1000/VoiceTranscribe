@@ -169,8 +169,10 @@ struct LLMEndpointConfiguration: Identifiable, Codable, Equatable {
             var copy = endpoint
             copy.id = copy.id.trimmingCharacters(in: .whitespacesAndNewlines)
             copy.name = copy.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            copy.endpoint = copy.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-            copy.model = copy.model.trimmingCharacters(in: .whitespacesAndNewlines)
+            copy.endpoint = normalizedStoredString(copy.endpoint)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            copy.model = normalizedStoredString(copy.model)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             copy.apiKey = copy.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
 
             if copy.id.isEmpty || seenIDs.contains(copy.id) {
@@ -213,6 +215,14 @@ struct LLMEndpointConfiguration: Identifiable, Codable, Equatable {
         if host.isEmpty || host == "opencode.ai" || host == "api.openai.com" || host == "localhost" || host == "127.0.0.1" {
             endpoint = LLMProviderKind.openRouter.defaultEndpoint
         }
+    }
+
+    private static func normalizedStoredString(_ value: String) -> String {
+        value.replacingOccurrences(
+            of: #"\\+/"#,
+            with: "/",
+            options: .regularExpression
+        )
     }
 }
 

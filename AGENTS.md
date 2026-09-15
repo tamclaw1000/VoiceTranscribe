@@ -148,6 +148,11 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.3.2 | 42 | Simplified OpenAI-compatible LLM requests, normalized saved endpoint strings, and moved main panels into tabs |
+| 2.3.1 | 41 | Combined transcript and AI result output into one Markdown recording table |
+| 2.3.0 | 40 | Added AI result metadata, prompts, summary, and fact-check output to Markdown exports |
+| 2.2.9 | 39 | Added a pinned version footer to the source sidebar |
+| 2.2.8 | 38 | Added Markdown export for transcript sessions |
 | 2.2.7 | 37 | Fixed permission-flow relaunch to start a fresh app instance |
 | 2.2.6 | 36 | Split the macOS menu Settings window into the same two-column options layout |
 | 2.2.5 | 35 | Made the AI toggle visible in the main settings bar and transcript header |

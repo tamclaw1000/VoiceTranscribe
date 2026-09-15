@@ -5,6 +5,13 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var showSettings = false
+    @State private var selectedDetailTab: DetailTab = .transcript
+
+    private enum DetailTab: Hashable {
+        case transcript
+        case summary
+        case recordings
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -132,44 +139,54 @@ struct ContentView: View {
     private var mainDetail: some View {
         VStack(spacing: 0) {
             GraphPanel(snapshot: appModel.captureService.visualization)
-                .frame(height: 240)
-                .padding()
+                .frame(height: 140)
+                .padding(.horizontal)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
 
             Divider()
 
-            TranscriptFactCheckPanel(
-                finalized: appModel.transcription.segments,
-                interim: appModel.transcription.interimSegment,
-                factChecks: appModel.factCheck.items,
-                sourceName: appModel.transcriptSourceName,
-                isFactCheckEnabled: appModel.settings.isFactCheckActive,
-                isFactChecking: appModel.factCheck.isRunning,
-                buffer: appModel.transcription.bufferSnapshot,
-                isTranscribing: appModel.transcription.isTranscribing,
-                aiEnabled: aiEnabledBinding,
-                hasTranscriptText: !appModel.transcription.transcriptText
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .isEmpty,
-                onSaveToFile: appModel.saveTranscriptToFile,
-                onExportMarkdown: appModel.saveTranscriptMarkdownToFile,
-                onCopyText: appModel.copyTranscriptText
-            )
+            TabView(selection: $selectedDetailTab) {
+                TranscriptFactCheckPanel(
+                    finalized: appModel.transcription.segments,
+                    interim: appModel.transcription.interimSegment,
+                    factChecks: appModel.factCheck.items,
+                    sourceName: appModel.transcriptSourceName,
+                    isFactCheckEnabled: appModel.settings.isFactCheckActive,
+                    isFactChecking: appModel.factCheck.isRunning,
+                    buffer: appModel.transcription.bufferSnapshot,
+                    isTranscribing: appModel.transcription.isTranscribing,
+                    aiEnabled: aiEnabledBinding,
+                    hasTranscriptText: !appModel.transcription.transcriptText
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty,
+                    onSaveToFile: appModel.saveTranscriptToFile,
+                    onExportMarkdown: appModel.saveTranscriptMarkdownToFile,
+                    onCopyText: appModel.copyTranscriptText
+                )
+                .tabItem {
+                    Label("Live Transcript", systemImage: "text.alignleft")
+                }
+                .tag(DetailTab.transcript)
 
-            Divider()
+                SummaryPanel(
+                    paragraphs: appModel.summary.paragraphs,
+                    sentenceCount: appModel.summary.sentenceCount,
+                    onSaveToFile: appModel.saveSummaryToFile,
+                    onCopyText: appModel.copySummaryText
+                )
+                .tabItem {
+                    Label("Recording Summary", systemImage: "doc.text.magnifyingglass")
+                }
+                .tag(DetailTab.summary)
 
-            SummaryPanel(
-                paragraphs: appModel.summary.paragraphs,
-                sentenceCount: appModel.summary.sentenceCount,
-                onSaveToFile: appModel.saveSummaryToFile,
-                onCopyText: appModel.copySummaryText
-            )
-            .frame(minHeight: 130, maxHeight: 190)
-
-            if !appModel.completedRecordings.isEmpty {
-                Divider()
                 RecentRecordingsView(recordings: appModel.completedRecordings)
-                    .frame(height: 140)
+                    .tabItem {
+                        Label("Recent Recordings", systemImage: "folder")
+                    }
+                    .tag(DetailTab.recordings)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -1146,21 +1163,30 @@ private struct RecentRecordingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Recent Recordings", systemImage: "folder")
                 .font(.headline)
-            List(recordings) { recording in
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(recording.basename)
-                            .font(.caption.weight(.semibold))
-                        Text(recording.audioURL.path)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+            if recordings.isEmpty {
+                ContentUnavailableView(
+                    "No Recent Recordings",
+                    systemImage: "folder",
+                    description: Text("Completed recordings will appear here.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 180)
+            } else {
+                List(recordings) { recording in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(recording.basename)
+                                .font(.caption.weight(.semibold))
+                            Text(recording.audioURL.path)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(recording.duration, format: .number.precision(.fractionLength(1)))
+                            .font(.caption)
                     }
-                    Spacer()
-                    Text(recording.duration, format: .number.precision(.fractionLength(1)))
-                        .font(.caption)
                 }
+                .listStyle(.plain)
             }
-            .listStyle(.plain)
         }
         .padding()
     }

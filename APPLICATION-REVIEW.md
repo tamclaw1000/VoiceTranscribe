@@ -1,7 +1,7 @@
 # VoiceTranscribe Application Review
 
-**Date:** 2026-09-15
-**Version:** 2.4.6 (Build 49)
+**Date:** 2026-09-16
+**Version:** 2.4.14 (Build 57)
 **Reviewer:** Codex
 
 ## Build And Tests
@@ -12,9 +12,9 @@
 
 ## Current Feature State
 
-VoiceTranscribe is now a transcription and AI processing app rather than a single-purpose fact-checking prototype. The main flow supports audio source selection, live levels, recording, transcription, recording summaries, Markdown export, and configurable prompt-driven AI processing.
+VoiceTranscribe is now a transcription and AI processing app rather than a single-purpose fact-checking prototype. The main flow supports audio source selection, live levels, recording, transcription, live FluidAudio speaker diarization, recording summaries, Markdown export, and configurable prompt-driven AI processing.
 
-The main window uses a left source pane with microphone, file-source, and prompt-template controls. The detail area is split into tabs for Live Transcript, Recording Summary, and Recent Recordings. The Live Transcript tab includes copy, save, Markdown export, and auto-scroll controls. The Recording Summary tab includes copy and save controls.
+The main window uses a left source pane with microphone, file-source, and prompt-template controls. The detail area is split into tabs for Live Transcript, Recording Summary, and Recent Recordings. The Live Transcript tab includes timestamp, speaker, a current-speaker status, text, AI results, copy, save, Markdown export, and auto-scroll controls. The Recording Summary tab includes copy and save controls.
 
 ## AI Processing
 
@@ -38,9 +38,9 @@ Historical Swift names still include `FactCheck` in several types and trace even
 
 The durable docs now reflect the current app:
 
-- `README.md`: current overview, features, AI processing, prompt placeholders, exports, build/test/package/launch commands, and logs.
-- `REQUIREMENTS.md`: updated AI processing requirements, tabbed settings, prompt templates, LLM providers, batching, prompt state, auto-scroll, and Markdown export behavior.
-- `IMPLEMENTATION.md`: current versioned implementation checklist through v2.4.6.
+- `README.md`: current overview, features, live speaker diarization, AI processing, prompt placeholders, exports, build/test/package/launch commands, and logs.
+- `REQUIREMENTS.md`: updated AI processing requirements, tabbed settings, prompt templates, LLM providers, batching, prompt state, auto-scroll, speaker diarization, and Markdown export behavior.
+- `IMPLEMENTATION.md`: current versioned implementation checklist through v2.4.8.
 - `AGENTS.md`: current handoff notes, architecture, AI gotchas, key files, and version history.
 
 ## Remaining Risks
@@ -48,6 +48,8 @@ The durable docs now reflect the current app:
 Device removal during active capture remains a high-priority runtime risk. The requirements and checklist still call this out as incomplete for listen, record, and transcription paths.
 
 Transcription backpressure is still incomplete. The app has bounded visualization behavior and non-blocking file writing, but slow transcription consumers can still require more explicit throttling or dropping behavior.
+
+Speaker labels are currently best-effort live annotations based on the latest finalized FluidAudio diarization update. More precise overlap alignment needs transcript segment audio offsets or word-level timing.
 
 Output-path validation and low-disk-space handling remain incomplete. Disk write failures are surfaced, but proactive validation would make long recordings safer.
 
@@ -64,6 +66,7 @@ Higher-risk areas still need integration or UI coverage:
 - Capture lifecycle with mock audio.
 - Recording file creation and finalization.
 - Transcription pipeline behavior under load.
+- Diarization model availability, alignment accuracy, and long-session performance.
 - Permission-denied and rebuild/relaunch flows.
 - Device unplug during active capture.
 - Long recording performance.
@@ -77,8 +80,9 @@ Higher-risk areas still need integration or UI coverage:
 | `AudioDeviceService.swift` | CoreAudio enumeration and polling. Active-device removal handling remains the main gap. |
 | `RecordingService.swift` | Async file writing, basename generation, metadata, transcript save path. Needs collision protection and stronger disk-space handling. |
 | `TranscriptionService.swift` | SpeechTranscriber pipeline and FluidAudio integration path. Analyzer ordering and buffer copying remain critical. |
+| `DiarizationService.swift` | FluidAudio LS-EEND speaker timeline processing and live transcript speaker annotation. Alignment remains best-effort without audio-offset transcript segments. |
 | `FactCheckService.swift` | Despite the historical name, this owns AI processing clients, provider adapters, prompt substitutions, batching, queueing, and prompt state. |
-| `MarkdownExportService.swift` | Exports details, transcript rows with AI results, summary, AI metadata/prompts, and file references without API keys. |
+| `MarkdownExportService.swift` | Exports details, transcript rows with speaker labels and AI results, speaker timeline, summary, AI metadata/prompts, and file references without API keys. |
 | `AppSettings.swift` | Persists audio, transcript, LLM endpoint, prompt template, global prompt model, and auto-scroll settings. |
 | `Views.swift` | Main SwiftUI surface, tabbed detail area, tabbed settings, prompt controls, LLM controls, transcript and summary actions. |
 | `Tests/VoiceTranscribeTests.swift` | 42 tests, including recent AI processing behavior. |
@@ -87,6 +91,6 @@ Higher-risk areas still need integration or UI coverage:
 
 1. Handle device removal during active capture.
 2. Add explicit transcription backpressure behavior.
-3. Validate output folders and low disk space before long recordings.
-4. Apply `visualizationSensitivity` to the graph display calculation or remove the setting.
-5. Add integration/UI tests for capture, recording, permissions, and long-running sessions.
+3. Add audio-offset transcript timing to improve speaker/transcript alignment.
+4. Validate output folders and low disk space before long recordings.
+5. Apply `visualizationSensitivity` to the graph display calculation or remove the setting.

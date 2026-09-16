@@ -13,6 +13,7 @@ struct MarkdownExportContext {
     var llmProvider: String
     var llmEndpoint: String
     var llmModel: String
+    var promptStates: [MarkdownExportPromptState] = []
     var factCheckPrompt: String
     var summaryPrompt: String
     var audioURL: URL?
@@ -20,10 +21,16 @@ struct MarkdownExportContext {
     var metadataURL: URL?
 }
 
+struct MarkdownExportPromptState: Equatable {
+    var promptName: String
+    var state: String
+}
+
 enum MarkdownExportService {
     static func makeDocument(
         context: MarkdownExportContext,
         finalizedSegments: [TranscriptSegment],
+        speakerSegments: [SpeakerDiarizationSegment] = [],
         factChecks: [FactCheckItem],
         summaryParagraphs: [String],
         calendar: Calendar = .current
@@ -42,17 +49,22 @@ enum MarkdownExportService {
 
         lines.append("# RECORDING")
         lines.append("")
-        lines.append("| date time | length | text | AI result |")
-        lines.append("| --- | ---: | --- | --- |")
+        lines.append("| date time | length | speaker | text | AI result |")
+        lines.append("| --- | ---: | --- | --- | --- |")
         for (index, segment) in finalizedSegments.enumerated() {
             let end = nextTimestamp(after: index, in: finalizedSegments) ?? context.endDate
             let length = segmentLengthText(start: segment.timestamp, end: end)
             let aiResult = factCheckText(for: segment, factChecks: factChecks)
-            lines.append("| \(tableCell(dateTimeText(segment.timestamp, calendar: calendar))) | \(tableCell(length)) | \(tableCell(segment.text)) | \(tableCell(aiResult)) |")
+            lines.append("| \(tableCell(dateTimeText(segment.timestamp, calendar: calendar))) | \(tableCell(length)) | \(tableCell(segment.speakerLabel ?? "")) | \(tableCell(segment.text)) | \(tableCell(aiResult)) |")
         }
         if finalizedSegments.isEmpty {
-            lines.append("| | | No finalized transcript text. | |")
+            lines.append("| | | | No finalized transcript text. | |")
         }
+
+        appendSpeakerTimeline(
+            to: &lines,
+            speakerSegments: speakerSegments
+        )
 
         let summary = summaryParagraphs
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -103,8 +115,56 @@ enum MarkdownExportService {
             lines.append(contentsOf: summary)
         }
 
+        appendPromptStates(context.promptStates, to: &lines)
         appendPromptSection(title: "AI Processing Prompts", prompt: context.factCheckPrompt, to: &lines)
         appendPromptSection(title: "Summary Prompt", prompt: context.summaryPrompt, to: &lines)
+    }
+
+    private static func appendSpeakerTimeline(
+        to lines: inout [String],
+        speakerSegments: [SpeakerDiarizationSegment]
+    ) {
+        guard !speakerSegments.isEmpty else {
+            return
+        }
+
+        lines.append("")
+        lines.append("# SPEAKERS")
+        lines.append("")
+        lines.append("| start | end | speaker | confidence |")
+        lines.append("| ---: | ---: | --- | ---: |")
+        for segment in speakerSegments.sorted(by: { $0.startTime < $1.startTime }) {
+            lines.append("| \(tableCell(timeOffsetText(segment.startTime))) | \(tableCell(timeOffsetText(segment.endTime))) | \(tableCell(segment.speakerLabel)) | \(tableCell(segment.confidence.map { String(format: "%.2f", $0) } ?? "")) |")
+        }
+    }
+
+    private static func appendPromptStates(_ promptStates: [MarkdownExportPromptState], to lines: inout [String]) {
+        let states = promptStates.compactMap { promptState -> MarkdownExportPromptState? in
+            let state = promptState.state.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !state.isEmpty else {
+                return nil
+            }
+            let name = promptState.promptName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return MarkdownExportPromptState(
+                promptName: name.isEmpty ? "Unnamed Prompt" : name,
+                state: state
+            )
+        }
+
+        guard !states.isEmpty else {
+            return
+        }
+
+        lines.append("")
+        lines.append("## Prompt States")
+        for promptState in states {
+            lines.append("")
+            lines.append("### \(promptState.promptName)")
+            lines.append("")
+            lines.append("```text")
+            lines.append(promptState.state)
+            lines.append("```")
+        }
     }
 
     private static func appendPromptSection(title: String, prompt: String, to lines: inout [String]) {
@@ -165,6 +225,10 @@ enum MarkdownExportService {
             return String(format: "%d:%02d:%02d", hours, minutes, seconds)
         }
         return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private static func timeOffsetText(_ offset: TimeInterval) -> String {
+        durationText(max(0, offset))
     }
 
     private static func dateTimeText(_ date: Date, calendar: Calendar) -> String {

@@ -96,6 +96,24 @@ import Testing
     #expect(settings.isFactCheckActive == true)
 }
 
+@Test func promptTemplateSanitizerPreservesEditableSpaces() {
+    let sanitized = AIPromptTemplateConfiguration.sanitized(
+        [
+            AIPromptTemplateConfiguration(
+                id: "prompt",
+                name: "Action Items ",
+                llmEndpointID: "llm",
+                template: "Summarize {{sentence}} with spaces "
+            )
+        ],
+        availableLLMEndpointIDs: ["llm"],
+        fallbackLLMEndpointID: "llm"
+    )
+
+    #expect(sanitized[0].name == "Action Items ")
+    #expect(sanitized[0].template == "Summarize {{sentence}} with spaces ")
+}
+
 @Test func llmEndpointConfigurationUsesDefaultOllamaValues() {
     let configuration = LLMEndpointConfiguration.defaultConfiguration()
 
@@ -240,17 +258,37 @@ import Testing
 
 @Test func transcriptDocumentKeepsFinalAndInterimText() {
     var document = TranscriptDocument()
-    document.apply(TranscriptSegment(text: "hello", isFinal: true))
+    document.apply(TranscriptSegment(text: "hello", isFinal: true, speakerID: "Speaker 1"))
     document.apply(TranscriptSegment(text: "world", isFinal: false))
 
     #expect(document.finalized.map(\.text) == ["hello"])
     #expect(document.interim?.text == "world")
-    #expect(document.plainText == "hello\nworld")
+    #expect(document.plainText == "[Speaker 1] hello\nworld")
 
-    document.apply(TranscriptSegment(text: "world", isFinal: true))
+    document.apply(TranscriptSegment(text: "world", isFinal: true, speakerID: "Speaker 2"))
     #expect(document.finalized.map(\.text) == ["hello", "world"])
     #expect(document.interim == nil)
-    #expect(document.plainText == "hello\nworld")
+    #expect(document.plainText == "[Speaker 1] hello\n[Speaker 2] world")
+}
+
+@Test @MainActor func fluidAudioStalePartialAfterFinalSegmentIsSuppressed() async throws {
+    let service = FakeTranscriptionService(engineName: "FluidAudio Test")
+    let coordinator = TranscriptionCoordinator(service: service)
+    var currentSpeaker = "Speaker 1"
+    coordinator.speakerProvider = {
+        (currentSpeaker, nil)
+    }
+
+    try await coordinator.start()
+    service.emit(TranscriptSegment(text: "This sentence is complete.", isFinal: true))
+    try await Task.sleep(for: .milliseconds(20))
+    currentSpeaker = "Speaker 2"
+    service.emit(TranscriptSegment(text: "this sentence is complete", isFinal: false))
+    try await Task.sleep(for: .milliseconds(20))
+
+    #expect(coordinator.interimSegment == nil)
+    #expect(coordinator.segments.map(\.text) == ["This sentence is complete."])
+    #expect(coordinator.segments.compactMap(\.speakerLabel) == ["Speaker 1"])
 }
 
 @Test func markdownExportIncludesDetailsRecordingSummaryAndFactChecks() {
@@ -287,6 +325,16 @@ import Testing
             llmProvider: "Ollama",
             llmEndpoint: "http://localhost:11434",
             llmModel: "igorls/gemma-4-12B-it-heretic-GGUF",
+            promptStates: [
+                MarkdownExportPromptState(
+                    promptName: "Action Items",
+                    state: "- Call Dana\n- Send the deck"
+                ),
+                MarkdownExportPromptState(
+                    promptName: "Empty State",
+                    state: "   "
+                )
+            ],
             factCheckPrompt: "Fact-check {{sentence}}",
             summaryPrompt: "Summarize this recording.",
             audioURL: URL(fileURLWithPath: "/tmp/recording.m4a"),
@@ -294,8 +342,21 @@ import Testing
             metadataURL: URL(fileURLWithPath: "/tmp/recording.json")
         ),
         finalizedSegments: [
-            TranscriptSegment(text: "The Earth orbits the Sun.", timestamp: start, isFinal: true),
+            TranscriptSegment(
+                text: "The Earth orbits the Sun.",
+                timestamp: start,
+                isFinal: true,
+                speakerID: "Speaker 1"
+            ),
             TranscriptSegment(text: "Pipe | characters are escaped.", timestamp: second, isFinal: true)
+        ],
+        speakerSegments: [
+            SpeakerDiarizationSegment(
+                speakerID: "Speaker 1",
+                startTime: 0,
+                endTime: 3,
+                confidence: 0.82
+            )
         ],
         factChecks: [factCheck],
         summaryParagraphs: ["The recording discusses astronomy."],
@@ -305,9 +366,11 @@ import Testing
     #expect(markdown.contains("# DETAILS"))
     #expect(markdown.contains("- Location of recording: Not specified"))
     #expect(markdown.contains("# RECORDING"))
-    #expect(markdown.contains("| date time | length | text | AI result |"))
-    #expect(markdown.contains("| 2026-05-28 07:33:17 | 0:03 | The Earth orbits the Sun. | AI Processing: Verdict: Supported<br>Confidence: High<br>This is a basic astronomical fact. |"))
+    #expect(markdown.contains("| date time | length | speaker | text | AI result |"))
+    #expect(markdown.contains("| 2026-05-28 07:33:17 | 0:03 | Speaker 1 | The Earth orbits the Sun. | AI Processing: Verdict: Supported<br>Confidence: High<br>This is a basic astronomical fact. |"))
     #expect(markdown.contains("Pipe \\| characters are escaped."))
+    #expect(markdown.contains("# SPEAKERS"))
+    #expect(markdown.contains("| 0:00 | 0:03 | Speaker 1 | 0.82 |"))
     #expect(markdown.contains("# SUMMARY"))
     #expect(markdown.contains("The recording discusses astronomy."))
     #expect(!markdown.contains("# FACT CHECKS"))
@@ -317,6 +380,10 @@ import Testing
     #expect(markdown.contains("- LLM model: igorls/gemma-4-12B-it-heretic-GGUF"))
     #expect(markdown.contains("## Summary Result"))
     #expect(!markdown.contains("## Fact-Check Results"))
+    #expect(markdown.contains("## Prompt States"))
+    #expect(markdown.contains("### Action Items"))
+    #expect(markdown.contains("- Call Dana\n- Send the deck"))
+    #expect(!markdown.contains("### Empty State"))
     #expect(markdown.contains("## AI Processing Prompts"))
     #expect(markdown.contains("AI Processing: Verdict: Supported"))
     #expect(markdown.contains("## Summary Prompt"))
@@ -736,6 +803,27 @@ private final class FakeMicrophonePermissionProvider: MicrophonePermissionProvid
         requestCount += 1
         status = requestedStatus
         return status
+    }
+}
+
+private final class FakeTranscriptionService: TranscriptionService {
+    let engineName: String
+    private var onSegment: ((TranscriptSegment) -> Void)?
+
+    init(engineName: String) {
+        self.engineName = engineName
+    }
+
+    func start(onSegment: @escaping (TranscriptSegment) -> Void) async throws {
+        self.onSegment = onSegment
+    }
+
+    func append(_ buffer: AVAudioPCMBuffer) {}
+
+    func stop() {}
+
+    func emit(_ segment: TranscriptSegment) {
+        onSegment?(segment)
     }
 }
 

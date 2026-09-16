@@ -759,6 +759,10 @@ final class FactCheckCoordinator: ObservableObject {
         lastError = nil
     }
 
+    func promptState(for promptTemplateID: String) -> String {
+        promptStates[promptTemplateID] ?? ""
+    }
+
     func enqueueTranscriptSegment(
         _ segment: TranscriptSegment,
         enabled: Bool,

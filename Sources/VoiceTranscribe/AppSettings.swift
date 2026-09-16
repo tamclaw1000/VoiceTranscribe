@@ -278,19 +278,17 @@ struct AIPromptTemplateConfiguration: Identifiable, Codable, Equatable {
         let sanitized = promptTemplates.enumerated().map { index, prompt -> AIPromptTemplateConfiguration in
             var copy = prompt
             copy.id = copy.id.trimmingCharacters(in: .whitespacesAndNewlines)
-            copy.name = copy.name.trimmingCharacters(in: .whitespacesAndNewlines)
             copy.llmEndpointID = copy.llmEndpointID.trimmingCharacters(in: .whitespacesAndNewlines)
-            copy.template = copy.template.trimmingCharacters(in: .whitespacesAndNewlines)
 
             if copy.id.isEmpty || seenIDs.contains(copy.id) {
                 copy.id = UUID().uuidString
             }
             seenIDs.insert(copy.id)
 
-            if copy.name.isEmpty {
+            if copy.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 copy.name = "AI Prompt \(index + 1)"
             }
-            if copy.template.isEmpty {
+            if copy.template.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 copy.template = FactCheckPrompt.defaultTemplate
             }
             if !availableLLMEndpointIDs.isEmpty,

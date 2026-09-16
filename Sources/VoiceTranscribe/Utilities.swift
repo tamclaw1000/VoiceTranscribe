@@ -127,10 +127,10 @@ struct TranscriptDocument {
     }
 
     var plainText: String {
-        let finalText = finalized.map(\.text).joined(separator: "\n")
+        let finalText = finalized.map(\.textWithSpeaker).joined(separator: "\n")
         guard let interim else {
             return finalText
         }
-        return finalText.isEmpty ? interim.text : "\(finalText)\n\(interim.text)"
+        return finalText.isEmpty ? interim.textWithSpeaker : "\(finalText)\n\(interim.textWithSpeaker)"
     }
 }

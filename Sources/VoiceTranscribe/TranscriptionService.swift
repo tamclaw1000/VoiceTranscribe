@@ -167,11 +167,13 @@ final class TranscriptionCoordinator: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var bufferSnapshot = TranscriptionBufferSnapshot()
     var onFinalSegment: ((TranscriptSegment) -> Void)?
+    var speakerProvider: (() -> (id: String, name: String?)?)?
 
     private var transcript = TranscriptDocument()
     private var service: TranscriptionService
     private var bufferTimer: Timer?
     private var startTask: Task<Void, Error>?
+    private var lastFinalizedNormalizedText = ""
     private var consumedBufferCount = 0
 
     init(service: TranscriptionService = AppleSpeechTranscriptionService()) {
@@ -225,6 +227,7 @@ final class TranscriptionCoordinator: ObservableObject {
         interimSegment = nil
         bufferSnapshot = TranscriptionBufferSnapshot()
         consumedBufferCount = 0
+        lastFinalizedNormalizedText = ""
         isStarting = true
 
         let task = Task { @MainActor in
@@ -296,18 +299,63 @@ final class TranscriptionCoordinator: ObservableObject {
     }
 
     private func apply(_ segment: TranscriptSegment) {
+        var segment = segment
+        if let speaker = speakerProvider?() {
+            segment.speakerID = speaker.id
+            segment.speakerName = speaker.name
+        }
         bufferSnapshot.lastResultAt = Date()
         bufferSnapshot.queuedDuration = segment.isFinal ? 0 : min(bufferSnapshot.queuedDuration, 0.75)
-        transcript.apply(segment)
         if segment.isFinal {
-            Trace.event("transcription.segmentFinal", ["text": segment.text.prefix(80), "confidence": segment.confidence.map { String(format: "%.2f", $0) } ?? "nil"])
+            let normalized = Self.normalizedTranscriptText(segment.text)
+            if !normalized.isEmpty, normalized == lastFinalizedNormalizedText {
+                interimSegment = nil
+                Trace.event("transcription.segmentFinal.duplicateSuppressed", [
+                    "text": segment.text.prefix(80)
+                ])
+                return
+            }
+            transcript.apply(segment)
+            lastFinalizedNormalizedText = normalized
+            Trace.event("transcription.segmentFinal", [
+                "text": segment.text.prefix(80),
+                "confidence": segment.confidence.map { String(format: "%.2f", $0) } ?? "nil",
+                "speaker": segment.speakerLabel ?? "nil"
+            ])
             segments.append(segment)
             onFinalSegment?(segment)
             interimSegment = nil
         } else {
-            Trace.event("transcription.segmentPartial", ["text": segment.text.prefix(80)])
+            if shouldSuppressStalePartial(segment) {
+                Trace.event("transcription.segmentPartial.staleSuppressed", [
+                    "text": segment.text.prefix(80),
+                    "speaker": segment.speakerLabel ?? "nil"
+                ])
+                return
+            }
+            transcript.apply(segment)
+            Trace.event("transcription.segmentPartial", [
+                "text": segment.text.prefix(80),
+                "speaker": segment.speakerLabel ?? "nil"
+            ])
             interimSegment = segment
         }
+    }
+
+    private func shouldSuppressStalePartial(_ segment: TranscriptSegment) -> Bool {
+        let normalized = Self.normalizedTranscriptText(segment.text)
+        guard !normalized.isEmpty, !lastFinalizedNormalizedText.isEmpty else {
+            return false
+        }
+        return lastFinalizedNormalizedText.hasPrefix(normalized)
+            || normalized.hasPrefix(lastFinalizedNormalizedText)
+    }
+
+    nonisolated private static func normalizedTranscriptText(_ text: String) -> String {
+        text
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
     }
 
     private func startBufferTimer() {

@@ -4,7 +4,7 @@ Project knowledge for future agents (and future-you). Read before touching code.
 
 ## What This Is
 
-VoiceTranscribe is a native macOS SwiftUI app for enumerating audio input devices, monitoring their levels with a live graph, recording to disk, displaying live transcripts, summarizing recordings, and running configurable AI processing prompts over finalized transcript text.
+VoiceTranscribe is a native macOS SwiftUI app for enumerating audio input devices, monitoring their levels with a live graph, recording to disk, displaying live transcripts with live FluidAudio speaker diarization, summarizing recordings, and running configurable AI processing prompts over finalized transcript text.
 
 - **Repo:** https://github.com/tamclaw1000/VoiceTranscribe
 - **Local:** `~/projects/ai/VoiceTranscribe`
@@ -25,6 +25,7 @@ VoiceTranscribeApp
        ├─ RecordingService — AsyncAudioFileWriter on .utility queue
        ├─ TranscriptionCoordinator
        │    └─ AppleSpeechTranscriptionService — SpeechTranscriber + SpeechAnalyzer
+       ├─ DiarizationCoordinator — FluidAudio LS-EEND speaker timeline + transcript annotation
        ├─ SummaryCoordinator — paragraph-form recording summaries
        ├─ FactCheckCoordinator — AI processing queue, prompt templates, batching, prompt state
        ├─ PermissionService — lazy mic/speech auth with caching
@@ -56,6 +57,8 @@ Mic → AVAudioEngine tap → copyBuffer() → DispatchQueue.main
 7. **Global prompt model enables batching.** When all enabled prompts target the global model, multiple prompt questions for the same sentence can be sent in one LLM request and mapped back to individual result rows.
 
 8. **Prompt state is per template.** `{{prompt-state}}` accrues independently for each prompt template, updates from successful responses, resets with AI processing state, and forces that template's calls to run serially.
+
+9. **Diarization is live and best-effort.** FluidAudio LS-EEND runs alongside transcription. Transcript rows get the latest finalized speaker label when the ASR segment arrives, while Markdown export also includes the diarizer's separate speaker timeline for time-based review.
 
 ## Critical Gotchas
 
@@ -119,6 +122,7 @@ No CLI flag needed. The `Trace.swift` utility fires on every:
 - Recording I/O (`recording.started`, `.finalized`, `transcript.saved`, `.metadata.saved`)
 - Transcription event (`transcription.starting`, `.started`, `.stopped`, `segmentFinal`)
 - AI processing event (`factCheck.*` historical trace names, including prompt/template/model queue activity)
+- Diarization event (`diarization.*`)
 - Device change (`devices.changed`)
 - Permission state (`permission.mic`)
 - Error (various `.error` events)
@@ -128,7 +132,7 @@ No CLI flag needed. The `Trace.swift` utility fires on every:
 ```sh
 cd ~/projects/ai/VoiceTranscribe
 swift build
-open "$(swift build --show-bin-path)/VoiceTranscribe"
+./run.sh
 ```
 
 Package as .app:
@@ -151,6 +155,7 @@ swift test
 | `AudioDeviceService.swift` | CoreAudio enumeration, 2s polling, transport labels |
 | `RecordingService.swift` | Async file writing, basename generation, metadata JSON |
 | `TranscriptionService.swift` | SpeechTranscriber pipeline, format conversion, coordinator |
+| `DiarizationService.swift` | FluidAudio LS-EEND speaker diarization, speaker timeline, transcript annotations |
 | `FactCheckService.swift` | AI processing LLM clients, queueing, prompt substitutions, batching, prompt state |
 | `PermissionService.swift` | Lazy mic/speech auth with caching and mock support |
 | `Trace.swift` | JSON-line event logger to `/tmp/VoiceTranscribe.log` |
@@ -166,6 +171,18 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.18 | 61 | Removed stalled partial finalization and suppressed stale FluidAudio partial repeats |
+| 2.4.17 | 60 | Added fallback finalization for stalled FluidAudio interim transcript segments |
+| 2.4.16 | 59 | Made packaged app builds run `swift package clean` before compiling |
+| 2.4.15 | 58 | Fixed packaging to use SwiftPM's actual build product path after clean builds |
+| 2.4.14 | 57 | Replaced the Live Transcript audio-source column with a speaker column |
+| 2.4.13 | 56 | Moved current-speaker status to a full-width Live Transcript strip |
+| 2.4.12 | 55 | Fixed prompt template editing so typed spaces are preserved |
+| 2.4.11 | 54 | Added a prominent current-speaker indicator in Live Transcript |
+| 2.4.10 | 53 | Moved Live Transcript speaker labels under the audio source |
+| 2.4.9 | 52 | Added a root launcher script for packaged app rebuild and launch |
+| 2.4.8 | 51 | Added live FluidAudio speaker diarization with transcript and export annotations |
+| 2.4.7 | 50 | Added accumulated prompt-state output to Markdown transcript exports |
 | 2.4.6 | 49 | Added per-prompt accumulated `{{prompt-state}}` substitution |
 | 2.4.5 | 48 | Batched multiple prompt questions into one LLM request when using a global prompt model |
 | 2.4.4 | 47 | Added timestamped conversation prompt placeholders for AI processing |

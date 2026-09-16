@@ -157,7 +157,9 @@ struct ContentView: View {
                     finalized: appModel.transcription.segments,
                     interim: appModel.transcription.interimSegment,
                     factChecks: appModel.factCheck.items,
-                    sourceName: appModel.transcriptSourceName,
+                    currentSpeakerLabel: appModel.diarization.currentSpeakerLabel,
+                    isDiarizationActive: appModel.diarization.isStarting || appModel.diarization.isRunning,
+                    diarizationError: appModel.diarization.lastError,
                     isFactCheckEnabled: appModel.settings.isFactCheckActive,
                     isFactChecking: appModel.factCheck.isRunning,
                     buffer: appModel.transcription.bufferSnapshot,
@@ -995,7 +997,9 @@ private struct TranscriptFactCheckPanel: View {
     let finalized: [TranscriptSegment]
     let interim: TranscriptSegment?
     let factChecks: [FactCheckItem]
-    let sourceName: String
+    let currentSpeakerLabel: String?
+    let isDiarizationActive: Bool
+    let diarizationError: String?
     let isFactCheckEnabled: Bool
     let isFactChecking: Bool
     let buffer: TranscriptionBufferSnapshot
@@ -1055,13 +1059,33 @@ private struct TranscriptFactCheckPanel: View {
                     .frame(width: 260)
             }
 
+            HStack(spacing: 8) {
+                Image(systemName: "person.wave.2.fill")
+                    .foregroundStyle(currentSpeakerColor)
+                Text(currentSpeakerStatusText)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(currentSpeakerColor)
+                Spacer()
+                Text("FluidAudio diarization")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(currentSpeakerColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(currentSpeakerColor.opacity(0.25))
+            )
+            .help(currentSpeakerHelpText)
+
             ScrollViewReader { proxy in
                 ScrollView {
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
                         GridRow {
                             Text("Timestamp")
                                 .frame(width: 76, alignment: .leading)
-                            Text("Audio Source")
+                            Text("Speaker")
                                 .frame(width: 150, alignment: .leading)
                             Text("Text")
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1084,7 +1108,7 @@ private struct TranscriptFactCheckPanel: View {
                             ForEach(finalized) { segment in
                                 transcriptRows(
                                     segment: segment,
-                                    sourceName: sourceName,
+                                    fallbackSpeakerLabel: currentSpeakerLabel,
                                     factChecks: factChecks(for: segment),
                                     isInterim: false
                                 )
@@ -1092,7 +1116,7 @@ private struct TranscriptFactCheckPanel: View {
                             if let interim {
                                 transcriptRows(
                                     segment: interim,
-                                    sourceName: sourceName,
+                                    fallbackSpeakerLabel: currentSpeakerLabel,
                                     factChecks: [],
                                     isInterim: true
                                 )
@@ -1121,22 +1145,22 @@ private struct TranscriptFactCheckPanel: View {
     @ViewBuilder
     private func transcriptRows(
         segment: TranscriptSegment,
-        sourceName: String,
+        fallbackSpeakerLabel: String?,
         factChecks: [FactCheckItem],
         isInterim: Bool
     ) -> some View {
+        let speakerLabel = segment.speakerLabel ?? fallbackSpeakerLabel
         GridRow(alignment: .top) {
             Text(timestampText(for: segment.timestamp))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 76, alignment: .leading)
 
-            Text(sourceName)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .truncationMode(.middle)
-                .frame(width: 150, alignment: .leading)
+            Text(speakerLabel ?? "Detecting")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(speakerLabel == nil ? Color.secondary : Color.blue)
+                .lineLimit(1)
+            .frame(width: 150, alignment: .leading)
 
             Text(segment.text)
                 .foregroundStyle(isInterim ? .secondary : .primary)
@@ -1233,6 +1257,36 @@ private struct TranscriptFactCheckPanel: View {
             return "Disabled"
         }
         return isFactChecking ? "Processing" : "Ready"
+    }
+
+    private var currentSpeakerStatusText: String {
+        if let currentSpeakerLabel, !currentSpeakerLabel.isEmpty {
+            return "Current speaker: \(currentSpeakerLabel)"
+        }
+        if let diarizationError, !diarizationError.isEmpty {
+            return "Speaker detection unavailable"
+        }
+        if isDiarizationActive {
+            return "Current speaker: Detecting"
+        }
+        return "Current speaker: Not active"
+    }
+
+    private var currentSpeakerHelpText: String {
+        if let diarizationError, !diarizationError.isEmpty {
+            return diarizationError
+        }
+        return "FluidAudio diarization distinguishes anonymous speakers as Speaker 1, Speaker 2, and so on."
+    }
+
+    private var currentSpeakerColor: Color {
+        if currentSpeakerLabel != nil {
+            return .blue
+        }
+        if diarizationError != nil {
+            return .orange
+        }
+        return .secondary
     }
 
     private var factCheckStatusColor: Color {

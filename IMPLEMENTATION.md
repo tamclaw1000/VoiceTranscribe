@@ -1431,3 +1431,181 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify the test suite passes.
 - [x] Bump `CFBundleShortVersionString` to `2.4.6`.
 - [x] Bump `CFBundleVersion` to `49`.
+
+## 69. v2.4.7. Prompt State Markdown Export
+
+### 69a. Export Content
+
+- [x] Include non-empty accumulated prompt states in Markdown transcript exports.
+- [x] Preserve prompt-template display names with each exported prompt state.
+- [x] Omit empty prompt states from the export.
+
+### 69b. Tests and Version
+
+- [x] Add Markdown export coverage for prompt states.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.7`.
+- [x] Bump `CFBundleVersion` to `50`.
+
+## 70. v2.4.8. Live Speaker Diarization
+
+### 70a. FluidAudio Pipeline
+
+- [x] Add a live FluidAudio LS-EEND diarization coordinator.
+- [x] Feed copied live microphone buffers to diarization in parallel with transcription.
+- [x] Feed copied file-transcription buffers to diarization in parallel with transcription.
+- [x] Finalize and merge diarization timeline updates when transcription stops.
+- [x] Continue transcription without speaker labels when diarization startup fails.
+
+### 70b. Transcript Annotation and Export
+
+- [x] Add speaker fields to transcript segments and speaker timeline models.
+- [x] Annotate live transcript rows with speaker labels when available.
+- [x] Include speaker labels in copied and saved transcript text.
+- [x] Add a speaker column and speaker timeline to Markdown exports.
+
+### 70c. Docs, Tests, and Version
+
+- [x] Update README, requirements, architecture notes, and agent handoff notes for diarization.
+- [x] Add coverage for speaker labels in text and Markdown exports.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.8`.
+- [x] Bump `CFBundleVersion` to `51`.
+
+## 71. v2.4.9. Root App Launcher
+
+### 71a. Launch Script
+
+- [x] Add root `run.sh` to package and launch `dist/VoiceTranscribe.app`.
+- [x] Support `./run.sh --no-build` for relaunching an existing packaged app.
+- [x] Update README and agent launch instructions to use the packaged app launcher.
+
+### 71b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.9`.
+- [x] Bump `CFBundleVersion` to `52`.
+
+## 72. v2.4.10. Speaker Placement in Live Transcript
+
+### 72a. Live Transcript UI
+
+- [x] Move speaker labels from a separate Live Transcript column to a line under Audio Source.
+- [x] Keep unknown speaker state visible under the source name.
+- [x] Update layout documentation for the source-plus-speaker row design.
+
+### 72b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.10`.
+- [x] Bump `CFBundleVersion` to `53`.
+
+## 73. v2.4.11. Visible Current Speaker Status
+
+### 73a. Live Transcript UI
+
+- [x] Add a prominent current-speaker indicator to the Live Transcript toolbar.
+- [x] Show diarization detecting, unavailable, and inactive states.
+- [x] Use the current diarized speaker as the interim-row speaker fallback.
+- [x] Document that diarization labels are anonymous speakers such as `Speaker 1`.
+
+### 73b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.11`.
+- [x] Bump `CFBundleVersion` to `54`.
+
+## 74. v2.4.12. Prompt Template Space Editing Fix
+
+### 74a. Prompt Template Editing
+
+- [x] Preserve prompt template text exactly while editing instead of trimming on every keystroke.
+- [x] Preserve prompt template names while editing, while still falling back when the trimmed name is empty.
+- [x] Keep fallback default prompt behavior for truly empty templates.
+
+### 74b. Tests and Version
+
+- [x] Add regression coverage proving prompt template names and text preserve trailing spaces during sanitization.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.12`.
+- [x] Bump `CFBundleVersion` to `55`.
+
+## 75. v2.4.13. Always-Visible Speaker Status
+
+### 75a. Live Transcript UI
+
+- [x] Move current-speaker status out of the crowded toolbar.
+- [x] Add a full-width Live Transcript speaker-detection strip that is visible before and during transcription.
+- [x] Show inactive, detecting, unavailable, and current-speaker states in that strip.
+
+### 75b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.13`.
+- [x] Bump `CFBundleVersion` to `56`.
+
+## 76. v2.4.14. Speaker-Only Transcript Column
+
+### 76a. Live Transcript UI
+
+- [x] Replace the Live Transcript `Audio Source` column with a `Speaker` column.
+- [x] Display only the speaker label or `Detecting` in transcript rows.
+- [x] Keep the full-width current-speaker status strip above the transcript grid.
+
+### 76b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.14`.
+- [x] Bump `CFBundleVersion` to `57`.
+
+## 77. v2.4.15. Clean Package Build Path
+
+### 77a. Packaging
+
+- [x] Resolve the SwiftPM build product directory with `swift build --show-bin-path`.
+- [x] Avoid packaging stale or missing executables when Swift places clean-build products outside the old architecture-specific path.
+- [x] Rebuild and relaunch the packaged app after verifying the executable no longer contains the old Live Transcript `Audio Source` label.
+
+### 77b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.15`.
+- [x] Bump `CFBundleVersion` to `58`.
+
+## 78. v2.4.16. Always-Clean Package Builds
+
+### 78a. Packaging
+
+- [x] Run `swift package clean` before every packaged app build.
+- [x] Ensure `./run.sh` uses a clean build whenever it rebuilds through `scripts/package-app.sh`.
+
+### 78b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.16`.
+- [x] Bump `CFBundleVersion` to `59`.
+
+## 79. v2.4.17. Stalled FluidAudio Partial Finalization
+
+### 79a. Transcription Finalization
+
+- [x] Add a FluidAudio-only fallback that finalizes a stable interim transcript segment after a short stall.
+- [x] Capitalize and punctuate fallback-finalized interim text so AI processing receives complete sentences.
+- [x] Suppress duplicate final segments if FluidAudio later emits the same utterance through its EOU callback.
+- [x] Keep Apple Speech transcription behavior unchanged.
+
+### 79b. Tests and Version
+
+- [x] Add regression coverage for a stalled FluidAudio partial becoming a finalized transcript segment.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.17`.
+- [x] Bump `CFBundleVersion` to `60`.
+
+## 80. v2.4.18. FluidAudio Stale Partial Suppression
+
+### 80a. Transcription Finalization
+
+- [x] Remove stalled-interim fallback finalization because FluidAudio partials are cumulative and can cross speaker boundaries.
+- [x] Suppress stale partial transcript updates that repeat the latest finalized utterance.
+- [x] Suppress exact duplicate final transcript segments.
+- [x] Keep finalized transcript text driven by FluidAudio EOU callbacks.
+
+### 80b. Tests and Version
+
+- [x] Replace the stalled-finalization regression test with stale-partial suppression coverage.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.18`.
+- [x] Bump `CFBundleVersion` to `61`.

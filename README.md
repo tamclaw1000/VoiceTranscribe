@@ -1,6 +1,6 @@
 # VoiceTranscribe
 
-VoiceTranscribe is a native macOS SwiftUI application for enumerating sound-input sources, monitoring live input levels, recording audio, transcribing speech, summarizing recordings, and running configurable AI processing prompts over finalized transcript text.
+VoiceTranscribe is a native macOS SwiftUI application for enumerating sound-input sources, monitoring live input levels, recording audio, transcribing speech with speaker diarization, summarizing recordings, and running configurable AI processing prompts over finalized transcript text.
 
 The app is built for macOS 26+ and uses FluidAudio by default for streaming ASR, with Apple SpeechTranscriber available as an alternate transcription engine.
 
@@ -10,6 +10,7 @@ The app is built for macOS 26+ and uses FluidAudio by default for streaming ASR,
 - Shows a live input-level graph for the active source.
 - Records audio to a configurable output folder.
 - Displays finalized and interim transcript text while audio is processed.
+- Annotates transcript rows with live FluidAudio speaker labels when diarization output is available, and shows the current anonymous speaker in the Live Transcript toolbar.
 - Saves transcript text beside recordings and supports manual transcript export.
 - Organizes finalized transcript sentences into a running recording summary.
 - Supports audio file sources that can be loaded and transcribed.
@@ -111,9 +112,10 @@ The Recording Summary tab includes:
 Markdown exports include:
 
 - `# DETAILS`
-- `# RECORDING` with one row per finalized transcript segment and an `AI result` column.
+- `# RECORDING` with one row per finalized transcript segment, speaker labels, and an `AI result` column.
+- `# SPEAKERS` with the diarized speaker timeline when speaker segments are available.
 - `# SUMMARY` when summary content exists.
-- `# AI RESULTS` with model metadata and prompts.
+- `# AI RESULTS` with model metadata, non-empty prompt states, and prompts.
 - `# FILES` when related output files exist.
 
 API keys are never included in Markdown exports.
@@ -147,7 +149,13 @@ The local bundle includes microphone and speech-recognition permission descripti
 ## Launch
 
 ```sh
-open -n dist/VoiceTranscribe.app
+./run.sh
+```
+
+To relaunch an existing packaged app without rebuilding:
+
+```sh
+./run.sh --no-build
 ```
 
 ## Logs

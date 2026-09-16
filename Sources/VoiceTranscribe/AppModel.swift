@@ -14,6 +14,7 @@ final class AppModel: ObservableObject {
     @Published var captureService = AudioCaptureService()
     @Published var recordingService = RecordingService()
     @Published var transcription: TranscriptionCoordinator
+    @Published var diarization = DiarizationCoordinator()
     @Published var factCheck = FactCheckCoordinator()
     @Published var summary = SummaryCoordinator()
 
@@ -151,6 +152,9 @@ final class AppModel: ObservableObject {
 
     init() {
         transcription = TranscriptionCoordinator(service: AppModel.makeInitialService())
+        transcription.speakerProvider = { [weak self] in
+            self?.diarization.annotationForCurrentSpeaker()
+        }
         transcription.onFinalSegment = { [weak self] segment in
             guard let self else { return }
             let enabledPromptTemplates = self.settings.effectiveEnabledAIPromptTemplates
@@ -180,6 +184,9 @@ final class AppModel: ObservableObject {
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         transcription.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        diarization.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         factCheck.objectWillChange.sink { [weak self] _ in
@@ -453,6 +460,7 @@ final class AppModel: ObservableObject {
                 self.transcriptSourceName = source.name
                 self.factCheck.reset()
                 self.summary.reset()
+                self.diarization.reset()
                 Trace.event("transcribe.service.starting", [
                     "source": source.name,
                     "engine": self.transcription.engineName
@@ -509,11 +517,41 @@ final class AppModel: ObservableObject {
             throw AppModelError.speechPermissionRequired
         }
 
-        try await transcription.start()
-        captureService.addConsumer(id: "transcribe") { [weak transcription] buffer, time in
-            Task { @MainActor in
-                transcription?.consume(buffer: buffer, time: time)
+        let diarizationStarted = await startDiarization(sourceName: source.name, addLiveConsumer: true)
+        do {
+            try await transcription.start()
+            captureService.addConsumer(id: "transcribe") { [weak transcription] buffer, time in
+                Task { @MainActor in
+                    transcription?.consume(buffer: buffer, time: time)
+                }
             }
+        } catch {
+            if diarizationStarted {
+                captureService.removeConsumer(id: "diarize")
+                diarization.stop()
+            }
+            throw error
+        }
+    }
+
+    private func startDiarization(sourceName: String, addLiveConsumer: Bool) async -> Bool {
+        do {
+            try await diarization.start()
+            if addLiveConsumer {
+                captureService.addConsumer(id: "diarize") { [weak diarization] buffer, time in
+                    Task { @MainActor in
+                        diarization?.consume(buffer: buffer, time: time)
+                    }
+                }
+            }
+            return true
+        } catch {
+            userMessage = "Speaker diarization unavailable for \(sourceName): \(error.localizedDescription). Transcription will continue without speaker labels."
+            Trace.event("diarization.unavailable", [
+                "source": sourceName,
+                "error": error.localizedDescription
+            ])
+            return false
         }
     }
 
@@ -636,6 +674,7 @@ final class AppModel: ObservableObject {
         let markdown = MarkdownExportService.makeDocument(
             context: context,
             finalizedSegments: transcription.segments,
+            speakerSegments: diarization.segments,
             factChecks: factCheck.items,
             summaryParagraphs: summary.paragraphs
         )
@@ -678,6 +717,12 @@ final class AppModel: ObservableObject {
                 return "\(promptTemplate.displayName) [\(promptTemplate.isEnabled ? "enabled" : "disabled")] on \(llm.displayName):\n\(promptTemplate.template)"
             }
             .joined(separator: "\n\n")
+        let promptStates = settings.effectiveAIPromptTemplates.map {
+            MarkdownExportPromptState(
+                promptName: $0.displayName,
+                state: factCheck.promptState(for: $0.id)
+            )
+        }
 
         return MarkdownExportContext(
             sourceName: transcriptSourceName,
@@ -692,6 +737,7 @@ final class AppModel: ObservableObject {
             llmProvider: selectedLLM.provider.displayName,
             llmEndpoint: selectedLLM.endpoint,
             llmModel: selectedLLM.model,
+            promptStates: promptStates,
             factCheckPrompt: promptTemplateDetails,
             summaryPrompt: settings.summaryPrompt,
             audioURL: session?.audioURL,
@@ -818,11 +864,13 @@ final class AppModel: ObservableObject {
         isTranscribingFile = true
         fileTranscriptionProgress = 0
         transcriptSourceName = source.name
+        diarization.reset()
 
         fileTranscriptionTask = Task { [weak self] in
             guard let self else { return }
 
             do {
+                _ = await self.startDiarization(sourceName: source.name, addLiveConsumer: false)
                 try await self.transcription.start()
                 self.factCheck.reset()
                 self.summary.reset()
@@ -838,6 +886,7 @@ final class AppModel: ObservableObject {
 
                 await MainActor.run {
                     self.transcription.stop()
+                    self.diarization.stop()
                     self.isTranscribingFile = false
                     self.activeFileSourceID = nil
                     self.fileTranscriptionProgress = 1.0
@@ -846,6 +895,7 @@ final class AppModel: ObservableObject {
             } catch is CancellationError {
                 await MainActor.run {
                     self.transcription.stop()
+                    self.diarization.stop()
                     self.isTranscribingFile = false
                     self.activeFileSourceID = nil
                     Trace.event("fileTranscribe.cancelled", ["file": source.name])
@@ -853,6 +903,7 @@ final class AppModel: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.transcription.stop()
+                    self.diarization.stop()
                     self.isTranscribingFile = false
                     self.activeFileSourceID = nil
                     self.userMessage = "File transcription failed: \(error.localizedDescription)"
@@ -874,6 +925,7 @@ final class AppModel: ObservableObject {
         fileTranscriptionTask?.cancel()
         fileTranscriptionTask = nil
         transcription.stop()
+        diarization.stop()
         isTranscribingFile = false
         activeFileSourceID = nil
         fileTranscriptionProgress = 0
@@ -922,6 +974,7 @@ final class AppModel: ObservableObject {
             )
 
             await MainActor.run {
+                self.diarization.consume(buffer: copy, time: time)
                 self.transcription.consume(buffer: copy, time: time)
             }
 
@@ -990,6 +1043,7 @@ final class AppModel: ObservableObject {
             )
 
             await MainActor.run {
+                self.diarization.consume(buffer: copy, time: time)
                 self.transcription.consume(buffer: copy, time: time)
             }
 
@@ -1017,8 +1071,10 @@ final class AppModel: ObservableObject {
             "segments": transcription.segments.count,
             "isTranscribing": transcription.isTranscribing
         ])
+        captureService.removeConsumer(id: "diarize")
         captureService.removeConsumer(id: "transcribe")
         transcription.stop()
+        diarization.stop()
         captureService.stopIfUnused()
         Trace.event("transcribe.stopped", ["finalSegments": transcription.segments.count])
     }

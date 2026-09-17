@@ -122,6 +122,17 @@ struct SpeakerDiarizationSegment: Identifiable, Equatable, Sendable {
     }
 }
 
+struct SpeakerNameEditorItem: Identifiable, Equatable {
+    var id: String { speakerID }
+    var speakerID: String
+    var displayName: String
+    var customName: String
+
+    var hasCustomName: Bool {
+        !customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
 struct RecordingSession: Identifiable, Equatable {
     let id: UUID
     let source: SoundInputSource

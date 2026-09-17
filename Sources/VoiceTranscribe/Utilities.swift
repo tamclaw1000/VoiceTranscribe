@@ -126,6 +126,22 @@ struct TranscriptDocument {
         }
     }
 
+    mutating func updateSpeakerName(speakerID: String, speakerName: String?) {
+        finalized = finalized.map { segment in
+            guard segment.speakerID == speakerID else {
+                return segment
+            }
+            var copy = segment
+            copy.speakerName = speakerName
+            return copy
+        }
+
+        if var interim, interim.speakerID == speakerID {
+            interim.speakerName = speakerName
+            self.interim = interim
+        }
+    }
+
     var plainText: String {
         let finalText = finalized.map(\.textWithSpeaker).joined(separator: "\n")
         guard let interim else {

@@ -173,6 +173,8 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.27 | 70 | Added Live Transcript speaker-name editing with per-speaker and reset-all controls |
+| 2.4.26 | 69 | Downmixed multichannel capture buffers before Apple Speech analysis so BlackHole and aggregate-device input can transcribe reliably |
 | 2.4.25 | 68 | Runs an active AI health test when AI processing is re-enabled from a disabled state |
 | 2.4.24 | 67 | Temporarily disabled automatic app relaunch after permission prompts to test whether it is still required |
 | 2.4.23 | 66 | Made the standard build script always refresh the packaged app bundle |

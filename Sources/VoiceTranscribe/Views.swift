@@ -160,6 +160,8 @@ struct ContentView: View {
                     finalized: appModel.transcription.segments,
                     interim: appModel.transcription.interimSegment,
                     factChecks: appModel.factCheck.items,
+                    speakerNameItems: appModel.speakerNameEditorItems,
+                    currentSpeakerID: appModel.diarization.currentSpeakerID,
                     currentSpeakerLabel: appModel.diarization.currentSpeakerLabel,
                     isDiarizationActive: appModel.diarization.isStarting || appModel.diarization.isRunning,
                     diarizationError: appModel.diarization.lastError,
@@ -171,6 +173,9 @@ struct ContentView: View {
                     hasTranscriptText: !appModel.transcription.transcriptText
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .isEmpty,
+                    onSetSpeakerName: appModel.setSpeakerName,
+                    onResetSpeakerName: appModel.resetSpeakerName,
+                    onResetAllSpeakerNames: appModel.resetAllSpeakerNames,
                     onSaveToFile: appModel.saveTranscriptToFile,
                     onExportMarkdown: appModel.saveTranscriptMarkdownToFile,
                     onCopyText: appModel.copyTranscriptText
@@ -829,6 +834,8 @@ private struct TranscriptFactCheckPanel: View {
     let finalized: [TranscriptSegment]
     let interim: TranscriptSegment?
     let factChecks: [FactCheckItem]
+    let speakerNameItems: [SpeakerNameEditorItem]
+    let currentSpeakerID: String?
     let currentSpeakerLabel: String?
     let isDiarizationActive: Bool
     let diarizationError: String?
@@ -838,6 +845,9 @@ private struct TranscriptFactCheckPanel: View {
     let isTranscribing: Bool
     @Binding var autoScrollToBottom: Bool
     let hasTranscriptText: Bool
+    let onSetSpeakerName: (String, String) -> Void
+    let onResetSpeakerName: (String) -> Void
+    let onResetAllSpeakerNames: () -> Void
     let onSaveToFile: () -> Void
     let onExportMarkdown: () -> Void
     let onCopyText: () -> Void
@@ -911,6 +921,10 @@ private struct TranscriptFactCheckPanel: View {
             )
             .help(currentSpeakerHelpText)
 
+            if !speakerNameItems.isEmpty {
+                speakerNameEditor
+            }
+
             ScrollViewReader { proxy in
                 ScrollView {
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
@@ -940,6 +954,7 @@ private struct TranscriptFactCheckPanel: View {
                             ForEach(finalized) { segment in
                                 transcriptRows(
                                     segment: segment,
+                                    fallbackSpeakerID: currentSpeakerID,
                                     fallbackSpeakerLabel: currentSpeakerLabel,
                                     factChecks: factChecks(for: segment),
                                     isInterim: false
@@ -948,6 +963,7 @@ private struct TranscriptFactCheckPanel: View {
                             if let interim {
                                 transcriptRows(
                                     segment: interim,
+                                    fallbackSpeakerID: currentSpeakerID,
                                     fallbackSpeakerLabel: currentSpeakerLabel,
                                     factChecks: [],
                                     isInterim: true
@@ -974,13 +990,79 @@ private struct TranscriptFactCheckPanel: View {
         .padding()
     }
 
+    private var speakerNameEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label("Speakers", systemImage: "person.2")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    onResetAllSpeakerNames()
+                } label: {
+                    Label("Reset All", systemImage: "arrow.counterclockwise")
+                }
+                .font(.caption)
+                .disabled(!speakerNameItems.contains(where: \.hasCustomName))
+                .help("Reset all speaker names to their generated Speaker N labels")
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
+                ForEach(speakerNameItems) { item in
+                    GridRow {
+                        Text(item.speakerID)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(speakerColor(for: item.speakerID))
+                            .lineLimit(1)
+                            .frame(width: 88, alignment: .leading)
+
+                        TextField(
+                            item.speakerID,
+                            text: Binding(
+                                get: { item.customName },
+                                set: { onSetSpeakerName(item.speakerID, $0) }
+                            )
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 140, maxWidth: 260)
+                        .help("Enter a display name for \(item.speakerID)")
+
+                        Text(item.displayName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Button {
+                            onResetSpeakerName(item.speakerID)
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(!item.hasCustomName)
+                        .help("Reset \(item.speakerID) to its generated name")
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.secondary.opacity(0.15))
+        )
+    }
+
     @ViewBuilder
     private func transcriptRows(
         segment: TranscriptSegment,
+        fallbackSpeakerID: String?,
         fallbackSpeakerLabel: String?,
         factChecks: [FactCheckItem],
         isInterim: Bool
     ) -> some View {
+        let speakerID = segment.speakerID ?? fallbackSpeakerID
         let speakerLabel = segment.speakerLabel ?? fallbackSpeakerLabel
         GridRow(alignment: .top) {
             Text(timestampText(for: segment.timestamp))
@@ -990,7 +1072,7 @@ private struct TranscriptFactCheckPanel: View {
 
             Text(speakerLabel ?? "Detecting")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(speakerColor(for: speakerLabel))
+                .foregroundStyle(speakerColor(for: speakerID ?? speakerLabel))
                 .lineLimit(1)
             .frame(width: 150, alignment: .leading)
 
@@ -1112,6 +1194,9 @@ private struct TranscriptFactCheckPanel: View {
     }
 
     private var currentSpeakerColor: Color {
+        if let currentSpeakerID {
+            return speakerColor(for: currentSpeakerID)
+        }
         if let currentSpeakerLabel {
             return speakerColor(for: currentSpeakerLabel)
         }

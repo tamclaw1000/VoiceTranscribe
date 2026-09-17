@@ -145,7 +145,15 @@ final class AudioCaptureService: ObservableObject {
             }
         }
 
-        for consumer in consumers.values {
+        let priorityConsumerIDs = ["transcribe", "record", "diarize"]
+        var dispatchedConsumerIDs = Set<String>()
+        for id in priorityConsumerIDs {
+            guard let consumer = consumers[id] else { continue }
+            dispatchedConsumerIDs.insert(id)
+            consumer(buffer, time)
+        }
+
+        for (id, consumer) in consumers where !dispatchedConsumerIDs.contains(id) {
             consumer(buffer, time)
         }
     }

@@ -12,7 +12,7 @@ VoiceTranscribe is a native macOS SwiftUI executable package.
 - Minimum platform: macOS 26
 - Swift tools: 6.3
 - Swift language mode: 5
-- Local dependency: `external/FluidAudio`
+- Local dependencies: `external/FluidAudio`, `external/speech-swift-worktree`
 
 The application is centered on `AppModel`, a `@MainActor ObservableObject` that owns the user workflow and all long-lived services.
 
@@ -29,7 +29,7 @@ VoiceTranscribeApp
            -> AppleSpeechTranscriptionService
            -> FluidAudioTranscriptionService
         -> DiarizationCoordinator
-           -> FluidAudio LS-EEND diarizer
+           -> SpeechVAD SortformerStreamingSession
         -> SummaryCoordinator
         -> FactCheckCoordinator
            -> OllamaFactCheckService
@@ -52,7 +52,7 @@ VoiceTranscribeApp
 | `RecordingService.swift` | Audio file creation/finalization, async writer queue, recording metadata. |
 | `TranscriptionService.swift` | Transcription protocol, Apple Speech implementation, coordinator/state. |
 | `FluidAudioTranscriptionService.swift` | FluidAudio Parakeet EOU streaming ASR implementation and model download/load path. |
-| `DiarizationService.swift` | FluidAudio LS-EEND live diarization wrapper, speaker timeline state, transcript speaker annotations. |
+| `DiarizationService.swift` | SpeechVAD Sortformer live diarization wrapper, speaker timeline state, transcript speaker annotations. |
 | `SummaryService.swift` | Paragraph-form transcript summary/organization. |
 | `FactCheckService.swift` | AI processing model clients, prompt rendering, sentence queue, batching, prompt state. |
 | `MarkdownExportService.swift` | Markdown transcript/session export. |
@@ -125,8 +125,8 @@ Both use tabs for `General`, `LLM Models`, and `Prompt Templates`. The standalon
 
 - Live speaker timeline segments.
 - Current/latest speaker annotation.
-- FluidAudio diarizer lifecycle.
-- Dedupe keys for repeated timeline updates.
+- SpeechVAD Sortformer streaming session lifecycle.
+- Snapshot replacement and trace dedupe for repeated timeline updates.
 
 `FactCheckCoordinator` owns AI processing state:
 
@@ -291,15 +291,15 @@ Stop drains `mgr.finish()` and emits any final trailing utterance.
 
 ## Diarization Flow
 
-`DiarizationCoordinator` runs FluidAudio LS-EEND diarization in parallel with transcription for live microphone and file-source transcription.
+`DiarizationCoordinator` runs SpeechVAD Sortformer streaming diarization in parallel with Apple Speech transcription for live microphone and file-source transcription.
 
 Startup:
 
 ```text
 AppModel.startTranscriptionConsumer
   -> DiarizationCoordinator.start()
-     -> FluidAudioDiarizationEngine actor
-     -> LSEENDDiarizer(variant: .dihard3)
+     -> SpeechSwiftSortformerDiarizationEngine actor
+     -> SortformerStreamingSession.fromPretrained(config: .streaming)
   -> AudioCaptureService.addConsumer("diarize")
   -> TranscriptionCoordinator.start()
 ```
@@ -310,8 +310,9 @@ Processing:
 AudioCaptureService.process
   -> "diarize" consumer
   -> downmix AVAudioPCMBuffer to mono Float samples
-  -> FluidAudioDiarizationEngine.process(samples, sampleRate)
-  -> merge finalized DiarizerSegment updates
+  -> resample to 16 kHz mono with AudioFileLoader
+  -> SortformerStreamingSession.push(audio:)
+  -> replace whole-stream SpeakerDiarizationSegment snapshot
   -> publish SpeakerDiarizationSegment timeline
 ```
 
@@ -431,7 +432,7 @@ Sections:
 
 The recording table has one row per finalized segment, including speaker labels and associated AI result text in the `AI result` cell.
 
-`# SPEAKERS` contains diarized speaker start/end offsets, labels, and confidence values when FluidAudio returns a speaker timeline.
+`# SPEAKERS` contains diarized speaker start/end offsets, labels, and confidence values when the diarizer returns a speaker timeline.
 
 `# AI RESULTS` includes:
 
@@ -490,7 +491,8 @@ Apple frameworks:
 
 Third-party/local:
 
-- `external/FluidAudio`: Parakeet EOU streaming ASR, LS-EEND diarization, model download utilities, Core ML model runtime.
+- `external/FluidAudio`: Parakeet EOU streaming ASR, model download utilities, Core ML model runtime.
+- `external/speech-swift-worktree`: SpeechVAD Sortformer streaming diarization and AudioCommon resampling/model download utilities.
 
 Network:
 
@@ -598,7 +600,7 @@ Change recording filenames:
 ## Build, Test, Package
 
 ```sh
-swift build
+./build.sh
 swift test
 ./scripts/package-app.sh
 ```

@@ -113,14 +113,7 @@ final class AppModel: ObservableObject {
     }
 
     private static func makeInitialService() -> TranscriptionService {
-        let raw = UserDefaults.standard.string(forKey: "transcriptionEngine") ?? AppSettings.defaultTranscriptionEngine.rawValue
-        let kind = TranscriptionEngineKind(rawValue: raw) ?? AppSettings.defaultTranscriptionEngine
-        switch kind {
-        case .appleSpeech:
-            return AppleSpeechTranscriptionService()
-        case .fluidAudio:
-            return FluidAudioTranscriptionService()
-        }
+        AppleSpeechTranscriptionService()
     }
     @Published var completedRecordings: [RecordingSession] = []
     @Published var userMessage: String?
@@ -149,6 +142,7 @@ final class AppModel: ObservableObject {
     private var transcriptionTask: Task<Void, Never>?
     private var recordingTask: Task<Void, Never>?
     private var fileTranscriptionTask: Task<Void, Never>?
+    private var diarizationStartTask: Task<Void, Never>?
 
     init() {
         transcription = TranscriptionCoordinator(service: AppModel.makeInitialService())
@@ -517,7 +511,6 @@ final class AppModel: ObservableObject {
             throw AppModelError.speechPermissionRequired
         }
 
-        let diarizationStarted = await startDiarization(sourceName: source.name, addLiveConsumer: true)
         do {
             try await transcription.start()
             captureService.addConsumer(id: "transcribe") { [weak transcription] buffer, time in
@@ -525,18 +518,32 @@ final class AppModel: ObservableObject {
                     transcription?.consume(buffer: buffer, time: time)
                 }
             }
+            startDiarizationInBackground(sourceName: source.name, addLiveConsumer: true)
         } catch {
-            if diarizationStarted {
-                captureService.removeConsumer(id: "diarize")
-                diarization.stop()
-            }
             throw error
+        }
+    }
+
+    private func startDiarizationInBackground(sourceName: String, addLiveConsumer: Bool) {
+        diarizationStartTask?.cancel()
+        diarizationStartTask = Task { [weak self] in
+            guard let self else { return }
+            Trace.event("diarization.backgroundStart", [
+                "source": sourceName,
+                "addLiveConsumer": addLiveConsumer ? "true" : "false"
+            ])
+            _ = await self.startDiarization(sourceName: sourceName, addLiveConsumer: addLiveConsumer)
         }
     }
 
     private func startDiarization(sourceName: String, addLiveConsumer: Bool) async -> Bool {
         do {
             try await diarization.start()
+            if Task.isCancelled {
+                diarization.stop()
+                Trace.event("diarization.cancelled", ["source": sourceName])
+                return false
+            }
             if addLiveConsumer {
                 captureService.addConsumer(id: "diarize") { [weak diarization] buffer, time in
                     Task { @MainActor in
@@ -546,6 +553,9 @@ final class AppModel: ObservableObject {
             }
             return true
         } catch {
+            if Task.isCancelled {
+                return false
+            }
             userMessage = "Speaker diarization unavailable for \(sourceName): \(error.localizedDescription). Transcription will continue without speaker labels."
             Trace.event("diarization.unavailable", [
                 "source": sourceName,
@@ -870,8 +880,8 @@ final class AppModel: ObservableObject {
             guard let self else { return }
 
             do {
-                _ = await self.startDiarization(sourceName: source.name, addLiveConsumer: false)
                 try await self.transcription.start()
+                self.startDiarizationInBackground(sourceName: source.name, addLiveConsumer: false)
                 self.factCheck.reset()
                 self.summary.reset()
                 Trace.event("fileTranscribe.started", [
@@ -885,6 +895,8 @@ final class AppModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 500_000_000)
 
                 await MainActor.run {
+                    self.diarizationStartTask?.cancel()
+                    self.diarizationStartTask = nil
                     self.transcription.stop()
                     self.diarization.stop()
                     self.isTranscribingFile = false
@@ -894,6 +906,8 @@ final class AppModel: ObservableObject {
                 }
             } catch is CancellationError {
                 await MainActor.run {
+                    self.diarizationStartTask?.cancel()
+                    self.diarizationStartTask = nil
                     self.transcription.stop()
                     self.diarization.stop()
                     self.isTranscribingFile = false
@@ -902,6 +916,8 @@ final class AppModel: ObservableObject {
                 }
             } catch {
                 await MainActor.run {
+                    self.diarizationStartTask?.cancel()
+                    self.diarizationStartTask = nil
                     self.transcription.stop()
                     self.diarization.stop()
                     self.isTranscribingFile = false
@@ -924,6 +940,8 @@ final class AppModel: ObservableObject {
     private func cancelFileTranscription() {
         fileTranscriptionTask?.cancel()
         fileTranscriptionTask = nil
+        diarizationStartTask?.cancel()
+        diarizationStartTask = nil
         transcription.stop()
         diarization.stop()
         isTranscribingFile = false
@@ -974,8 +992,8 @@ final class AppModel: ObservableObject {
             )
 
             await MainActor.run {
-                self.diarization.consume(buffer: copy, time: time)
                 self.transcription.consume(buffer: copy, time: time)
+                self.diarization.consume(buffer: copy, time: time)
             }
 
             framesRead += AVAudioFramePosition(frames)
@@ -1043,8 +1061,8 @@ final class AppModel: ObservableObject {
             )
 
             await MainActor.run {
-                self.diarization.consume(buffer: copy, time: time)
                 self.transcription.consume(buffer: copy, time: time)
+                self.diarization.consume(buffer: copy, time: time)
             }
 
             framesRead += AVAudioFramePosition(pcm.frameLength)
@@ -1071,6 +1089,8 @@ final class AppModel: ObservableObject {
             "segments": transcription.segments.count,
             "isTranscribing": transcription.isTranscribing
         ])
+        diarizationStartTask?.cancel()
+        diarizationStartTask = nil
         captureService.removeConsumer(id: "diarize")
         captureService.removeConsumer(id: "transcribe")
         transcription.stop()

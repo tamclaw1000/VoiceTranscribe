@@ -99,14 +99,14 @@ Internal architecture, programming languages, frameworks, processing algorithms,
 
 - Transcribe starts speech-to-text processing for the selected source without requiring a saved audio recording.
 - Provide local speech recognition as the default and allow selection among transcription options available in the deployment. Show the selected option and its availability. Equivalent recognition engines may satisfy this requirement on different platforms.
-- The current macOS reference implementation defaults to FluidAudio (Parakeet EOU) and also offers Apple Speech; those libraries are not dependencies required of other implementations.
+- The current macOS reference implementation uses Apple Speech for finalized transcript boundaries.
 - Show preparation or model-download activity before transcription is ready. Identify the language or locale being used and report unsupported language or locale and preparation failures. A multilingual picker and automatic language detection are not required.
 - Reuse valid installed models. Detect missing or incomplete model assets, obtain required assets when permitted, and provide a retry path after failed preparation or download. A failed model setup must not leave a source falsely marked as transcribing.
 - Once required local models are installed, local transcription must work without an external recognition service. Distinguish model installation that needs network access from local speech processing.
 - Accept supported device and imported-file audio formats without requiring the user to manually resample or convert them for the recognition engine. Report an unsupported format before claiming transcription is running.
 - Show interim text as speech is processed and clearly distinguish it from finalized text.
 - Run speaker diarization as part of the live and file transcription pipeline when the selected implementation supports it. Show preparation, unavailable, and failure states without mixing diarization errors into spoken transcript text.
-- The current macOS reference implementation uses FluidAudio diarization alongside FluidAudio transcription.
+- The current macOS reference implementation uses SpeechVAD Sortformer streaming diarization alongside Apple Speech transcription.
 - Preserve finalized transcript content and its source association. Interim revisions replace the corresponding provisional text; finalization must not append duplicate copies of that same occurrence.
 - Keep recognition errors separate from spoken transcript text so errors are not processed as speech by summaries or AI prompts.
 - Display confidence when supplied by the recognizer without inventing scores when unavailable.

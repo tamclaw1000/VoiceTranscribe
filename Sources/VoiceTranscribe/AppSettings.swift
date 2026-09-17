@@ -306,12 +306,13 @@ struct AIPromptTemplateConfiguration: Identifiable, Codable, Equatable {
 
 @MainActor
 final class AppSettings: ObservableObject {
-    static let defaultTranscriptionEngine: TranscriptionEngineKind = .fluidAudio
+    static let defaultTranscriptionEngine: TranscriptionEngineKind = .appleSpeech
 
     @AppStorage("outputFolderPath") var outputFolderPath: String = DefaultPaths.voiceTranscribeOutputFolder.path
     @AppStorage("audioOutputFormat") var audioOutputFormatRaw: String = AudioOutputFormat.m4a.rawValue
     @AppStorage("transcriptionEngine") var transcriptionEngineRaw: String = AppSettings.defaultTranscriptionEngine.rawValue
     @AppStorage("migratedDefaultTranscriptionEngineToFluidAudio") private var migratedDefaultTranscriptionEngineToFluidAudio: Bool = false
+    @AppStorage("migratedTranscriptionPipelineToAppleSpeech") private var migratedTranscriptionPipelineToAppleSpeech: Bool = false
     @AppStorage("saveTranscriptsAutomatically") var saveTranscriptsAutomatically: Bool = true
     @AppStorage("autoScrollTranscript") var autoScrollTranscript: Bool = true
     @AppStorage("visualizationSensitivity") var visualizationSensitivity: Double = 1.0
@@ -331,6 +332,7 @@ final class AppSettings: ObservableObject {
         migrateLLMEndpointsIfNeeded()
         migratePromptTemplatesIfNeeded()
         migrateDefaultTranscriptionEngineIfNeeded()
+        migrateTranscriptionPipelineToAppleSpeechIfNeeded()
     }
 
     static var defaultOutputFolder: URL {
@@ -347,8 +349,8 @@ final class AppSettings: ObservableObject {
     }
 
     var transcriptionEngine: TranscriptionEngineKind {
-        get { TranscriptionEngineKind(rawValue: transcriptionEngineRaw) ?? Self.defaultTranscriptionEngine }
-        set { transcriptionEngineRaw = newValue.rawValue }
+        get { Self.defaultTranscriptionEngine }
+        set { transcriptionEngineRaw = Self.defaultTranscriptionEngine.rawValue }
     }
 
     var ollamaEndpointURL: URL {
@@ -539,15 +541,23 @@ final class AppSettings: ObservableObject {
         guard !migratedDefaultTranscriptionEngineToFluidAudio else {
             return
         }
+        migratedDefaultTranscriptionEngineToFluidAudio = true
+    }
 
-        if transcriptionEngineRaw == TranscriptionEngineKind.appleSpeech.rawValue {
-            transcriptionEngineRaw = Self.defaultTranscriptionEngine.rawValue
+    private func migrateTranscriptionPipelineToAppleSpeechIfNeeded() {
+        guard !migratedTranscriptionPipelineToAppleSpeech else {
+            return
+        }
+
+        if transcriptionEngineRaw != TranscriptionEngineKind.appleSpeech.rawValue {
             Trace.event("settings.transcriptionEngineMigrated", [
-                "from": TranscriptionEngineKind.appleSpeech.rawValue,
-                "to": Self.defaultTranscriptionEngine.rawValue
+                "from": transcriptionEngineRaw,
+                "to": TranscriptionEngineKind.appleSpeech.rawValue,
+                "reason": "appleSpeechTranscriptFluidDiarizationPipeline"
             ])
         }
-        migratedDefaultTranscriptionEngineToFluidAudio = true
+        transcriptionEngineRaw = TranscriptionEngineKind.appleSpeech.rawValue
+        migratedTranscriptionPipelineToAppleSpeech = true
     }
 
     private func migrateLLMEndpointsIfNeeded() {

@@ -504,26 +504,15 @@ private struct SettingsSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Transcription Engine", systemImage: "text.bubble")
+                    Label("Speech Pipeline", systemImage: "text.bubble")
                         .font(.headline)
-                    Picker("Engine", selection: Binding(
-                        get: { appModel.settings.transcriptionEngine },
-                        set: { newEngine in
-                            appModel.transcription.setEngine(newEngine)
-                            appModel.settings.transcriptionEngine = newEngine
-                        }
-                    )) {
-                        ForEach(TranscriptionEngineKind.allCases) { engine in
-                            Text(engine.displayName).tag(engine)
-                        }
-                    }
-                    .pickerStyle(.radioGroup)
-                    .disabled(appModel.transcription.isTranscribing)
-                    if appModel.transcription.isTranscribing {
-                        Text("Stop transcription before changing the engine.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Label("Apple Speech transcript segmentation", systemImage: "text.quote")
+                        .font(.caption)
+                    Label("SpeechVAD Sortformer speaker diarization", systemImage: "person.wave.2")
+                        .font(.caption)
+                    Text("Transcript rows are finalized by Apple Speech; speaker labels are detected separately by SpeechVAD Sortformer.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -1066,7 +1055,7 @@ private struct TranscriptFactCheckPanel: View {
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(currentSpeakerColor)
                 Spacer()
-                Text("FluidAudio diarization")
+                Text("SpeechVAD Sortformer diarization")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1276,7 +1265,7 @@ private struct TranscriptFactCheckPanel: View {
         if let diarizationError, !diarizationError.isEmpty {
             return diarizationError
         }
-        return "FluidAudio diarization distinguishes anonymous speakers as Speaker 1, Speaker 2, and so on."
+        return "SpeechVAD Sortformer diarization distinguishes anonymous speakers as Speaker 1, Speaker 2, and so on."
     }
 
     private var currentSpeakerColor: Color {
@@ -1533,19 +1522,10 @@ struct SettingsView: View {
                     Label("Transcription", systemImage: "text.bubble")
                         .font(.headline)
 
-                    Picker("Engine", selection: Binding(
-                        get: { appModel.settings.transcriptionEngine },
-                        set: { newEngine in
-                            appModel.transcription.setEngine(newEngine)
-                            appModel.settings.transcriptionEngine = newEngine
-                        }
-                    )) {
-                        ForEach(TranscriptionEngineKind.allCases) { engine in
-                            Text(engine.displayName).tag(engine)
-                        }
-                    }
-                    .pickerStyle(.radioGroup)
-                    .disabled(appModel.transcription.isTranscribing)
+                    Label("Apple Speech transcript segmentation", systemImage: "text.quote")
+                        .font(.caption)
+                    Label("SpeechVAD Sortformer speaker diarization", systemImage: "person.wave.2")
+                        .font(.caption)
 
                     Toggle("Save transcripts automatically", isOn: $appModel.settings.saveTranscriptsAutomatically)
                 }

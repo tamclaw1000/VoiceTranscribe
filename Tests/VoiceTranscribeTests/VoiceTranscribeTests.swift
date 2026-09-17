@@ -74,8 +74,8 @@ import Testing
 }
 
 @MainActor
-@Test func defaultTranscriptionEngineIsFluidAudio() {
-    #expect(AppSettings.defaultTranscriptionEngine == .fluidAudio)
+@Test func defaultTranscriptionEngineIsAppleSpeech() {
+    #expect(AppSettings.defaultTranscriptionEngine == .appleSpeech)
 }
 
 @MainActor

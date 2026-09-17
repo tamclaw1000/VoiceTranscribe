@@ -10,6 +10,7 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 
 cd "$ROOT_DIR"
 swift package clean
+"$ROOT_DIR/scripts/prepare-speech-swift.sh"
 swift build -c "$CONFIGURATION"
 BIN_PATH="$(swift build -c "$CONFIGURATION" --show-bin-path)"
 

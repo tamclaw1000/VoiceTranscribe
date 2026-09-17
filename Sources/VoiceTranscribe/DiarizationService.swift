@@ -1,6 +1,7 @@
 import AVFoundation
-import FluidAudio
+import AudioCommon
 import Foundation
+import SpeechVAD
 
 @MainActor
 final class DiarizationCoordinator: ObservableObject {
@@ -9,10 +10,10 @@ final class DiarizationCoordinator: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var lastError: String?
 
-    private var engine: FluidAudioDiarizationEngine?
+    private var engine: SpeechSwiftSortformerDiarizationEngine?
     private var sessionID = UUID()
     private var lastSpeaker: SpeakerDiarizationSegment?
-    private var processedSegmentKeys = Set<String>()
+    private var tracedSegmentKeys = Set<String>()
 
     var currentSpeakerLabel: String? {
         lastSpeaker?.speakerLabel
@@ -23,13 +24,13 @@ final class DiarizationCoordinator: ObservableObject {
         isStarting = true
         Trace.event("diarization.starting")
         do {
-            let engine = FluidAudioDiarizationEngine()
+            let engine = SpeechSwiftSortformerDiarizationEngine()
             try await engine.start()
             self.engine = engine
             isStarting = false
             isRunning = true
             lastError = nil
-            Trace.event("diarization.started")
+            Trace.event("diarization.started", ["engine": "SpeechVAD Sortformer"])
         } catch {
             isStarting = false
             isRunning = false
@@ -44,7 +45,7 @@ final class DiarizationCoordinator: ObservableObject {
         segments = []
         sessionID = UUID()
         lastSpeaker = nil
-        processedSegmentKeys = []
+        tracedSegmentKeys = []
         isStarting = false
         isRunning = false
         lastError = nil
@@ -68,7 +69,7 @@ final class DiarizationCoordinator: ObservableObject {
                     guard self?.sessionID == sessionID else {
                         return
                     }
-                    self?.merge(finalized)
+                    self?.replaceSegments(finalized)
                     Trace.event("diarization.stopped", [
                         "segments": self?.segments.count ?? 0
                     ])
@@ -104,7 +105,7 @@ final class DiarizationCoordinator: ObservableObject {
                     guard self?.sessionID == sessionID else {
                         return
                     }
-                    self?.merge(updates)
+                    self?.replaceSegments(updates)
                 }
             } catch {
                 await MainActor.run {
@@ -125,22 +126,24 @@ final class DiarizationCoordinator: ObservableObject {
         return (lastSpeaker.speakerID, lastSpeaker.speakerName)
     }
 
-    private func merge(_ newSegments: [SpeakerDiarizationSegment]) {
-        for segment in newSegments {
-            let key = "\(segment.speakerID)|\(String(format: "%.2f", segment.startTime))|\(String(format: "%.2f", segment.endTime))"
-            guard !processedSegmentKeys.contains(key) else {
-                continue
-            }
-            processedSegmentKeys.insert(key)
-            segments.append(segment)
-            lastSpeaker = segment
+    private func replaceSegments(_ newSegments: [SpeakerDiarizationSegment]) {
+        segments = newSegments.sorted { $0.startTime < $1.startTime }
+        lastSpeaker = segments.max { $0.endTime < $1.endTime }
+
+        for segment in segments {
+            let key = segmentKey(segment)
+            guard !tracedSegmentKeys.contains(key) else { continue }
+            tracedSegmentKeys.insert(key)
             Trace.event("diarization.segment", [
                 "speaker": segment.speakerLabel,
                 "start": String(format: "%.2f", segment.startTime),
                 "end": String(format: "%.2f", segment.endTime)
             ])
         }
-        segments.sort { $0.startTime < $1.startTime }
+    }
+
+    private func segmentKey(_ segment: SpeakerDiarizationSegment) -> String {
+        "\(segment.speakerID)|\(String(format: "%.2f", segment.startTime))|\(String(format: "%.2f", segment.endTime))"
     }
 
     private static func monoFloatSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
@@ -189,37 +192,59 @@ final class DiarizationCoordinator: ObservableObject {
     }
 }
 
-private actor FluidAudioDiarizationEngine {
-    private var diarizer: LSEENDDiarizer?
+private actor SpeechSwiftSortformerDiarizationEngine {
+    private let targetSampleRate = 16_000
+    private var session: SortformerStreamingSession?
 
     func start() async throws {
-        diarizer = try await LSEENDDiarizer(variant: .dihard3)
+        session = try await SortformerStreamingSession.fromPretrained(
+            config: .streaming,
+            progressHandler: { progress, stage in
+                Trace.event("diarization.modelProgress", [
+                    "engine": "SpeechVAD Sortformer",
+                    "progress": String(format: "%.2f", progress),
+                    "stage": stage
+                ])
+            }
+        )
     }
 
     func process(samples: [Float], sampleRate: Double) throws -> [SpeakerDiarizationSegment] {
-        guard let diarizer else {
+        guard let session else {
             return []
         }
-        let update = try diarizer.process(samples: samples, sourceSampleRate: sampleRate)
-        return Self.map(update?.finalizedSegments ?? [])
+        let prepared = prepare(samples: samples, sampleRate: sampleRate)
+        guard !prepared.isEmpty else {
+            return []
+        }
+        let result = try session.push(audio: prepared)
+        return Self.map(result.segments)
     }
 
     func finalize() throws -> [SpeakerDiarizationSegment] {
-        guard let diarizer else {
+        guard let session else {
             return []
         }
-        let update = try diarizer.finalizeSession()
-        return Self.map(update?.finalizedSegments ?? [])
+        let result = try session.finish()
+        return Self.map(result.segments)
     }
 
-    private static func map(_ segments: [DiarizerSegment]) -> [SpeakerDiarizationSegment] {
+    private func prepare(samples: [Float], sampleRate: Double) -> [Float] {
+        let inputRate = Int(sampleRate.rounded())
+        guard inputRate > 0 else {
+            return samples
+        }
+        return AudioFileLoader.resample(samples, from: inputRate, to: targetSampleRate)
+    }
+
+    private static func map(_ segments: [DiarizedSegment]) -> [SpeakerDiarizationSegment] {
         segments.map { segment in
-            let speakerNumber = segment.speakerIndex + 1
+            let speakerNumber = segment.speakerId + 1
             return SpeakerDiarizationSegment(
                 speakerID: "Speaker \(speakerNumber)",
                 startTime: TimeInterval(segment.startTime),
                 endTime: TimeInterval(segment.endTime),
-                confidence: segment.activity
+                confidence: nil
             )
         }
     }

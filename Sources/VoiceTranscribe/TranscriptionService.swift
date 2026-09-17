@@ -217,7 +217,7 @@ final class TranscriptionCoordinator: ObservableObject {
         case .appleSpeech:
             return AppleSpeechTranscriptionService()
         case .fluidAudio:
-            return FluidAudioTranscriptionService()
+            return AppleSpeechTranscriptionService()
         }
     }
 

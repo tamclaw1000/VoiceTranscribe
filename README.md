@@ -123,7 +123,7 @@ API keys are never included in Markdown exports.
 ## Build
 
 ```sh
-swift build
+./build.sh
 ```
 
 ## Test

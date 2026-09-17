@@ -4,7 +4,7 @@ Project knowledge for future agents (and future-you). Read before touching code.
 
 ## What This Is
 
-VoiceTranscribe is a native macOS SwiftUI app for enumerating audio input devices, monitoring their levels with a live graph, recording to disk, displaying live transcripts with live FluidAudio speaker diarization, summarizing recordings, and running configurable AI processing prompts over finalized transcript text.
+VoiceTranscribe is a native macOS SwiftUI app for enumerating audio input devices, monitoring their levels with a live graph, recording to disk, displaying live transcripts with live SpeechVAD Sortformer speaker diarization, summarizing recordings, and running configurable AI processing prompts over finalized transcript text.
 
 - **Repo:** https://github.com/tamclaw1000/VoiceTranscribe
 - **Local:** `~/projects/ai/VoiceTranscribe`
@@ -25,7 +25,7 @@ VoiceTranscribeApp
        ├─ RecordingService — AsyncAudioFileWriter on .utility queue
        ├─ TranscriptionCoordinator
        │    └─ AppleSpeechTranscriptionService — SpeechTranscriber + SpeechAnalyzer
-       ├─ DiarizationCoordinator — FluidAudio LS-EEND speaker timeline + transcript annotation
+       ├─ DiarizationCoordinator — SpeechVAD Sortformer speaker timeline + transcript annotation
        ├─ SummaryCoordinator — paragraph-form recording summaries
        ├─ FactCheckCoordinator — AI processing queue, prompt templates, batching, prompt state
        ├─ PermissionService — lazy mic/speech auth with caching
@@ -58,7 +58,7 @@ Mic → AVAudioEngine tap → copyBuffer() → DispatchQueue.main
 
 8. **Prompt state is per template.** `{{prompt-state}}` accrues independently for each prompt template, updates from successful responses, resets with AI processing state, and forces that template's calls to run serially.
 
-9. **Diarization is live and best-effort.** FluidAudio LS-EEND runs alongside transcription. Transcript rows get the latest finalized speaker label when the ASR segment arrives, while Markdown export also includes the diarizer's separate speaker timeline for time-based review.
+9. **Diarization is live and best-effort.** SpeechVAD Sortformer streaming diarization runs alongside Apple Speech transcription. Transcript rows get the latest finalized speaker label when the ASR segment arrives, while Markdown export also includes the diarizer's separate speaker timeline for time-based review.
 
 ## Critical Gotchas
 
@@ -131,7 +131,7 @@ No CLI flag needed. The `Trace.swift` utility fires on every:
 
 ```sh
 cd ~/projects/ai/VoiceTranscribe
-swift build
+./build.sh
 ./run.sh
 ```
 
@@ -155,7 +155,7 @@ swift test
 | `AudioDeviceService.swift` | CoreAudio enumeration, 2s polling, transport labels |
 | `RecordingService.swift` | Async file writing, basename generation, metadata JSON |
 | `TranscriptionService.swift` | SpeechTranscriber pipeline, format conversion, coordinator |
-| `DiarizationService.swift` | FluidAudio LS-EEND speaker diarization, speaker timeline, transcript annotations |
+| `DiarizationService.swift` | SpeechVAD Sortformer speaker diarization, speaker timeline, transcript annotations |
 | `FactCheckService.swift` | AI processing LLM clients, queueing, prompt substitutions, batching, prompt state |
 | `PermissionService.swift` | Lazy mic/speech auth with caching and mock support |
 | `Trace.swift` | JSON-line event logger to `/tmp/VoiceTranscribe.log` |
@@ -171,6 +171,9 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.21 | 64 | Made SpeechVAD diarization startup nonblocking so Apple Speech transcript text appears immediately |
+| 2.4.20 | 63 | Replaced FluidAudio diarization with SpeechVAD Sortformer streaming diarization |
+| 2.4.19 | 62 | Fixed transcript processing to Apple Speech while keeping FluidAudio speaker diarization |
 | 2.4.18 | 61 | Removed stalled partial finalization and suppressed stale FluidAudio partial repeats |
 | 2.4.17 | 60 | Added fallback finalization for stalled FluidAudio interim transcript segments |
 | 2.4.16 | 59 | Made packaged app builds run `swift package clean` before compiling |

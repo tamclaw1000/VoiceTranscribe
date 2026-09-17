@@ -209,3 +209,27 @@ Relevant events:
   - Final transcript speaker assignment by timeline overlap.
   - Ambiguous/no-overlap speaker assignment.
 
+## Soniqo speech-swift Trial Notes
+
+Attempted direct SwiftPM integration of `https://github.com/soniqo/speech-swift` on the `wip/add-diarization-current` branch.
+
+Relevant API:
+
+- Product: `SpeechVAD`
+- Streaming class: `SortformerStreamingSession`
+- Loader: `SortformerStreamingSession.fromPretrained(config: .streaming, ...)`
+- Push audio with `push(audio:)`, finalize with `finish()`
+- Input requirement: 16 kHz mono `Float` PCM
+- Output: whole-stream `DiarizationResult` snapshots with `DiarizedSegment.startTime`, `endTime`, and `speakerId`
+
+Blocker:
+
+- Adding `SpeechVAD` through SwiftPM pulls in `MLXCommon` and the `mlx-swift` package even though the Sortformer streaming path itself is CoreML-based.
+- `swift test` failed during transitive `mlx-swift` Metal compilation before app code compiled.
+- Because of that package-level dependency graph, direct `SpeechVAD` import is not currently a viable drop-in for this app.
+
+Possible paths:
+
+- Ask upstream for a CoreML-only Sortformer product that excludes `MLXCommon`.
+- Vendor a small, attributed subset of Sortformer code plus the required model downloader/error helpers into this repo.
+- Keep Apple Speech for transcript boundaries and use any future Sortformer integration only as a side-channel diarizer that emits time-aligned speaker timeline snapshots.

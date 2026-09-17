@@ -1609,3 +1609,53 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify the test suite passes.
 - [x] Bump `CFBundleShortVersionString` to `2.4.18`.
 - [x] Bump `CFBundleVersion` to `61`.
+
+## 81. v2.4.19. Apple Speech Transcript Pipeline
+
+### 81a. Transcription and Diarization
+
+- [x] Make Apple Speech the fixed live transcript engine so transcript rows use Apple's finalized segment boundaries.
+- [x] Keep FluidAudio in the live pipeline for speaker diarization only.
+- [x] Replace transcription engine pickers with a read-only pipeline summary in Settings.
+- [x] Migrate saved transcription-engine preferences back to Apple Speech.
+
+### 81b. Tests and Version
+
+- [x] Update default transcription engine regression coverage.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.19`.
+- [x] Bump `CFBundleVersion` to `62`.
+
+## 82. v2.4.20. SpeechVAD Sortformer Diarization
+
+### 82a. Diarization
+
+- [x] Add the local `speech-swift` checkout as a SwiftPM dependency for `SpeechVAD` and `AudioCommon`.
+- [x] Replace the live FluidAudio diarization engine with SpeechVAD Sortformer streaming diarization.
+- [x] Keep Apple Speech as the transcript segmentation engine while preserving the existing speaker annotation/export surface.
+- [x] Update build scripts to resolve and patch the MLX checkout before clean builds so generated Metal sources do not break the Xcode Metal wrapper.
+- [x] Add a root `build.sh` clean-build helper.
+
+### 82b. Tests and Version
+
+- [x] Verify `./build.sh` succeeds.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.20`.
+- [x] Bump `CFBundleVersion` to `63`.
+
+## 83. v2.4.21. Nonblocking Diarization Startup
+
+### 83a. Latency
+
+- [x] Start Apple Speech transcription before SpeechVAD Sortformer diarization startup.
+- [x] Launch diarization model loading in a background task so first transcript text is not blocked by model download/load/CoreML warmup.
+- [x] Cancel pending diarization startup when live or file transcription stops.
+- [x] Feed transcription before diarization for live and file audio buffers.
+- [x] Dispatch capture consumers in a stable priority order: transcribe, record, diarize, then any remaining consumers.
+
+### 83b. Tests and Version
+
+- [x] Verify `./build.sh` succeeds.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.21`.
+- [x] Bump `CFBundleVersion` to `64`.

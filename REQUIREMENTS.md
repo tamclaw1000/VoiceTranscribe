@@ -36,6 +36,7 @@ Internal architecture, programming languages, frameworks, processing algorithms,
 ### 3.1 Workspace Organization and Controls
 
 - Separate source and prompt controls from the content workspace. A wide display should support viewing both together; narrower displays may use equivalent navigation that keeps all actions reachable.
+- The default main-window size should be wide enough to show source controls, live levels, and the selected content tab without immediate horizontal crowding.
 - Group live devices under Microphones, loaded audio under File Sources, and prompt toggles under AI Prompts. Include a manual device refresh and an always-available Load File action.
 - Provide distinct Live Transcript, Transcript Paragraphs, AI Summary, and Recent Recordings views. Tabs are suitable, but a particular widget or window arrangement is not required.
 - Keep source identity, capture/recording status, live input levels, and access to Settings discoverable while navigating content views. Show application version and build when available, or explain when version information is unavailable.
@@ -57,7 +58,7 @@ Internal architecture, programming languages, frameworks, processing algorithms,
 
 ### 3.3 Content Views
 
-- Live Transcript presents timestamp, speaker label when available, and text for each entry, with interim text visually distinct. The transcript row should prioritize speaker identity over repeating the audio source. Show a prominent current-speaker status while diarization is active. Associate prompt results beneath the relevant entry and label each by prompt name.
+- Live Transcript presents timestamp, speaker label when available, and text for each entry, with interim text visually distinct. The transcript row should prioritize speaker identity over repeating the audio source. Show a prominent current-speaker status while diarization is active, and use stable distinct colors to help differentiate speaker labels. Associate prompt results beneath the relevant entry and label each by prompt name.
 - Provide Auto-scroll, Copy Text, Save to File, and Export Markdown actions alongside transcription and AI processing status.
 - Show whether sentence-level AI processing is disabled, ready, or processing. Per-result states distinguish queued, running, failed, and completed work. Interim text is awaiting finalization and is not an accepted AI job.
 - Disabling prompts governs new work; continue to show the actual status and results of earlier accepted work.
@@ -73,7 +74,7 @@ Internal architecture, programming languages, frameworks, processing algorithms,
 - LLM Models includes configuration editing, diagnostic model selection, model test actions, and the global model override.
 - Prompt Templates includes enabled state, name, prompt text, supported-placeholder help, effective model, add/remove actions, and reset to the default template text.
 - Retain each prompt's individual model assignment while the global override is enabled; make clear that it is temporarily overridden and restore its use when the override is disabled. Disable individual model editing while the override is active.
-- Persist valid settings changes and make them consistent across every Settings entry point. Closing Settings does not itself grant permissions.
+- Persist valid settings changes and make them consistent across every Settings entry point. The main-window Settings control and platform menu Settings command must open the same Settings experience at the same usable size. Closing Settings does not itself grant permissions.
 - Allow output destination selection, audio-file import, text saving, and Markdown export using the environment's file picker, storage picker, or equivalent interaction. Cancellation leaves existing content and settings intact.
 - Mask API keys during ordinary editing. Show model-test and save/export outcomes within the active interaction so they are not hidden behind another window.
 
@@ -244,6 +245,7 @@ Support the following user-facing placeholders:
 - Allow a model per sentence prompt and a global override that routes all enabled prompts and the AI Summary to the selected global model.
 - Show the effective model and whether it is globally overridden. When removing an assigned model, reassign affected prompts to the remaining selected model and show the new assignment.
 - Provide a plain-prompt connectivity test for a selected model and a test of configured AI processing, showing returned output or a useful error. Identify the model and prompt being tested. Tests must be usable without starting audio capture or enabling live sentence processing and must not change session results or prompt state.
+- Test the active AI route at launch when sentence-level AI processing is enabled. Show whether the active AI route is untested, testing, reachable, failed, or disabled, and identify the active model choice or mixed-model configuration currently in use.
 - Keep the diagnostic model selection distinct from per-prompt assignments and the global override; selecting a diagnostic model alone does not reroute accepted processing.
 - Accept provider-appropriate base URLs and, for OpenAI-compatible configurations, versioned or full chat-completions URLs without duplicating route components. Support compatible proxies and routers without requiring optional provider features such as structured-response controls.
 - Validate required configuration fields and report invalid addresses before sending requests. Normalize harmless surrounding whitespace and legacy escaped slashes in stored endpoint/model strings. Do not silently send text to another destination on validation failure.

@@ -1,618 +1,241 @@
-# VoiceTranscribe Architecture
+# ARCHITECTURE.md — VoiceTranscribe
 
-This document summarizes the current technical implementation so another agent can safely resume work. It complements `AGENTS.md`, `REQUIREMENTS.md`, and the versioned checklist in `IMPLEMENTATION.md`.
+Project architecture notes and build history for future agents (and future-you). Read before touching code.
 
-## Runtime Shape
+## What This Is
 
-VoiceTranscribe is a native macOS SwiftUI executable package.
+VoiceTranscribe is a native macOS SwiftUI app for enumerating audio input devices, monitoring their levels with a live graph, recording to disk, displaying live transcripts with live SpeechVAD Sortformer speaker diarization, summarizing recordings, and running configurable AI processing prompts over finalized transcript text.
 
-- Package: `Package.swift`
-- Executable target: `VoiceTranscribe`
-- Test target: `VoiceTranscribeTests`
-- Minimum platform: macOS 26
-- Swift tools: 6.3
-- Swift language mode: 5
-- Local dependencies: `external/FluidAudio`, `external/speech-swift-worktree`
+- **Repo:** https://github.com/tamclaw1000/VoiceTranscribe
+- **Local:** `~/projects/ai/VoiceTranscribe`
+- **Platform:** macOS 26+ (requires SpeechTranscriber API)
+- **Language:** Swift (Swift 5 language mode, building with Swift 6.3 toolchain)
+- **UI:** SwiftUI (AppKit bridges only for folder picker and privacy settings)
 
-The application is centered on `AppModel`, a `@MainActor ObservableObject` that owns the user workflow and all long-lived services.
+## Architecture
 
-```text
+```
 VoiceTranscribeApp
-  -> ContentView / SettingsView
-     -> AppModel
-        -> AudioDeviceService
-        -> PermissionService
-        -> AppSettings
-        -> AudioCaptureService
-        -> RecordingService
-        -> TranscriptionCoordinator
-           -> AppleSpeechTranscriptionService
-           -> FluidAudioTranscriptionService
-        -> DiarizationCoordinator
-           -> SpeechVAD SortformerStreamingSession
-        -> SummaryCoordinator
-        -> FactCheckCoordinator
-           -> OllamaFactCheckService
-        -> MarkdownExportService
+  └─ AppModel (@MainActor, ObservableObject) — central orchestrator
+       ├─ AudioDeviceService — CoreAudio enumeration, 2s polling timer
+       ├─ AudioCaptureService — AVAudioEngine tap → consumer fan-out
+       │    ├─ consumers["listen"]      → (noop, viz is automatic)
+       │    ├─ consumers["record"]      → RecordingService.consume()
+       │    └─ consumers["transcribe"]  → TranscriptionCoordinator.consume()
+       ├─ RecordingService — AsyncAudioFileWriter on .utility queue
+       ├─ TranscriptionCoordinator
+       │    └─ AppleSpeechTranscriptionService — SpeechTranscriber + SpeechAnalyzer
+       ├─ DiarizationCoordinator — SpeechVAD Sortformer speaker timeline + transcript annotation
+       ├─ SummaryCoordinator — paragraph-form recording summaries
+       ├─ FactCheckCoordinator — AI processing queue, prompt templates, batching, prompt state
+       ├─ PermissionService — lazy mic/speech auth with caching
+       └─ AppSettings — @AppStorage-backed preferences
 ```
 
-`AppModel` forwards `objectWillChange` from nested observable services. This is required because `@Published` reference-type children do not automatically make SwiftUI re-render when the child publishes internally.
+### Data Flow
 
-## Source Files
-
-| File | Main Responsibility |
-| --- | --- |
-| `VoiceTranscribeApp.swift` | App entry point, top-level model injection, Settings scene. |
-| `Views.swift` | SwiftUI main split view, source rows, graph, transcript/AI rows, settings tabs. |
-| `AppModel.swift` | User actions, workflow orchestration, permission flow, recording/transcription/file actions, export. |
-| `AppSettings.swift` | Persisted settings, LLM endpoint config, prompt templates, global prompt model routing. |
-| `Models.swift` | Core value types: sources, sessions, transcript segments, visualization, file sources. |
-| `AudioDeviceService.swift` | CoreAudio input-device enumeration and polling. |
-| `AudioCaptureService.swift` | `AVAudioEngine` input tap, source selection, buffer copying, visualization, consumer fan-out. |
-| `RecordingService.swift` | Audio file creation/finalization, async writer queue, recording metadata. |
-| `TranscriptionService.swift` | Transcription protocol, Apple Speech implementation, coordinator/state. |
-| `FluidAudioTranscriptionService.swift` | FluidAudio Parakeet EOU streaming ASR implementation and model download/load path. |
-| `DiarizationService.swift` | SpeechVAD Sortformer live diarization wrapper, speaker timeline state, transcript speaker annotations. |
-| `SummaryService.swift` | Paragraph-form transcript summary/organization. |
-| `FactCheckService.swift` | AI processing model clients, prompt rendering, sentence queue, batching, prompt state. |
-| `MarkdownExportService.swift` | Markdown transcript/session export. |
-| `PermissionService.swift` | Microphone and speech permission state/request helpers. |
-| `Trace.swift` | JSON-line tracing to `/tmp/VoiceTranscribe.log`. |
-| `Utilities.swift` | File naming, bounded buffer, transcript document helpers. |
-
-## UI Composition
-
-`ContentView` is a `NavigationSplitView`.
-
-Left pane:
-
-- `Microphones` section: live CoreAudio devices.
-- `File Sources` section: user-loaded audio files.
-- `AI Prompts` section: prompt-template enable toggles and effective model names.
-- Pinned version footer.
-- Toolbar `Refresh` button.
-
-Right pane:
-
-- Settings/status bar.
-- `GraphPanel` for input level history.
-- Tabbed detail area:
-  - `Live Transcript` with timestamp, speaker, text, and AI result rows.
-  - `Recording Summary` in current code. Requirements now target `Transcript Paragraphs` plus a separate `AI Summary`.
-  - `Recent Recordings`
-
-Settings exists in two surfaces:
-
-- `SettingsSheet`: modal sheet launched from the main window.
-- `SettingsView`: standalone macOS Settings scene.
-
-Both use tabs for `General`, `LLM Models`, and `Prompt Templates`. The standalone Settings window exposes output folder, audio format, automatic transcript saving, and visualization sensitivity; the sheet focuses on permissions, transcription engine, summary prompt, LLMs, and prompts.
-
-## Data Ownership
-
-`AppModel` owns session-level state:
-
-- Active source identity via `AudioCaptureService.activeSource`.
-- Completed recordings.
-- Loaded file sources.
-- Active file transcription ID/progress.
-- Current transcript source name.
-- User-facing message string.
-- Recently active recording filename/path for Finder reveal.
-
-`AudioCaptureService` owns live capture state:
-
-- Capture status.
-- Active source.
-- Registered audio consumers.
-- Visualization snapshot and bounded level history.
-
-`RecordingService` owns active recording state:
-
-- Current `RecordingSession`.
-- Async writer.
-- Last writer error.
-
-`TranscriptionCoordinator` owns transcript state:
-
-- Finalized `TranscriptSegment` array.
-- Current interim segment.
-- `TranscriptDocument` merge state.
-- Buffer snapshot.
-- Selected transcription service instance.
-
-`DiarizationCoordinator` owns speaker state:
-
-- Live speaker timeline segments.
-- Current/latest speaker annotation.
-- SpeechVAD Sortformer streaming session lifecycle.
-- Snapshot replacement and trace dedupe for repeated timeline updates.
-
-`FactCheckCoordinator` owns AI processing state:
-
-- Visible `FactCheckItem` rows.
-- Queue worker count and worker tasks.
-- Prompt-state dictionary keyed by prompt template ID.
-- Deduplication keys by prompt template and normalized sentence.
-
-`SummaryCoordinator` owns paragraph-form summary state:
-
-- Paragraphs.
-- Sentence count.
-- Current summary prompt behavior.
-
-`AppSettings` owns persisted configuration:
-
-- Output folder path.
-- Audio format.
-- Transcription engine.
-- Automatic transcript saving.
-- Visualization sensitivity.
-- LLM endpoint configurations.
-- Selected LLM endpoint.
-- Global prompt model flag and model ID.
-- AI prompt templates.
-- Summary prompt.
-- Transcript auto-scroll.
-
-Most settings are stored with `@AppStorage`, including JSON-encoded arrays for LLM endpoints and prompt templates.
-
-## Audio Capture Flow
-
-Live microphone workflow:
-
-```text
-User presses Transcribe or Record
-  -> AppModel ensures permissions
-  -> AppModel.ensureCapture(source)
-  -> AudioCaptureService.start(source)
-     -> select CoreAudio input device on AVAudioEngine input node
-     -> install tap on input bus
-     -> deep-copy tap buffer
-     -> DispatchQueue.main
-     -> AudioCaptureService.process(buffer,time)
-        -> compute RMS/peak/display level
-        -> update VisualizationSnapshot at 30 fps
-        -> fan copied buffer to registered consumers
+```
+Mic → AVAudioEngine tap → copyBuffer() → DispatchQueue.main
+  → process() → metrics + visualization (30fps throttle)
+  → fan out to registered consumers (listen/record/transcribe)
 ```
 
-Consumers are keyed by string IDs:
+### Key Design Decisions
 
-- `"listen"`: no-op consumer used to keep visualization active.
-- `"record"`: `RecordingService.consume`.
-- `"diarize"`: `DiarizationCoordinator.consume`.
-- `"transcribe"`: `TranscriptionCoordinator.consume`.
+1. **Single capture path, multiple consumers.** One `AVAudioEngine` tap feeds all active modes. `AudioCaptureService` fans out copied buffers. Capture stops when no consumers remain (`stopIfUnused()`).
 
-Capture stops only when all consumers are removed and `stopIfUnused()` sees an empty consumer registry.
+2. **Off-main-actor file writing.** `AsyncAudioFileWriter` uses its own `DispatchQueue` (`.utility` QoS) so disk I/O never blocks the audio tap.
 
-Important invariant: audio tap buffers are transient. Every path copies buffers before retaining, dispatching, writing, or transcribing them.
+3. **SpeechTranscriber (not SFSpeechRecognizer).** The legacy `SFSpeechRecognizer` is broken for streaming on macOS 26. Migration to `SpeechAnalyzer` + `SpeechTranscriber` happened in v1.3.0. The analyzer stream must be started BEFORE audio buffers are fed. Buffers are resampled via `AVAudioConverter` to the analyzer's preferred format.
 
-## Recording Flow
+4. **Startup + fallback permission model.** Device enumeration is passive, but app startup now requests native microphone/speech dialogs when macOS reports a not-determined state, then relaunches the packaged app so audio starts with fresh authorization. `PermissionService.authorizeFirstRecordingDeviceTouch()` remains the fallback path before capture.
 
-Start:
+5. **Buffer copying is mandatory.** Tap buffers are transient. Every buffer is deep-copied (`copyBuffer()`, `deepCopy()`) before being handed off to consumers.
 
-```text
-User checks Record
-  -> AppModel.toggleRecord
-  -> ensure permissions and capture
-  -> RecordingService.start(source,inputFormat,outputFolder,outputFormat)
-     -> create output folder
-     -> build in-progress basename
-     -> create AVAudioFile
-     -> create AsyncAudioFileWriter
-  -> AudioCaptureService.addConsumer("record")
-```
+6. **AI processing is prompt-template based.** Enabled prompt templates, not a single global AI toggle, determine whether finalized sentences are sent to LLMs. Each prompt can use its own model unless `useGlobalPromptLLM` is enabled.
 
-Write:
+7. **Global prompt model enables batching.** When all enabled prompts target the global model, multiple prompt questions for the same sentence can be sent in one LLM request and mapped back to individual result rows.
 
-```text
-AudioCaptureService.process
-  -> "record" consumer
-  -> RecordingService.consume
-  -> deepCopy buffer
-  -> AsyncAudioFileWriter.write on utility DispatchQueue
-```
+8. **Prompt state is per template.** `{{prompt-state}}` accrues independently for each prompt template, updates from successful responses, resets with AI processing state, and forces that template's calls to run serially.
 
-Stop:
+9. **Diarization is live and best-effort.** SpeechVAD Sortformer streaming diarization runs alongside Apple Speech transcription. Transcript rows get the latest finalized speaker label when the ASR segment arrives, while Markdown export also includes the diarizer's separate speaker timeline for time-based review.
 
-```text
-User unchecks Record
-  -> remove "record" consumer
-  -> RecordingService.stop(transcriptText,saveTranscript,engine)
-     -> drain writer queue
-     -> rename audio from in-progress basename to final basename
-     -> optionally write transcript .txt
-     -> write metadata .json
-     -> return finalized RecordingSession
-  -> AppModel adds completed recording to recent recordings
-  -> AppModel may add completed audio as a file source
-```
+## Critical Gotchas
 
-Known technical gap: `RecordingService.moveReplacingExisting` currently removes an existing destination before moving. Requirements call for collision-safe filenames.
+### ⚠️ Nested ObservableObject Bug (Fixed in v1.3.1)
 
-## Transcription Flow
+**The problem:** AppModel had `@Published` child ObservableObjects (`captureService`, `recordingService`, `transcription`, `permissionService`). When, say, `AudioCaptureService.status` changed, SwiftUI did NOT re-render — because `@Published` on a reference type only fires when the *reference* changes, not when the child's own `@Published` properties change.
 
-`TranscriptionService` protocol:
+**The fix:** In `AppModel.init()`, subscribe to each child's `objectWillChange` and forward to `self.objectWillChange`:
 
 ```swift
-protocol TranscriptionService {
-    var engineName: String { get }
-    func start(onSegment: @escaping (TranscriptSegment) -> Void) async throws
-    func append(_ buffer: AVAudioPCMBuffer)
-    func stop()
-}
+captureService.objectWillChange.sink { [weak self] _ in
+    self?.objectWillChange.send()
+}.store(in: &cancellables)
 ```
 
-`TranscriptionCoordinator` wraps the selected service. It resets transcript state on start, calls the service, and applies incoming segments:
+**Lesson:** Any time an ObservableObject contains `@Published` child ObservableObjects, you must forward their changes. Otherwise button states, labels, and panels silently fail to update.
 
-- Final segments are appended to `segments` and `TranscriptDocument`.
-- Interim segments update `interimSegment`.
-- Final segments trigger `onFinalSegment`, which `AppModel` wires to AI processing and summary updates.
-- Buffer status is tracked with `TranscriptionBufferSnapshot`.
+### ⚠️ AVAudioEngine Tap Must Copy Buffers
 
-### Apple Speech
+Tap callback buffers are transient — they're invalidated after the callback returns. Always `memcpy` or `deepCopy()` before fanning out to async consumers. RecordingService and TranscriptionService both do their own copies too.
 
-`AppleSpeechTranscriptionService` uses:
+### ⚠️ SpeechAnalyzer Input Stream Ordering
 
-- `SpeechTranscriber`
-- `SpeechAnalyzer`
-- `AnalyzerInput`
-- `AVAudioConverter`
+The analyzer stream must be started (`analyzer.start(inputSequence:)`) BEFORE any audio buffers are sent. Getting this order wrong causes silent transcription failures.
 
-Startup sequence:
+### ⚠️ AI Processing Labels
 
-1. Check speech authorization.
-2. Check `SpeechTranscriber.isAvailable`.
-3. Ensure language model is installed.
-4. Get analyzer-compatible audio format.
-5. Create analyzer input stream.
-6. Start result task over `transcriber.results`.
-7. Create raw-buffer stream and conversion task.
-8. Start analyzer before audio buffers are fed.
+The Swift type names still include historical `FactCheck` names, but visible UI and documentation should say **AI Processing** unless specifically describing the old implementation. Avoid reintroducing user-facing "Fact Check" labels.
 
-Stop finishes raw stream and asks analyzer to finalize through end of input.
+### ⚠️ Stateful Prompt Queueing
 
-### FluidAudio
+Prompts that include `{{prompt-state}}` must not be batched or run concurrently for the same template. Inject prompt state immediately before the request is sent, then update it from the successful response before the next stateful call for that template.
 
-`FluidAudioTranscriptionService` uses `StreamingEouAsrManager` with `.ms320` chunk size and EOU debounce of 1280 ms.
+### ⚠️ Version Bumps Are Manual
 
-Startup sequence:
+Version numbers live in `Resources/Info.plist` (`CFBundleShortVersionString` and `CFBundleVersion`). Every code change section in `IMPLEMENTATION.md` should end with a bump. If the plist says 1.3.0 but the checklist says 1.3.2, someone forgot.
 
-1. Create manager.
-2. Register EOU and partial callbacks before loading models.
-3. Verify/download Parakeet EOU model files.
-4. Load models from `~/Library/Application Support/FluidAudio/Models/parakeet-eou-streaming/320ms/`.
+### ⚠️ IMPLEMENTATION.md IS the Changelog — Do NOT Create a Separate CHANGELOG.md
 
-EOU callback trims text, capitalizes, appends punctuation if needed, and emits a final `TranscriptSegment`.
+This project tracks versioned work exclusively in `IMPLEMENTATION.md`. Each version is a numbered section with checklists. There is NO `CHANGELOG.md` file — do not create one. When adding a new version:
 
-Partial callback emits non-final segments.
+1. Add a new numbered section to `IMPLEMENTATION.md` (e.g., `## 30. v1.5.0. Feature Name`).
+2. Use checked-off `- [x]` items describing what was done.
+3. Bump `CFBundleShortVersionString` and `CFBundleVersion` in `Resources/Info.plist`.
+4. Add a row to the Version History table in THIS file (`ARCHITECTURE.md`).
 
-Stop drains `mgr.finish()` and emits any final trailing utterance.
+That's it. No other files need version info.
 
-## Diarization Flow
+## Tracing
 
-`DiarizationCoordinator` runs SpeechVAD Sortformer streaming diarization in parallel with Apple Speech transcription for live microphone and file-source transcription.
-
-Startup:
-
-```text
-AppModel.startTranscriptionConsumer
-  -> DiarizationCoordinator.start()
-     -> SpeechSwiftSortformerDiarizationEngine actor
-     -> SortformerStreamingSession.fromPretrained(config: .streaming)
-  -> AudioCaptureService.addConsumer("diarize")
-  -> TranscriptionCoordinator.start()
-```
-
-Processing:
-
-```text
-AudioCaptureService.process
-  -> "diarize" consumer
-  -> downmix AVAudioPCMBuffer to mono Float samples
-  -> resample to 16 kHz mono with AudioFileLoader
-  -> SortformerStreamingSession.push(audio:)
-  -> replace whole-stream SpeakerDiarizationSegment snapshot
-  -> publish SpeakerDiarizationSegment timeline
-```
-
-`TranscriptionCoordinator` has a `speakerProvider` callback. When a transcript segment is applied, the coordinator asks `DiarizationCoordinator` for the current speaker and stores `speakerID`/`speakerName` on the `TranscriptSegment`. This is a best-effort live annotation based on the latest finalized diarization update. The complete diarization timeline remains available separately for exports.
-
-Stop:
-
-```text
-AppModel.stopTranscription
-  -> remove "diarize" consumer
-  -> DiarizationCoordinator.stop()
-     -> finalizeSession()
-     -> merge remaining speaker timeline segments
-```
-
-## File Transcription Flow
-
-File sources are represented by `FileInputSource`.
-
-`FileInputSource.from(url:)` first tries `AVAudioFile`; if that fails, it falls back to `AVURLAsset` for compressed formats.
-
-The AppModel file path reads audio with an asset reader, feeds copied buffers through diarization and transcription, and updates `fileTranscriptionProgress`. Only one file source is transcribed at a time.
-
-File sources are not recorded. They reuse transcript display, summary, and AI processing once transcript segments are emitted.
-
-## AI Processing Flow
-
-Historical code names use `FactCheck`; user-facing text should say `AI Processing`.
-
-Final transcript segment path:
-
-```text
-TranscriptionCoordinator.apply(final segment)
-  -> AppModel.transcription.onFinalSegment
-     -> settings.effectiveEnabledAIPromptTemplates
-     -> FactCheckCoordinator.enqueueTranscriptSegment(...)
-     -> SummaryCoordinator.enqueueTranscriptSegment(...)
-```
-
-AI queue steps:
-
-1. Ignore disabled AI or non-final segments.
-2. Build `FactCheckPromptContext` from transcript conversation.
-3. Resolve each enabled prompt's effective LLM endpoint.
-4. Extract complete sentences using `.`, `?`, and `!`.
-5. Deduplicate by `promptTemplateID|normalizedSentence`.
-6. Queue one `FactCheckItem` per sentence and prompt.
-7. Start up to three workers.
-
-Prompt placeholders:
-
-- `{{sentence}}`
-- `{{conversation}}`
-- `{{last-3}}`
-- `{{last-5}}`
-- `{{last-10}}`
-- `{{prompt-state}}`
-
-If a prompt contains no supported placeholder, the current sentence is appended automatically.
-
-Prompt state:
-
-- Stored per prompt template ID.
-- Injected immediately before sending.
-- Updated from successful result display text.
-- Cleared on coordinator reset.
-- Stateful prompts are serialized by template ID so they do not race against stale state.
-
-Batching:
-
-- Enabled when `useGlobalPromptLLM` is on and multiple prompts route to the same model for the same sentence.
-- A shared `batchGroupID` groups queued items.
-- `BatchFactCheckPrompt.render` asks the model to return JSON answers by prompt item ID.
-- Missing batch answers become per-item failures.
-
-## LLM Provider Adapters
-
-`OllamaFactCheckService` handles all provider request/response shapes despite the historical name.
-
-Supported providers:
-
-| Provider | Request Shape | Auth |
-| --- | --- | --- |
-| Ollama | `POST /api/generate` | Optional bearer token |
-| OpenAI-compatible | `POST /v1/chat/completions` | Bearer token |
-| OpenRouter | OpenAI-compatible chat completions plus `X-Title` | Bearer token |
-| Anthropic | `POST /v1/messages` | `x-api-key` |
-| Gemini | `POST /v1beta/models/{model}:generateContent` | Query `key` |
-
-OpenAI-compatible requests intentionally send only `model` and `messages` for broad proxy/router compatibility.
-
-Response parsing:
-
-- Strict JSON `FactCheckResult` is accepted.
-- Fenced JSON is accepted.
-- JSON embedded inside prose is attempted.
-- Plain text falls back to an `.unverifiable` result with `rawResponse`, so arbitrary prompt output can display unchanged.
-
-## Markdown Export
-
-`MarkdownExportService.makeDocument` builds a snapshot from:
-
-- `MarkdownExportContext`
-- Finalized transcript segments.
-- Speaker diarization segments.
-- AI result items.
-- Summary paragraphs.
-
-Sections:
-
-- `# DETAILS`
-- `# RECORDING`
-- `# SPEAKERS` when speaker timeline segments exist.
-- `# SUMMARY` when summary text exists.
-- `# AI RESULTS`
-- `# FILES` when related URLs exist.
-
-The recording table has one row per finalized segment, including speaker labels and associated AI result text in the `AI result` cell.
-
-`# SPEAKERS` contains diarized speaker start/end offsets, labels, and confidence values when the diarizer returns a speaker timeline.
-
-`# AI RESULTS` includes:
-
-- AI enabled flag.
-- LLM endpoint/provider/base URL/model.
-- Summary result.
-- Non-empty prompt states.
-- AI processing prompt templates.
-- Summary prompt.
-
-API keys are not exported.
-
-Markdown table cells escape backslashes, pipes, line breaks, and carriage returns.
-
-## Persistence and Files
-
-Settings:
-
-- `AppSettings` uses `@AppStorage`/UserDefaults.
-- Complex settings are JSON-encoded strings behind computed properties.
-- LLM endpoints are sanitized on read/write.
-- Prompt templates are sanitized on read/write.
-
-Recording output:
-
-- Default output folder is managed by settings.
-- Audio extensions: `.m4a`, `.caf`, `.wav`.
-- Transcript extension: `.txt`.
-- Metadata extension: `.json`.
-- Metadata dates are ISO-8601 encoded.
-
-FluidAudio models:
-
-- Downloaded under user Application Support.
-- Verified by checking `coremldata.bin` files and `vocab.json`.
-- Partial model folders are removed before fresh download.
-
-Logs:
-
-- `/tmp/VoiceTranscribe.log`
-- JSON lines.
-- Always on.
-
-## External Frameworks and Libraries
-
-Apple frameworks:
-
-- SwiftUI: UI.
-- Combine: nested observable forwarding.
-- AppKit: save/open panels, Finder reveal, app restart, privacy settings.
-- AVFoundation: audio engine, buffers, audio files, assets, asset reader.
-- AudioToolbox/CoreAudio: audio device IDs, input-device selection.
-- Speech: `SpeechTranscriber`, `SpeechAnalyzer`, speech authorization.
-- CoreMedia: buffer timestamps for analyzer input and asset duration.
-- UniformTypeIdentifiers: save panel content types.
-
-Third-party/local:
-
-- `external/FluidAudio`: Parakeet EOU streaming ASR, model download utilities, Core ML model runtime.
-- `external/speech-swift-worktree`: SpeechVAD Sortformer streaming diarization and AudioCommon resampling/model download utilities.
-
-Network:
-
-- LLM calls use `URLSession.shared.data(for:)`.
-- Ollama defaults to local `http://localhost:11434`.
-- Remote providers can be configured by the user.
-
-## Permissions and Startup
-
-`AppModel.runFirstLaunchPermissionFlowIfNeeded()`:
-
-1. Refresh permission state.
-2. If mic or speech permission is `notDetermined`, request native dialogs.
-3. Persist setup state.
-4. Relaunch the packaged `.app` with `/usr/bin/open -n`.
-5. Terminate the current app instance.
-
-Fallback permission checks run before capture through `PermissionService.authorizeFirstRecordingDeviceTouch()`.
-
-If not running as an `.app` bundle, the app cannot relaunch itself and instead asks the user to restart manually.
-
-## Diagnostics
-
-Tracing is the primary debugging interface.
+Traces are **always-on** and write to `/tmp/VoiceTranscribe.log` as JSON lines (one per event):
 
 ```sh
 tail -f /tmp/VoiceTranscribe.log
 ```
 
-Useful event families:
+No CLI flag needed. The `Trace.swift` utility fires on every:
+- Button press (`button.listen.start`, `record.*`, `transcribe.*`)
+- Audio level sample (~every 1s: RMS, peak, display level, clipping)
+- Capture lifecycle (`capture.starting`, `.started`, `.stopped`, `.error`)
+- Recording I/O (`recording.started`, `.finalized`, `transcript.saved`, `.metadata.saved`)
+- Transcription event (`transcription.starting`, `.started`, `.stopped`, `segmentFinal`)
+- AI processing event (`factCheck.*` historical trace names, including prompt/template/model queue activity)
+- Diarization event (`diarization.*`)
+- Device change (`devices.changed`)
+- Permission state (`permission.mic`)
+- Error (various `.error` events)
 
-- `permission.*`
-- `capture.*`
-- `recording.*`
-- `transcript.*`
-- `transcription.*`
-- `fluidAudio.*`
-- `diarization.*`
-- `factCheck.*`
-- `llm.*`
-- `summary.*`
-- `settings.*`
-
-Tests use Swift Testing in `Tests/VoiceTranscribeTests/VoiceTranscribeTests.swift`.
-
-Current coverage includes:
-
-- File naming.
-- Transcript document merging.
-- Permission service behavior.
-- LLM endpoint sanitization and provider repair.
-- Prompt rendering placeholders.
-- Prompt state accrual.
-- AI queue concurrency.
-- Batch prompt calls.
-- Markdown export.
-- Speaker labels in text and Markdown export.
-
-## Common Change Points
-
-Add a new LLM provider:
-
-1. Add case to `LLMProviderKind`.
-2. Add default endpoint and display name.
-3. Add request builder in `OllamaFactCheckService.generate`.
-4. Add response parser.
-5. Add tests for request path/auth/model handling.
-
-Add a prompt placeholder:
-
-1. Update `FactCheckPrompt.render`.
-2. Update prompt editor help in `Views.swift`.
-3. Update README/REQUIREMENTS if user-facing.
-4. Add tests.
-
-Add a transcription engine:
-
-1. Add case to `TranscriptionEngineKind`.
-2. Implement `TranscriptionService`.
-3. Route in `AppModel.makeInitialService` and `TranscriptionCoordinator.makeService`.
-4. Add UI label and tests where possible.
-
-Change transcript row behavior:
-
-1. Update `TranscriptFactCheckPanel` in `Views.swift`.
-2. Check `MarkdownExportService` if export semantics also change.
-3. Check `REQUIREMENTS.md` UI/UX section.
-
-Change recording filenames:
-
-1. Update `FileNamer` in `Utilities.swift`.
-2. Update `RecordingService.stop`.
-3. Update tests for basename/timestamps.
-4. Ensure audio, transcript, and metadata basenames remain aligned.
-
-## Known Implementation Risks
-
-- `RecordingService.moveReplacingExisting` overwrites existing destination files; requirements call for collision-safe names.
-- `visualizationSensitivity` is persisted and shown but not currently applied by `AudioCaptureService.displayLevel`.
-- Device removal during active capture needs stronger handling.
-- Transcription backpressure is mostly represented as UI buffer state; slow downstream consumers need explicit policy.
-- Swift type names and trace names still use `FactCheck` for generic AI processing.
-- Requirements now call for a target UI split between `Transcript Paragraphs` and `AI Summary`; current UI still has `Recording Summary`.
-
-## Build, Test, Package
+## Build & Launch
 
 ```sh
+cd ~/projects/ai/VoiceTranscribe
 ./build.sh
-swift test
-./scripts/package-app.sh
+./run.sh
 ```
 
-The packaged app is written to:
+`./build.sh` always performs a clean SwiftPM build and refreshes the packaged app at `dist/VoiceTranscribe.app`.
 
-```text
-dist/VoiceTranscribe.app
-```
-
-Run the packaged app:
-
+Refresh only the .app package from the current build:
 ```sh
-open -n dist/VoiceTranscribe.app
+./scripts/package-app.sh
+# → dist/VoiceTranscribe.app
 ```
+
+Run tests:
+```sh
+swift test
+```
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `AppModel.swift` | Orchestrator, button handlers, permission gating, Combine subscriptions |
+| `AudioCaptureService.swift` | AVAudioEngine tap, metrics, visualization, consumer fan-out |
+| `AudioDeviceService.swift` | CoreAudio enumeration, 2s polling, transport labels |
+| `RecordingService.swift` | Async file writing, basename generation, metadata JSON |
+| `TranscriptionService.swift` | SpeechTranscriber pipeline, format conversion, coordinator |
+| `DiarizationService.swift` | SpeechVAD Sortformer speaker diarization, speaker timeline, transcript annotations |
+| `FactCheckService.swift` | AI processing LLM clients, queueing, prompt substitutions, batching, prompt state |
+| `PermissionService.swift` | Lazy mic/speech auth with caching and mock support |
+| `Trace.swift` | JSON-line event logger to `/tmp/VoiceTranscribe.log` |
+| `Models.swift` | Data types: SoundInputSource, RecordingSession, TranscriptSegment, etc. |
+| `Utilities.swift` | FileNamer, BoundedBuffer, TranscriptDocument |
+| `AppSettings.swift` | @AppStorage preferences, output folder, format |
+| `Views.swift` | All SwiftUI views: ContentView, SourceRow, GraphPanel, Transcript/AI processing panels, SettingsView |
+| `Resources/Info.plist` | Bundle metadata, permissions strings, version numbers |
+| `REQUIREMENTS.md` | Full product requirements |
+| `IMPLEMENTATION.md` | Versioned implementation checklist |
+
+## Version History
+
+| Version | Build | What Changed |
+|---------|-------|-------------|
+| 2.4.25 | 68 | Runs an active AI health test when AI processing is re-enabled from a disabled state |
+| 2.4.24 | 67 | Temporarily disabled automatic app relaunch after permission prompts to test whether it is still required |
+| 2.4.23 | 66 | Made the standard build script always refresh the packaged app bundle |
+| 2.4.22 | 65 | Added wider default window sizing, shared Settings entry point, per-speaker colors, and launch-time AI reachability status |
+| 2.4.21 | 64 | Made SpeechVAD diarization startup nonblocking so Apple Speech transcript text appears immediately |
+| 2.4.20 | 63 | Replaced FluidAudio diarization with SpeechVAD Sortformer streaming diarization |
+| 2.4.19 | 62 | Fixed transcript processing to Apple Speech while keeping FluidAudio speaker diarization |
+| 2.4.18 | 61 | Removed stalled partial finalization and suppressed stale FluidAudio partial repeats |
+| 2.4.17 | 60 | Added fallback finalization for stalled FluidAudio interim transcript segments |
+| 2.4.16 | 59 | Made packaged app builds run `swift package clean` before compiling |
+| 2.4.15 | 58 | Fixed packaging to use SwiftPM's actual build product path after clean builds |
+| 2.4.14 | 57 | Replaced the Live Transcript audio-source column with a speaker column |
+| 2.4.13 | 56 | Moved current-speaker status to a full-width Live Transcript strip |
+| 2.4.12 | 55 | Fixed prompt template editing so typed spaces are preserved |
+| 2.4.11 | 54 | Added a prominent current-speaker indicator in Live Transcript |
+| 2.4.10 | 53 | Moved Live Transcript speaker labels under the audio source |
+| 2.4.9 | 52 | Added a root launcher script for packaged app rebuild and launch |
+| 2.4.8 | 51 | Added live FluidAudio speaker diarization with transcript and export annotations |
+| 2.4.7 | 50 | Added accumulated prompt-state output to Markdown transcript exports |
+| 2.4.6 | 49 | Added per-prompt accumulated `{{prompt-state}}` substitution |
+| 2.4.5 | 48 | Batched multiple prompt questions into one LLM request when using a global prompt model |
+| 2.4.4 | 47 | Added timestamped conversation prompt placeholders for AI processing |
+| 2.4.3 | 46 | Fixed LLM model list refresh, enabled new prompts by default, and added a global model override for all prompts |
+| 2.4.2 | 45 | Fixed prompt-template mutations to refresh the UI immediately |
+| 2.4.1 | 44 | Moved Settings options into General, LLM Models, and Prompt Templates tabs |
+| 2.4.0 | 43 | Added multiple named AI prompt templates, per-prompt model selection, prompt toggles, three-call AI queue, and transcript auto-scroll |
+| 2.3.2 | 42 | Simplified OpenAI-compatible LLM requests, normalized saved endpoint strings, and moved main panels into tabs |
+| 2.3.1 | 41 | Combined transcript and AI result output into one Markdown recording table |
+| 2.3.0 | 40 | Added AI result metadata, prompts, summary, and fact-check output to Markdown exports |
+| 2.2.9 | 39 | Added a pinned version footer to the source sidebar |
+| 2.2.8 | 38 | Added Markdown export for transcript sessions |
+| 2.2.7 | 37 | Fixed permission-flow relaunch to start a fresh app instance |
+| 2.2.6 | 36 | Split the macOS menu Settings window into the same two-column options layout |
+| 2.2.5 | 35 | Made the AI toggle visible in the main settings bar and transcript header |
+| 2.2.4 | 34 | Added a global AI toggle that gates LLM fact-checking and LLM tests |
+| 2.2.3 | 33 | Added first-class OpenRouter configuration and repaired OpenRouter/OpenCode endpoint mismatches |
+| 2.2.2 | 32 | Moved LLM test buttons to top, fixed modal result display, improved LLM HTTP errors |
+| 2.2.1 | 31 | Added a plain selected-LLM prompt test for `Hello, what is 10 * 20?` |
+| 2.2.0 | 30 | Added LLM API types for Ollama, OpenAI-compatible, Anthropic, and Gemini endpoints |
+| 2.1.1 | 29 | Split Settings sheet into two columns and moved LLM configuration to the right |
+| 2.1.0 | 28 | Multiple configurable LLM endpoints with selected endpoint routing for fact-checking |
+| 2.0.9 | 27 | Added CopyText and SaveToFile actions to the Recording Summary |
+| 2.0.8 | 26 | Transcript text saves after transcription stops; added CopyText and SaveToFile actions |
+| 2.0.7 | 25 | Removed FluidAudio length-based partial finalization so fragments are not fact-checked |
+| 2.0.6 | 24 | First-launch native permission prompts with automatic app relaunch |
+| 2.0.5 | 23 | Running recording summary, editable summary prompt, transcript grid no longer auto-scrolls |
+| 2.0.4 | 22 | Default/migrate transcription engine to FluidAudio and trace transcription buffer intake |
+| 2.0.3 | 21 | Combined live transcript and fact-check output into one timestamp/source/text grid |
+| 2.0.2 | 20 | Editable Ollama fact-check prompt template in Settings |
+| 2.0.1 | 19 | Fact-check result display accepts raw Ollama prose and fenced JSON responses |
+| 2.0.0 | 18 | Fact-check pane backed by local Ollama model `igorls/gemma-4-12B-it-heretic-GGUF` |
+| 1.7.0 | 17 | File input sources: load audio files, transcribe files, auto-load recordings |
+| 1.6.0 | 16 | Settings popup, first-run access flow, disable buttons until permissions granted |
+| 1.5.4 | 14 | Real-time sentence boundary detection (NLTokenizer) / length-based commit (1.5.5) |
+| 1.5.1 | 11 | Fixed FluidAudio model verification (partial downloads), cleaned cache, bumped version |
+| 1.5.0 | 10 | FluidAudio integration: Parakeet EOU streaming ASR, pluggable engine architecture, engine picker in Settings |
+| 1.4.0 | 9 | Simplified UI: merged Listen+Transcribe, Record→checkbox with filename + Finder reveal |
+| 1.3.4 | 8 | PCM recording fix: 16-bit interleaved (VLC-compatible) |
+| 1.3.3 | 7 | Synchronous trace writes + stderr echo |
+| 1.3.2 | 6 | Structured event tracing (`Trace.swift`) |
+| 1.3.1 | 5 | Fixed nested ObservableObject SwiftUI bug |
+| 1.3.0 | 4 | Migrated from SFSpeechRecognizer to SpeechTranscriber |
+| 1.2.1 | 3 | Green icons, state console, live RMS/peak readout |
+| 1.2.0 | 2 | UX fixes, transcription buffer bar, audio level scaling |
+| 1.1.0 | 1 | Lazy permission requests with caching |
+| 1.0.0 | — | Initial implementation |

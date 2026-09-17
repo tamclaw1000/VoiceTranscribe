@@ -4,7 +4,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var appModel: AppModel
-    @State private var showSettings = false
+    @Environment(\.openSettings) private var openSettings
     @State private var selectedDetailTab: DetailTab = .transcript
 
     private enum DetailTab: Hashable {
@@ -48,8 +48,9 @@ struct ContentView: View {
         .task {
             let requestedSystemPermissions = await appModel.runFirstLaunchPermissionFlowIfNeeded()
             if !requestedSystemPermissions && appModel.needsPermissionsSetup {
-                showSettings = true
+                openSettings()
             }
+            appModel.testAIReachabilityOnLaunch()
         }
     }
 
@@ -110,7 +111,7 @@ struct ContentView: View {
 
         HStack(spacing: 12) {
             Button {
-                showSettings = true
+                openSettings()
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "gearshape")
@@ -124,6 +125,12 @@ struct ContentView: View {
                 ? "Transcription engine, permissions, and more"
                 : "Microphone or speech recognition permissions are missing — open Settings to grant them")
 
+            AIReachabilityIndicator(
+                status: appModel.aiReachability,
+                optionDescription: appModel.activeAIOptionDescription,
+                compact: true
+            )
+
             if !permissionsOK {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
@@ -136,10 +143,6 @@ struct ContentView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
-        .sheet(isPresented: $showSettings) {
-            SettingsSheet(isPresented: $showSettings)
-                .environmentObject(appModel)
-        }
     }
 
     private var mainDetail: some View {
@@ -426,246 +429,86 @@ private struct PermissionStatusView: View {
     }
 }
 
-// MARK: - Settings Sheet
+private struct AIReachabilityIndicator: View {
+    let status: AIReachabilityStatus
+    let optionDescription: String
+    let compact: Bool
+
+    private var statusText: String {
+        switch status.state {
+        case .disabled:
+            return "AI Disabled"
+        case .untested:
+            return "AI Untested"
+        case .testing:
+            return "Testing AI"
+        case .reachable:
+            return "AI Ready"
+        case .failed:
+            return "AI Failed"
+        }
+    }
+
+    private var statusColor: Color {
+        switch status.state {
+        case .disabled, .untested:
+            return .secondary
+        case .testing:
+            return .orange
+        case .reachable:
+            return .green
+        case .failed:
+            return .red
+        }
+    }
+
+    private var systemImage: String {
+        switch status.state {
+        case .disabled:
+            return "sparkles.slash"
+        case .untested:
+            return "questionmark.circle"
+        case .testing:
+            return "arrow.triangle.2.circlepath"
+        case .reachable:
+            return "checkmark.circle.fill"
+        case .failed:
+            return "xmark.octagon.fill"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: compact ? 6 : 8) {
+            Image(systemName: systemImage)
+                .foregroundStyle(statusColor)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(statusText)
+                    .font(compact ? .caption.weight(.semibold) : .callout.weight(.semibold))
+                    .foregroundStyle(statusColor)
+                Text(optionDescription)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.horizontal, compact ? 8 : 10)
+        .padding(.vertical, compact ? 5 : 8)
+        .background(statusColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(statusColor.opacity(0.22))
+        )
+        .help(status.detail)
+    }
+}
+
+// MARK: - Settings
 
 private enum SettingsSectionTab: Hashable {
     case general
     case llmModels
     case promptTemplates
-}
-
-private struct SettingsSheet: View {
-    @EnvironmentObject private var appModel: AppModel
-    @Binding var isPresented: Bool
-    @State private var selectedSettingsTab: SettingsSectionTab = .general
-
-    var body: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Label("Settings", systemImage: "gearshape")
-                    .font(.title2.bold())
-                Spacer()
-                Button {
-                    appModel.markPermissionsSetupComplete()
-                    isPresented = false
-                } label: {
-                    Label("Done", systemImage: "checkmark")
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding(.bottom, 8)
-
-            Divider()
-
-            TabView(selection: $selectedSettingsTab) {
-                ScrollView {
-                    leftSettingsColumn
-                        .padding(.horizontal, 2)
-                }
-                .tabItem {
-                    Label("General", systemImage: "slider.horizontal.3")
-                }
-                .tag(SettingsSectionTab.general)
-
-                ScrollView {
-                    modelSettingsColumn
-                        .padding(.horizontal, 2)
-                }
-                .tabItem {
-                    Label("LLM Models", systemImage: "server.rack")
-                }
-                .tag(SettingsSectionTab.llmModels)
-
-                ScrollView {
-                    promptTemplateSettingsColumn
-                        .padding(.horizontal, 2)
-                }
-                .tabItem {
-                    Label("Prompt Templates", systemImage: "text.badge.plus")
-                }
-                .tag(SettingsSectionTab.promptTemplates)
-            }
-        }
-        .padding()
-        .frame(width: 720, height: 680)
-        .alert("VoiceTranscribe", isPresented: Binding(
-            get: { appModel.userMessage != nil },
-            set: { if !$0 { appModel.userMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {
-                appModel.userMessage = nil
-            }
-        } message: {
-            Text(appModel.userMessage ?? "")
-        }
-    }
-
-    private var leftSettingsColumn: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Speech Pipeline", systemImage: "text.bubble")
-                        .font(.headline)
-                    Label("Apple Speech transcript segmentation", systemImage: "text.quote")
-                        .font(.caption)
-                    Label("SpeechVAD Sortformer speaker diarization", systemImage: "person.wave.2")
-                        .font(.caption)
-                    Text("Transcript rows are finalized by Apple Speech; speaker labels are detected separately by SpeechVAD Sortformer.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            GroupBox {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("Permissions", systemImage: "lock.shield")
-                        .font(.headline)
-
-                    HStack {
-                        PermissionStatusView(
-                            title: "Microphone",
-                            status: microphoneStatusText(appModel.permissionService.microphoneStatus),
-                            isAllowed: appModel.permissionService.canCaptureAudio
-                        )
-                        Spacer()
-                        Button {
-                            appModel.requestMicrophonePermission()
-                        } label: {
-                            Text(appModel.permissionService.microphoneStatus == .notDetermined
-                                ? "Request Access" : "Open Settings")
-                        }
-                        .disabled(appModel.permissionService.microphoneStatus == .authorized)
-                    }
-
-                    HStack {
-                        PermissionStatusView(
-                            title: "Speech Recognition",
-                            status: speechStatusText(appModel.permissionService.speechStatus),
-                            isAllowed: appModel.permissionService.canTranscribe
-                        )
-                        Spacer()
-                        Button {
-                            appModel.requestSpeechPermission()
-                        } label: {
-                            Text(appModel.permissionService.speechStatus == .notDetermined
-                                ? "Request Access" : "Open Settings")
-                        }
-                        .disabled(appModel.permissionService.speechStatus == .authorized)
-                    }
-
-                    Divider()
-                    Button {
-                        appModel.permissionService.openSystemPrivacySettings()
-                    } label: {
-                        Label("Open System Privacy Settings…", systemImage: "arrow.up.forward.app")
-                    }
-                    .font(.caption)
-                    .buttonStyle(.link)
-                    .padding(.top, 4)
-                }
-            }
-
-            GroupBox {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("Summary", systemImage: "doc.text.magnifyingglass")
-                        .font(.headline)
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Summary Prompt")
-                                .font(.caption.weight(.semibold))
-                            Spacer()
-                            Button("Reset") {
-                                appModel.settings.resetSummaryPrompt()
-                            }
-                            .font(.caption)
-                            .buttonStyle(.link)
-                        }
-
-                        TextEditor(text: $appModel.settings.summaryPrompt)
-                            .font(.caption.monospaced())
-                            .frame(minHeight: 120)
-                            .scrollContentBackground(.hidden)
-                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.secondary.opacity(0.18))
-                            )
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private var modelSettingsColumn: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            GroupBox {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("LLM Models", systemImage: "server.rack")
-                        .font(.headline)
-
-                    GlobalPromptLLMControl()
-                        .environmentObject(appModel)
-
-                    HStack {
-                        Button {
-                            appModel.testSelectedLLMPlainPrompt()
-                        } label: {
-                            Label("Test Prompt", systemImage: "message")
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button {
-                            appModel.testSelectedLLMFactCheck()
-                        } label: {
-                            Label("Test AI Processing", systemImage: "network")
-                        }
-                        .buttonStyle(.bordered)
-                    }
-
-                    LLMEndpointSettingsView(compact: true)
-                        .environmentObject(appModel)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private var promptTemplateSettingsColumn: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            GroupBox {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("Prompt Templates", systemImage: "text.badge.plus")
-                        .font(.headline)
-
-                    AIPromptTemplateSettingsView(compact: true)
-                        .environmentObject(appModel)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private func microphoneStatusText(_ status: AVAuthorizationStatus) -> String {
-        switch status {
-        case .authorized:  return "Allowed"
-        case .denied:      return "Denied"
-        case .restricted:  return "Restricted"
-        case .notDetermined: return "Not Requested"
-        @unknown default:  return "Unknown"
-        }
-    }
-
-    private func speechStatusText(_ status: SFSpeechRecognizerAuthorizationStatus) -> String {
-        switch status {
-        case .authorized:  return "Allowed"
-        case .denied:      return "Denied"
-        case .restricted:  return "Restricted"
-        case .notDetermined: return "Not Requested"
-        @unknown default:  return "Unknown"
-        }
-    }
 }
 
 private struct LLMEndpointSettingsView: View {
@@ -1147,7 +990,7 @@ private struct TranscriptFactCheckPanel: View {
 
             Text(speakerLabel ?? "Detecting")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(speakerLabel == nil ? Color.secondary : Color.blue)
+                .foregroundStyle(speakerColor(for: speakerLabel))
                 .lineLimit(1)
             .frame(width: 150, alignment: .leading)
 
@@ -1269,13 +1112,31 @@ private struct TranscriptFactCheckPanel: View {
     }
 
     private var currentSpeakerColor: Color {
-        if currentSpeakerLabel != nil {
-            return .blue
+        if let currentSpeakerLabel {
+            return speakerColor(for: currentSpeakerLabel)
         }
         if diarizationError != nil {
             return .orange
         }
         return .secondary
+    }
+
+    private func speakerColor(for label: String?) -> Color {
+        guard let label,
+              !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .secondary
+        }
+
+        let palette: [Color] = [.blue, .purple, .green, .orange, .pink, .teal, .indigo, .mint]
+        let digits = String(label.filter(\.isNumber))
+        if let number = Int(digits), number > 0 {
+            return palette[(number - 1) % palette.count]
+        }
+
+        let checksum = label.unicodeScalars.reduce(0) { partial, scalar in
+            partial + Int(scalar.value)
+        }
+        return palette[checksum % palette.count]
     }
 
     private var factCheckStatusColor: Color {
@@ -1532,6 +1393,55 @@ struct SettingsView: View {
             }
 
             GroupBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Permissions", systemImage: "lock.shield")
+                        .font(.headline)
+
+                    HStack {
+                        PermissionStatusView(
+                            title: "Microphone",
+                            status: microphoneStatusText(appModel.permissionService.microphoneStatus),
+                            isAllowed: appModel.permissionService.canCaptureAudio
+                        )
+                        Spacer()
+                        Button {
+                            appModel.requestMicrophonePermission()
+                        } label: {
+                            Text(appModel.permissionService.microphoneStatus == .notDetermined
+                                ? "Request Access" : "Open Settings")
+                        }
+                        .disabled(appModel.permissionService.microphoneStatus == .authorized)
+                    }
+
+                    HStack {
+                        PermissionStatusView(
+                            title: "Speech Recognition",
+                            status: speechStatusText(appModel.permissionService.speechStatus),
+                            isAllowed: appModel.permissionService.canTranscribe
+                        )
+                        Spacer()
+                        Button {
+                            appModel.requestSpeechPermission()
+                        } label: {
+                            Text(appModel.permissionService.speechStatus == .notDetermined
+                                ? "Request Access" : "Open Settings")
+                        }
+                        .disabled(appModel.permissionService.speechStatus == .authorized)
+                    }
+
+                    Divider()
+                    Button {
+                        appModel.permissionService.openSystemPrivacySettings()
+                    } label: {
+                        Label("Open System Privacy Settings…", systemImage: "arrow.up.forward.app")
+                    }
+                    .font(.caption)
+                    .buttonStyle(.link)
+                    .padding(.top, 4)
+                }
+            }
+
+            GroupBox {
                 VStack(alignment: .leading, spacing: 10) {
                     Label("Summary", systemImage: "doc.text.magnifyingglass")
                         .font(.headline)
@@ -1576,6 +1486,26 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
+    private func microphoneStatusText(_ status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .authorized:  return "Allowed"
+        case .denied:      return "Denied"
+        case .restricted:  return "Restricted"
+        case .notDetermined: return "Not Requested"
+        @unknown default:  return "Unknown"
+        }
+    }
+
+    private func speechStatusText(_ status: SFSpeechRecognizerAuthorizationStatus) -> String {
+        switch status {
+        case .authorized:  return "Allowed"
+        case .denied:      return "Denied"
+        case .restricted:  return "Restricted"
+        case .notDetermined: return "Not Requested"
+        @unknown default:  return "Unknown"
+        }
+    }
+
     private var settingsModelColumn: some View {
         VStack(alignment: .leading, spacing: 14) {
             GroupBox {
@@ -1586,7 +1516,20 @@ struct SettingsView: View {
                     GlobalPromptLLMControl()
                         .environmentObject(appModel)
 
+                    AIReachabilityIndicator(
+                        status: appModel.aiReachability,
+                        optionDescription: appModel.activeAIOptionDescription,
+                        compact: false
+                    )
+
                     HStack {
+                        Button {
+                            appModel.testActiveAIReachability()
+                        } label: {
+                            Label("Test Active AI", systemImage: "checkmark.seal")
+                        }
+                        .buttonStyle(.bordered)
+
                         Button {
                             appModel.testSelectedLLMPlainPrompt()
                         } label: {

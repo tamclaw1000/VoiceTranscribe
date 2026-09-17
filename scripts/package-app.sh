@@ -9,9 +9,11 @@ CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 
 cd "$ROOT_DIR"
-swift package clean
-"$ROOT_DIR/scripts/prepare-speech-swift.sh"
-swift build -c "$CONFIGURATION"
+if [[ "${PACKAGE_APP_SKIP_BUILD:-0}" != "1" ]]; then
+  swift package clean
+  "$ROOT_DIR/scripts/prepare-speech-swift.sh"
+  swift build -c "$CONFIGURATION"
+fi
 BIN_PATH="$(swift build -c "$CONFIGURATION" --show-bin-path)"
 
 rm -rf "$APP_DIR"

@@ -49,6 +49,11 @@ final class AppleSpeechTranscriptionService: TranscriptionService {
         guard let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             throw TranscriptionError.engineUnavailable
         }
+        Trace.event("transcription.analyzerFormat", [
+            "sampleRate": Int(analyzerFormat.sampleRate),
+            "channels": Int(analyzerFormat.channelCount),
+            "commonFormat": analyzerFormat.commonFormat.rawValue
+        ])
 
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
@@ -82,14 +87,35 @@ final class AppleSpeechTranscriptionService: TranscriptionService {
             let timescale = CMTimeScale(analyzerFormat.sampleRate)
 
             for await buffer in rawStream {
-                if sourceFormat != buffer.format {
-                    converter = AVAudioConverter(from: buffer.format, to: analyzerFormat)
-                    sourceFormat = buffer.format
+                let analyzerInputBuffer = normalizeForSpeechAnalyzer(buffer)
+                if sourceFormat != analyzerInputBuffer.format {
+                    converter = analyzerInputBuffer.format == analyzerFormat
+                        ? nil
+                        : AVAudioConverter(from: analyzerInputBuffer.format, to: analyzerFormat)
+                    sourceFormat = analyzerInputBuffer.format
+                    Trace.event("transcription.converterConfigured", [
+                        "sourceSampleRate": Int(analyzerInputBuffer.format.sampleRate),
+                        "sourceChannels": Int(analyzerInputBuffer.format.channelCount),
+                        "targetSampleRate": Int(analyzerFormat.sampleRate),
+                        "targetChannels": Int(analyzerFormat.channelCount),
+                        "hasConverter": converter != nil || analyzerInputBuffer.format == analyzerFormat
+                    ])
                 }
 
-                let output = converter.flatMap {
-                    convert(buffer, using: $0, to: analyzerFormat)
-                } ?? buffer
+                let output: AVAudioPCMBuffer
+                if analyzerInputBuffer.format == analyzerFormat {
+                    output = analyzerInputBuffer
+                } else if let converted = converter.flatMap({ convert(analyzerInputBuffer, using: $0, to: analyzerFormat) }) {
+                    output = converted
+                } else {
+                    Trace.event("transcription.converterFailed", [
+                        "sourceSampleRate": Int(analyzerInputBuffer.format.sampleRate),
+                        "sourceChannels": Int(analyzerInputBuffer.format.channelCount),
+                        "targetSampleRate": Int(analyzerFormat.sampleRate),
+                        "targetChannels": Int(analyzerFormat.channelCount)
+                    ])
+                    continue
+                }
                 let startTime = CMTime(value: sampleClock, timescale: timescale)
                 sampleClock += Int64(output.frameLength)
                 analyzerContinuation.yield(AnalyzerInput(buffer: output, bufferStartTime: startTime))
@@ -298,6 +324,28 @@ final class TranscriptionCoordinator: ObservableObject {
         Trace.event("transcription.stopped", ["finalSegments": segments.count])
     }
 
+    func updateSpeakerName(speakerID: String, speakerName: String?) {
+        segments = segments.map { segment in
+            guard segment.speakerID == speakerID else {
+                return segment
+            }
+            var copy = segment
+            copy.speakerName = speakerName
+            return copy
+        }
+
+        if var interimSegment, interimSegment.speakerID == speakerID {
+            interimSegment.speakerName = speakerName
+            self.interimSegment = interimSegment
+        }
+
+        transcript.updateSpeakerName(speakerID: speakerID, speakerName: speakerName)
+        Trace.event("transcription.speakerName.updated", [
+            "speakerID": speakerID,
+            "speakerName": speakerName ?? ""
+        ])
+    }
+
     private func apply(_ segment: TranscriptSegment) {
         var segment = segment
         if let speaker = speakerProvider?() {
@@ -379,6 +427,61 @@ final class TranscriptionCoordinator: ObservableObject {
             bufferSnapshot.isReceivingAudio = false
         }
     }
+}
+
+private func normalizeForSpeechAnalyzer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer {
+    guard buffer.format.channelCount != 1,
+          let monoFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: buffer.format.sampleRate,
+            channels: 1,
+            interleaved: false
+          ),
+          let monoBuffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: buffer.frameLength) else {
+        return buffer
+    }
+
+    monoBuffer.frameLength = buffer.frameLength
+    let channelCount = Int(buffer.format.channelCount)
+    let frames = Int(buffer.frameLength)
+    guard let output = monoBuffer.floatChannelData?[0] else {
+        return buffer
+    }
+
+    if let input = buffer.floatChannelData {
+        for frame in 0..<frames {
+            var sum: Float = 0
+            for channel in 0..<channelCount {
+                sum += input[channel][frame]
+            }
+            output[frame] = sum / Float(channelCount)
+        }
+        return monoBuffer
+    }
+
+    if let input = buffer.int16ChannelData {
+        for frame in 0..<frames {
+            var sum: Float = 0
+            for channel in 0..<channelCount {
+                sum += Float(input[channel][frame]) / Float(Int16.max)
+            }
+            output[frame] = sum / Float(channelCount)
+        }
+        return monoBuffer
+    }
+
+    if let input = buffer.int32ChannelData {
+        for frame in 0..<frames {
+            var sum: Float = 0
+            for channel in 0..<channelCount {
+                sum += Float(input[channel][frame]) / Float(Int32.max)
+            }
+            output[frame] = sum / Float(channelCount)
+        }
+        return monoBuffer
+    }
+
+    return buffer
 }
 
 private func convert(

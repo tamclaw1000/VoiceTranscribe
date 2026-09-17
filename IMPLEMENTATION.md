@@ -1727,3 +1727,40 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify `swift test` passes.
 - [x] Bump `CFBundleShortVersionString` to `2.4.25`.
 - [x] Bump `CFBundleVersion` to `68`.
+
+## 88. v2.4.26. Multichannel Speech Input Normalization
+
+### 88a. Apple Speech Input
+
+- [x] Downmix multichannel capture buffers to mono before feeding Apple Speech's `SpeechAnalyzer`.
+- [x] Preserve sample-rate conversion from the normalized mono stream into the analyzer's preferred format.
+- [x] Add trace events for the analyzer format, converter setup, and conversion failures to make BlackHole or aggregate-device routing issues visible.
+
+### 88b. Tests and Version
+
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.26`.
+- [x] Bump `CFBundleVersion` to `69`.
+
+## 89. v2.4.27. Editable Speaker Names
+
+### 89a. Speaker Controls
+
+- [x] Add a Live Transcript speaker editor that lists detected generated speaker IDs.
+- [x] Allow each detected speaker to be renamed with a custom display name.
+- [x] Add per-speaker reset controls and a reset-all action to restore generated `Speaker N` labels.
+- [x] Keep speaker colors stable by generated speaker ID even after display names change.
+
+### 89b. Transcript and Export Propagation
+
+- [x] Apply renamed speaker labels to existing finalized transcript rows, interim text, current-speaker status, and diarization timeline rows.
+- [x] Include renamed speaker labels in plain transcript text and Markdown export tables.
+- [x] Preserve generated speaker IDs internally so reset returns to `Speaker N`.
+
+### 89c. Tests and Version
+
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.27`.
+- [x] Bump `CFBundleVersion` to `70`.

@@ -223,8 +223,86 @@ final class AppModel: ObservableObject {
         captureService.activeSource?.id
     }
 
+    var speakerNameEditorItems: [SpeakerNameEditorItem] {
+        let ids = knownSpeakerIDs()
+        return ids.map { speakerID in
+            let customName = diarization.speakerName(for: speakerID)
+                ?? transcription.segments.first { $0.speakerID == speakerID }?.speakerName
+                ?? (transcription.interimSegment?.speakerID == speakerID ? transcription.interimSegment?.speakerName : nil)
+                ?? ""
+            let trimmed = customName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return SpeakerNameEditorItem(
+                speakerID: speakerID,
+                displayName: trimmed.isEmpty ? speakerID : trimmed,
+                customName: customName
+            )
+        }
+    }
+
     func refreshDevices() {
         deviceService.refresh()
+    }
+
+    func setSpeakerName(speakerID: String, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let speakerName = trimmed.isEmpty ? nil : trimmed
+        diarization.setSpeakerName(speakerID: speakerID, name: speakerName)
+        transcription.updateSpeakerName(speakerID: speakerID, speakerName: speakerName)
+        objectWillChange.send()
+        Trace.event("speaker.name.set", [
+            "speakerID": speakerID,
+            "speakerName": speakerName ?? ""
+        ])
+    }
+
+    func resetSpeakerName(speakerID: String) {
+        setSpeakerName(speakerID: speakerID, name: "")
+    }
+
+    func resetAllSpeakerNames() {
+        for speakerID in knownSpeakerIDs() {
+            resetSpeakerName(speakerID: speakerID)
+        }
+        Trace.event("speaker.names.resetAll")
+    }
+
+    private func knownSpeakerIDs() -> [String] {
+        var ids = Set<String>()
+        for segment in diarization.segments {
+            ids.insert(segment.speakerID)
+        }
+        for segment in transcription.segments {
+            if let speakerID = segment.speakerID {
+                ids.insert(speakerID)
+            }
+        }
+        if let speakerID = transcription.interimSegment?.speakerID {
+            ids.insert(speakerID)
+        }
+        if let speakerID = diarization.currentSpeakerID {
+            ids.insert(speakerID)
+        }
+        return ids.sorted(by: speakerSort)
+    }
+
+    private func speakerSort(_ lhs: String, _ rhs: String) -> Bool {
+        let leftNumber = speakerNumber(lhs)
+        let rightNumber = speakerNumber(rhs)
+        switch (leftNumber, rightNumber) {
+        case let (left?, right?):
+            return left == right ? lhs < rhs : left < right
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        case (nil, nil):
+            return lhs < rhs
+        }
+    }
+
+    private func speakerNumber(_ label: String) -> Int? {
+        let digits = String(label.filter(\.isNumber))
+        return digits.isEmpty ? nil : Int(digits)
     }
 
     func requestMicrophonePermission() {

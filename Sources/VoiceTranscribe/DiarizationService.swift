@@ -14,9 +14,14 @@ final class DiarizationCoordinator: ObservableObject {
     private var sessionID = UUID()
     private var lastSpeaker: SpeakerDiarizationSegment?
     private var tracedSegmentKeys = Set<String>()
+    private var speakerNames: [String: String] = [:]
 
     var currentSpeakerLabel: String? {
         lastSpeaker?.speakerLabel
+    }
+
+    var currentSpeakerID: String? {
+        lastSpeaker?.speakerID
     }
 
     func start() async throws {
@@ -46,6 +51,7 @@ final class DiarizationCoordinator: ObservableObject {
         sessionID = UUID()
         lastSpeaker = nil
         tracedSegmentKeys = []
+        speakerNames = [:]
         isStarting = false
         isRunning = false
         lastError = nil
@@ -126,8 +132,33 @@ final class DiarizationCoordinator: ObservableObject {
         return (lastSpeaker.speakerID, lastSpeaker.speakerName)
     }
 
+    func speakerName(for speakerID: String) -> String? {
+        speakerNames[speakerID]
+    }
+
+    func setSpeakerName(speakerID: String, name: String?) {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            speakerNames.removeValue(forKey: speakerID)
+        } else {
+            speakerNames[speakerID] = trimmed
+        }
+
+        applySpeakerNames()
+        Trace.event("diarization.speakerName.updated", [
+            "speakerID": speakerID,
+            "speakerName": speakerNames[speakerID] ?? ""
+        ])
+    }
+
     private func replaceSegments(_ newSegments: [SpeakerDiarizationSegment]) {
-        segments = newSegments.sorted { $0.startTime < $1.startTime }
+        segments = newSegments
+            .map { segment in
+                var copy = segment
+                copy.speakerName = speakerNames[segment.speakerID]
+                return copy
+            }
+            .sorted { $0.startTime < $1.startTime }
         lastSpeaker = segments.max { $0.endTime < $1.endTime }
 
         for segment in segments {
@@ -144,6 +175,18 @@ final class DiarizationCoordinator: ObservableObject {
 
     private func segmentKey(_ segment: SpeakerDiarizationSegment) -> String {
         "\(segment.speakerID)|\(String(format: "%.2f", segment.startTime))|\(String(format: "%.2f", segment.endTime))"
+    }
+
+    private func applySpeakerNames() {
+        segments = segments.map { segment in
+            var copy = segment
+            copy.speakerName = speakerNames[segment.speakerID]
+            return copy
+        }
+        if var lastSpeaker {
+            lastSpeaker.speakerName = speakerNames[lastSpeaker.speakerID]
+            self.lastSpeaker = lastSpeaker
+        }
     }
 
     private static func monoFloatSamples(from buffer: AVAudioPCMBuffer) -> [Float] {

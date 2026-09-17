@@ -271,6 +271,18 @@ import Testing
     #expect(document.plainText == "[Speaker 1] hello\n[Speaker 2] world")
 }
 
+@Test func transcriptDocumentUpdatesSpeakerNames() {
+    var document = TranscriptDocument()
+    document.apply(TranscriptSegment(text: "hello", isFinal: true, speakerID: "Speaker 1"))
+    document.apply(TranscriptSegment(text: "working", isFinal: false, speakerID: "Speaker 1"))
+
+    document.updateSpeakerName(speakerID: "Speaker 1", speakerName: "Dana")
+    #expect(document.plainText == "[Dana] hello\n[Dana] working")
+
+    document.updateSpeakerName(speakerID: "Speaker 1", speakerName: nil)
+    #expect(document.plainText == "[Speaker 1] hello\n[Speaker 1] working")
+}
+
 @Test @MainActor func fluidAudioStalePartialAfterFinalSegmentIsSuppressed() async throws {
     let service = FakeTranscriptionService(engineName: "FluidAudio Test")
     let coordinator = TranscriptionCoordinator(service: service)
@@ -390,6 +402,54 @@ import Testing
     #expect(markdown.contains("Summarize this recording."))
     #expect(markdown.contains("# FILES"))
     #expect(markdown.contains("`/tmp/recording.m4a`"))
+}
+
+@Test func markdownExportUsesCustomSpeakerNames() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+
+    let markdown = MarkdownExportService.makeDocument(
+        context: MarkdownExportContext(
+            sourceName: "Test Mic",
+            location: "",
+            startDate: start,
+            endDate: start.addingTimeInterval(4),
+            exportedAt: start,
+            transcriptionEngine: "Apple Speech",
+            aiEnabled: false,
+            factCheckEnabled: false,
+            llmName: "",
+            llmProvider: "",
+            llmEndpoint: "",
+            llmModel: "",
+            factCheckPrompt: "",
+            summaryPrompt: ""
+        ),
+        finalizedSegments: [
+            TranscriptSegment(
+                text: "Hello there.",
+                timestamp: start,
+                isFinal: true,
+                speakerID: "Speaker 1",
+                speakerName: "Dana"
+            )
+        ],
+        speakerSegments: [
+            SpeakerDiarizationSegment(
+                speakerID: "Speaker 1",
+                speakerName: "Dana",
+                startTime: 0,
+                endTime: 4
+            )
+        ],
+        factChecks: [],
+        summaryParagraphs: [],
+        calendar: calendar
+    )
+
+    #expect(markdown.contains("| 2026-05-28 07:33:17 | 0:04 | Dana | Hello there. |  |"))
+    #expect(markdown.contains("| 0:00 | 0:04 | Dana |  |"))
 }
 
 @Test func factCheckSentenceExtractionRequiresCompleteSentences() {

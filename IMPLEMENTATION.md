@@ -1659,3 +1659,71 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify `swift test` passes.
 - [x] Bump `CFBundleShortVersionString` to `2.4.21`.
 - [x] Bump `CFBundleVersion` to `64`.
+
+## 84. v2.4.22. App Cleanup and AI Status
+
+### 84a. UI Cleanup
+
+- [x] Increase the default main window size so the source list, input level chart, and content tabs fit with less crowding.
+- [x] Route the main-window Settings gear through the same Settings window used by the app menu.
+- [x] Add permission controls to the shared Settings General tab so both Settings entry points expose the same recovery path.
+- [x] Color speaker labels consistently per speaker in the current-speaker strip and Live Transcript speaker column.
+
+### 84b. AI Status
+
+- [x] Run an active AI route health test at launch when AI prompts are enabled.
+- [x] Add a visible AI status indicator showing disabled, untested, testing, ready, or failed state.
+- [x] Show the active AI option currently in use, including global-model and mixed-model configurations.
+- [x] Add a manual Test Active AI action in the LLM Models settings tab.
+
+### 84c. Tests and Version
+
+- [x] Verify `./build.sh` succeeds.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.22`.
+- [x] Bump `CFBundleVersion` to `65`.
+
+## 85. v2.4.23. Build Packages App Bundle
+
+### 85a. Build Scripts
+
+- [x] Make `./build.sh` run the required clean SwiftPM build and refresh `dist/VoiceTranscribe.app`.
+- [x] Add a no-rebuild packaging path so `build.sh` does not compile the project twice.
+- [x] Keep `./scripts/package-app.sh` available for explicitly rebuilding or refreshing the app bundle.
+- [x] Update `ARCHITECTURE.md` and `AGENT.md` build guidance to state that `./build.sh` always refreshes the packaged app.
+
+### 85b. Tests and Version
+
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Bump `CFBundleShortVersionString` to `2.4.23`.
+- [x] Bump `CFBundleVersion` to `66`.
+
+## 86. v2.4.24. Permission Restart Experiment
+
+### 86a. Permission Flow
+
+- [x] Comment out the automatic app relaunch after first-launch microphone or speech permission prompts.
+- [x] Keep `restartAfterPermissionDialog()` intact so the relaunch can be restored quickly if macOS still requires it.
+- [x] Add a trace event when the restart is intentionally skipped for this experiment.
+
+### 86b. Tests and Version
+
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.24`.
+- [x] Bump `CFBundleVersion` to `67`.
+
+## 87. v2.4.25. AI Enable Health Test
+
+### 87a. AI Status
+
+- [x] Run the active AI reachability test when AI processing changes from disabled to enabled.
+- [x] Apply the transition test for all prompt activation paths, including the sidebar toggle, global prompt toggle, prompt settings edits, and adding a prompt.
+- [x] Cancel any in-flight AI health test when AI processing becomes disabled.
+
+### 87b. Tests and Version
+
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.25`.
+- [x] Bump `CFBundleVersion` to `68`.

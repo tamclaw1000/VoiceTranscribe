@@ -6,6 +6,22 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum AIReachabilityState: Equatable {
+    case disabled
+    case untested
+    case testing
+    case reachable
+    case failed
+}
+
+struct AIReachabilityStatus: Equatable {
+    var state: AIReachabilityState = .untested
+    var endpointID: String?
+    var optionDescription: String = "AI not tested"
+    var detail: String = "Launch test has not run yet."
+    var testedAt: Date?
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var deviceService = AudioDeviceService()
@@ -17,6 +33,7 @@ final class AppModel: ObservableObject {
     @Published var diarization = DiarizationCoordinator()
     @Published var factCheck = FactCheckCoordinator()
     @Published var summary = SummaryCoordinator()
+    @Published private(set) var aiReachability = AIReachabilityStatus()
 
     /// Tracks whether the user has completed the initial permissions setup flow.
     /// Persisted so we don't re-prompt on every launch after setup.
@@ -81,7 +98,11 @@ final class AppModel: ObservableObject {
             "canTranscribe": permissionService.canTranscribe
         ])
 
-        restartAfterPermissionDialog()
+        // Experiment: avoid automatic relaunch after first-launch permission prompts.
+        // Restore this call if macOS still requires a fresh app process before capture works.
+        // restartAfterPermissionDialog()
+        userMessage = "Permissions were updated. Continue without restarting VoiceTranscribe."
+        Trace.event("app.restart.disabledForPermissionExperiment")
         return true
     }
 
@@ -143,6 +164,8 @@ final class AppModel: ObservableObject {
     private var recordingTask: Task<Void, Never>?
     private var fileTranscriptionTask: Task<Void, Never>?
     private var diarizationStartTask: Task<Void, Never>?
+    private var aiReachabilityTask: Task<Void, Never>?
+    private var hasRunLaunchAIReachabilityTest = false
 
     init() {
         transcription = TranscriptionCoordinator(service: AppModel.makeInitialService())
@@ -192,6 +215,8 @@ final class AppModel: ObservableObject {
         permissionService.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
+
+        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
     }
 
     var activeSourceID: String? {
@@ -215,6 +240,7 @@ final class AppModel: ObservableObject {
     }
 
     func setAIEnabled(_ enabled: Bool) {
+        let wasActive = settings.isFactCheckActive
         objectWillChange.send()
         var promptTemplates = settings.aiPromptTemplates
         for index in promptTemplates.indices {
@@ -222,14 +248,13 @@ final class AppModel: ObservableObject {
         }
         settings.aiPromptTemplates = promptTemplates
         Trace.event("settings.aiPromptsToggled", ["enabled": enabled])
-        if !settings.isFactCheckActive {
-            factCheck.reset()
-        }
+        handleAIActivationChange(wasActive: wasActive, reason: "aiToggle")
     }
 
     func updateLLMEndpoint(_ endpoint: LLMEndpointConfiguration) {
         objectWillChange.send()
         settings.updateLLMEndpoint(endpoint)
+        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
     }
 
     func addLLMEndpoint() {
@@ -241,6 +266,7 @@ final class AppModel: ObservableObject {
             "beforeCount": beforeCount,
             "afterCount": afterCount
         ])
+        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
     }
 
     func removeLLMEndpoint(id: String) {
@@ -248,6 +274,7 @@ final class AppModel: ObservableObject {
         objectWillChange.send()
         settings.removeLLMEndpoint(id: id)
         Trace.event("settings.llmRemoved", ["llm": llmName])
+        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
     }
 
     func setSelectedLLMEndpointID(_ id: String) {
@@ -255,6 +282,7 @@ final class AppModel: ObservableObject {
         settings.selectedLLMEndpointID = id
         let llmName = settings.llmEndpoint(id: id)?.displayName ?? "unknown"
         Trace.event("settings.selectedLLMChanged", ["llm": llmName])
+        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
     }
 
     func setUseGlobalPromptLLM(_ enabled: Bool) {
@@ -264,6 +292,7 @@ final class AppModel: ObservableObject {
             "enabled": enabled,
             "llm": settings.globalPromptLLMEndpoint.displayName
         ])
+        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
     }
 
     func setGlobalPromptLLMEndpointID(_ id: String) {
@@ -271,6 +300,7 @@ final class AppModel: ObservableObject {
         settings.globalPromptLLMEndpointID = id
         let llmName = settings.llmEndpoint(id: id)?.displayName ?? "unknown"
         Trace.event("settings.globalPromptLLMChanged", ["llm": llmName])
+        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
     }
 
     func setAIPromptEnabled(id: String, enabled: Bool) {
@@ -278,6 +308,7 @@ final class AppModel: ObservableObject {
             return
         }
 
+        let wasActive = settings.isFactCheckActive
         objectWillChange.send()
         promptTemplate.isEnabled = enabled
         settings.updateAIPromptTemplate(promptTemplate)
@@ -286,20 +317,18 @@ final class AppModel: ObservableObject {
             "enabled": enabled
         ])
 
-        if !settings.isFactCheckActive {
-            factCheck.reset()
-        }
+        handleAIActivationChange(wasActive: wasActive, reason: "promptToggle")
     }
 
     func updateAIPromptTemplate(_ promptTemplate: AIPromptTemplateConfiguration) {
+        let wasActive = settings.isFactCheckActive
         objectWillChange.send()
         settings.updateAIPromptTemplate(promptTemplate)
-        if !settings.isFactCheckActive {
-            factCheck.reset()
-        }
+        handleAIActivationChange(wasActive: wasActive, reason: "promptSettings")
     }
 
     func addAIPromptTemplate() {
+        let wasActive = settings.isFactCheckActive
         objectWillChange.send()
         let beforeCount = settings.aiPromptTemplates.count
         settings.addAIPromptTemplate()
@@ -308,6 +337,7 @@ final class AppModel: ObservableObject {
             "beforeCount": beforeCount,
             "afterCount": afterCount
         ])
+        handleAIActivationChange(wasActive: wasActive, reason: "promptAdded")
     }
 
     func removeAIPromptTemplate(id: String) {
@@ -318,6 +348,7 @@ final class AppModel: ObservableObject {
         if !settings.isFactCheckActive {
             factCheck.reset()
         }
+        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
     }
 
     func resetAIPromptTemplate(id: String) {
@@ -325,6 +356,154 @@ final class AppModel: ObservableObject {
         settings.resetAIPromptTemplate(id: id)
         let promptName = settings.aiPromptTemplates.first { $0.id == id }?.displayName ?? "unknown"
         Trace.event("settings.aiPromptReset", ["promptTemplate": promptName])
+        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
+    }
+
+    private func handleAIActivationChange(wasActive: Bool, reason: String) {
+        guard settings.isFactCheckActive else {
+            aiReachabilityTask?.cancel()
+            aiReachabilityTask = nil
+            factCheck.reset()
+            updateAIReachabilityStatus(state: .disabled, detail: "No AI prompts are enabled.")
+            return
+        }
+
+        updateAIReachabilityStatus(state: .untested)
+        if !wasActive {
+            testActiveAIReachability(reason: reason)
+        }
+    }
+
+    var activeAIOptionDescription: String {
+        guard settings.isFactCheckActive else {
+            return "AI disabled"
+        }
+
+        if settings.useGlobalPromptLLM {
+            return "\(settings.globalPromptLLMEndpoint.displayName) (global)"
+        }
+
+        let promptTemplates = settings.effectiveEnabledAIPromptTemplates
+        let endpoints = promptTemplates.map { settings.effectiveLLMEndpoint(for: $0) }
+        let uniqueEndpointIDs = Set(endpoints.map(\.id))
+        if uniqueEndpointIDs.count == 1, let endpoint = endpoints.first {
+            return "\(endpoint.displayName) (\(promptTemplates.count) prompt\(promptTemplates.count == 1 ? "" : "s"))"
+        }
+        return "\(promptTemplates.count) prompts across \(uniqueEndpointIDs.count) models"
+    }
+
+    func testAIReachabilityOnLaunch() {
+        guard !hasRunLaunchAIReachabilityTest else {
+            return
+        }
+        hasRunLaunchAIReachabilityTest = true
+        testActiveAIReachability(reason: "launch")
+    }
+
+    func testActiveAIReachability(reason: String = "manual") {
+        aiReachabilityTask?.cancel()
+
+        guard settings.isFactCheckActive else {
+            updateAIReachabilityStatus(state: .disabled, detail: "No AI prompts are enabled.")
+            return
+        }
+
+        let endpoint = activeAIEndpointForReachabilityTest()
+        updateAIReachabilityStatus(
+            state: .testing,
+            endpoint: endpoint,
+            detail: "Testing with: Hello, what is 10 * 20?"
+        )
+
+        aiReachabilityTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let response = try await OllamaFactCheckService(timeout: 15).generate(
+                    prompt: "Hello, what is 10 * 20?",
+                    llm: endpoint,
+                    traceEvent: "llm.health.request.started"
+                )
+                guard !Task.isCancelled else { return }
+                let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty {
+                    self.updateAIReachabilityStatus(
+                        state: .failed,
+                        endpoint: endpoint,
+                        detail: "Endpoint returned an empty response."
+                    )
+                    Trace.event("llm.health.failed", [
+                        "reason": reason,
+                        "provider": endpoint.provider.rawValue,
+                        "model": endpoint.model,
+                        "error": "empty response"
+                    ])
+                } else {
+                    self.updateAIReachabilityStatus(
+                        state: .reachable,
+                        endpoint: endpoint,
+                        detail: "Last launch test succeeded."
+                    )
+                    Trace.event("llm.health.reachable", [
+                        "reason": reason,
+                        "provider": endpoint.provider.rawValue,
+                        "model": endpoint.model,
+                        "chars": trimmed.count
+                    ])
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.updateAIReachabilityStatus(
+                    state: .failed,
+                    endpoint: endpoint,
+                    detail: error.localizedDescription
+                )
+                Trace.event("llm.health.failed", [
+                    "reason": reason,
+                    "provider": endpoint.provider.rawValue,
+                    "model": endpoint.model,
+                    "error": error.localizedDescription
+                ])
+            }
+        }
+    }
+
+    private func activeAIEndpointForReachabilityTest() -> LLMEndpointConfiguration {
+        if settings.useGlobalPromptLLM {
+            return settings.globalPromptLLMEndpoint
+        }
+        if let promptTemplate = settings.effectiveEnabledAIPromptTemplates.first {
+            return settings.effectiveLLMEndpoint(for: promptTemplate)
+        }
+        return settings.selectedLLMEndpoint
+    }
+
+    private func updateAIReachabilityStatus(
+        state: AIReachabilityState,
+        endpoint: LLMEndpointConfiguration? = nil,
+        detail: String? = nil
+    ) {
+        aiReachability = AIReachabilityStatus(
+            state: state,
+            endpointID: endpoint?.id ?? activeAIEndpointForReachabilityTest().id,
+            optionDescription: activeAIOptionDescription,
+            detail: detail ?? defaultAIReachabilityDetail(for: state),
+            testedAt: state == .reachable || state == .failed ? Date() : aiReachability.testedAt
+        )
+    }
+
+    private func defaultAIReachabilityDetail(for state: AIReachabilityState) -> String {
+        switch state {
+        case .disabled:
+            return "No AI prompts are enabled."
+        case .untested:
+            return "AI configuration changed; reachability has not been tested yet."
+        case .testing:
+            return "Testing the configured AI endpoint."
+        case .reachable:
+            return "AI endpoint responded successfully."
+        case .failed:
+            return "AI endpoint test failed."
+        }
     }
 
     func testSelectedLLMFactCheck() {

@@ -51,18 +51,73 @@ struct TranscriptSegment: Identifiable, Equatable {
     var timestamp: Date
     var isFinal: Bool
     var confidence: Float?
+    var speakerID: String?
+    var speakerName: String?
+
+    var speakerLabel: String? {
+        let name = speakerName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let name, !name.isEmpty {
+            return name
+        }
+        let id = speakerID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return id?.isEmpty == false ? id : nil
+    }
+
+    var textWithSpeaker: String {
+        guard let speakerLabel else {
+            return text
+        }
+        return "[\(speakerLabel)] \(text)"
+    }
 
     init(
         id: UUID = UUID(),
         text: String,
         timestamp: Date = Date(),
         isFinal: Bool,
-        confidence: Float? = nil
+        confidence: Float? = nil,
+        speakerID: String? = nil,
+        speakerName: String? = nil
     ) {
         self.id = id
         self.text = text
         self.timestamp = timestamp
         self.isFinal = isFinal
+        self.confidence = confidence
+        self.speakerID = speakerID
+        self.speakerName = speakerName
+    }
+}
+
+struct SpeakerDiarizationSegment: Identifiable, Equatable, Sendable {
+    let id: UUID
+    var speakerID: String
+    var speakerName: String?
+    var startTime: TimeInterval
+    var endTime: TimeInterval
+    var confidence: Float?
+
+    var speakerLabel: String {
+        let name = speakerName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let name, !name.isEmpty {
+            return name
+        }
+        return speakerID
+    }
+
+    init(
+        id: UUID = UUID(),
+        speakerID: String,
+        speakerName: String? = nil,
+        startTime: TimeInterval,
+        endTime: TimeInterval,
+        confidence: Float? = nil
+    ) {
+        self.id = id
+        self.speakerID = speakerID
+        self.speakerName = speakerName
+        self.startTime = startTime
+        self.endTime = endTime
         self.confidence = confidence
     }
 }

@@ -1,6 +1,6 @@
 # VoiceTranscribe Implementation Checklist
 
-This checklist converts `VoiceTranscribe-REQUIREMENTS.md` into implementation work for a native Swift macOS application.
+This checklist converts `REQUIREMENTS.md` into implementation work for a native Swift macOS application.
 
 ## 1. Project Setup
 
@@ -735,4 +735,927 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [ ] Model download on first use (like FluidAudio ASR models).
 - [ ] Graceful fallback when diarizer is unavailable or fails.
 - [ ] Diarizer off by default; toggle in Settings popup (v1.6.0).
-	
+
+## 37. v2.0.0. Fact-Check Pane
+
+### 37a. Fact-Check UI
+
+- [x] Add a fact-check pane directly under the live transcription pane.
+- [x] Display fact-check rows in transcript sentence order.
+- [x] Show each original finalized sentence next to its fact-check result.
+- [x] Show row states: queued, checking, completed, failed.
+- [x] Keep the fact-check pane scrollable and responsive during long sessions.
+- [x] Preserve completed fact-check results while new transcript text arrives.
+- [x] Add empty state text when no complete sentences have been fact-checked yet.
+
+### 37b. Sentence Extraction and Queueing
+
+- [x] Detect complete finalized transcript sentences from `TranscriptSegment` updates.
+- [x] Queue each complete sentence exactly once for fact-checking.
+- [x] Avoid sending interim transcript text to the fact-check engine.
+- [x] Serialize rapid sentence submissions through one internal fact-check queue.
+- [x] Track sentence IDs so updates and results remain associated with the correct transcript sentence.
+- [x] Add tests for sentence extraction, duplicate suppression, and queue ordering.
+
+### 37c. Ollama Fact-Check Service
+
+- [x] Create `FactCheckService` protocol for sentence-level fact checking.
+- [x] Create `OllamaFactCheckService` implementation using the local Ollama HTTP API.
+- [x] Use model `igorls/gemma-4-12B-it-heretic-GGUF` by default.
+- [x] Add configurable Ollama endpoint with default `http://localhost:11434`.
+- [x] Limit concurrent Ollama requests to protect UI responsiveness.
+- [x] Add timeout handling for slow or unavailable local model responses.
+- [x] Surface clear error states when Ollama is not running or the model is unavailable.
+- [x] Trace fact-check lifecycle events: queued, request started, response received, parse failed, request failed.
+
+### 37d. Fact-Check Prompt and Parsing
+
+- [x] Define a prompt that asks the model to fact-check one transcribed sentence.
+- [x] Instruct the model to treat the sentence as a potentially imperfect transcript.
+- [x] Instruct the model to evaluate only factual claims present in the sentence.
+- [x] Instruct the model to classify subjective, command, filler, or non-factual text as `not_factual`.
+- [x] Require structured JSON output with `sentence`, `verdict`, `confidence`, `explanation`, and optional `notes`.
+- [x] Parse model responses into a `FactCheckResult` model.
+- [x] Gracefully handle malformed JSON by showing a failed parse state and raw response excerpt.
+- [x] Add tests for prompt construction and response parsing.
+
+### 37e. App Integration
+
+- [x] Add fact-check coordinator owned by `AppModel`.
+- [x] Subscribe the fact-check coordinator to finalized transcript sentences.
+- [x] Forward nested fact-check coordinator state changes through `AppModel.objectWillChange`.
+- [x] Ensure fact checking never blocks audio capture, recording, or transcription.
+- [x] Reset fact-check state when a new transcription session starts.
+- [ ] Save fact-check results alongside transcript metadata if enabled.
+
+### 37f. Settings
+
+- [x] Add setting for enabling/disabling fact checking.
+- [x] Add setting for Ollama endpoint URL.
+- [x] Add setting for Ollama model name, defaulting to `igorls/gemma-4-12B-it-heretic-GGUF`.
+- [x] Add a "Test Ollama" action to verify connectivity and model availability.
+- [x] Persist fact-check settings with `@AppStorage`.
+
+### 37g. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.0.0`.
+- [x] Bump `CFBundleVersion` to `18`.
+
+## 38. v2.0.1. Fact-Check Result Display Fix
+
+### 38a. Ollama Response Handling
+
+- [x] Accept strict JSON fact-check responses.
+- [x] Accept JSON wrapped in Markdown code fences.
+- [x] Extract embedded JSON when Ollama returns surrounding prose.
+- [x] Fall back to displaying plain text Ollama responses instead of failing with a format error.
+- [x] Trace when raw Ollama text is used as the displayed result.
+
+### 38b. Fact-Check UI
+
+- [x] Display the fact-check result body directly rather than presenting only the verdict badge.
+- [x] Keep structured verdict and confidence information inside the result text when available.
+- [x] Show raw local model output as the result when the model does not return structured JSON.
+
+### 38c. Tests and Version
+
+- [x] Add tests for fenced JSON and plain text Ollama responses.
+- [x] Bump `CFBundleShortVersionString` to `2.0.1`.
+- [x] Bump `CFBundleVersion` to `19`.
+
+## 39. v2.0.2. Editable Ollama Prompt
+
+### 39a. Prompt Settings
+
+- [x] Add a persisted fact-check prompt template setting.
+- [x] Reveal the prompt template in the Settings popup.
+- [x] Reveal the prompt template in the full Settings view.
+- [x] Add a reset action that restores the default prompt.
+- [x] Keep the default prompt available for first launch and reset behavior.
+
+### 39b. Prompt Rendering
+
+- [x] Pass the current prompt template into every Ollama fact-check request.
+- [x] Replace `{{sentence}}` with the finalized transcript sentence when present.
+- [x] Append the finalized transcript sentence automatically when the prompt has no placeholder.
+- [x] Preserve the prompt template captured when each sentence is queued.
+
+### 39c. Tests and Version
+
+- [x] Add tests for prompt placeholder replacement.
+- [x] Add tests for automatic sentence appending when the placeholder is missing.
+- [x] Bump `CFBundleShortVersionString` to `2.0.2`.
+- [x] Bump `CFBundleVersion` to `20`.
+
+## 40. v2.0.3. Combined Transcript and Fact-Check Grid
+
+### 40a. Unified Transcript Pane
+
+- [x] Replace separate transcript and fact-check panes with one combined transcript grid.
+- [x] Show finalized transcript entries as two-line grid groups.
+- [x] Render line 1 as timestamp, audio source, and transcript text.
+- [x] Render line 2 with blank timestamp/source columns and fact-check output in the text column.
+- [x] Keep interim transcript text in the same grid with a pending fact-check state.
+
+### 40b. Source and Fact-Check Association
+
+- [x] Track the active transcript source name for live microphone sessions.
+- [x] Track the active transcript source name for file transcription sessions.
+- [x] Match fact-check results back to transcript rows by normalized sentence text.
+- [x] Support transcript segments containing multiple complete sentences.
+- [x] Preserve existing queued, checking, result, disabled, and failed fact-check states in the combined row.
+
+### 40c. Tests and Version
+
+- [x] Verify the app builds with the combined SwiftUI grid.
+- [x] Verify the existing fact-check and transcription tests still pass.
+- [x] Bump `CFBundleShortVersionString` to `2.0.3`.
+- [x] Bump `CFBundleVersion` to `21`.
+
+## 41. v2.0.4. Transcription Engine Regression Fix
+
+### 41a. Engine Default
+
+- [x] Change the default transcription engine from Apple Speech to FluidAudio.
+- [x] Use FluidAudio as the fallback when no transcription engine preference exists.
+- [x] Add a one-time migration from the old Apple Speech default to FluidAudio for existing installs.
+- [x] Keep Apple Speech selectable manually in Settings after migration.
+
+### 41b. Diagnostics
+
+- [x] Add trace events when audio buffers reach the transcription coordinator.
+- [x] Include engine, sample rate, channel count, and buffer duration in transcription buffer traces.
+- [x] Add a regression test for the FluidAudio default engine.
+
+### 41c. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.0.4`.
+- [x] Bump `CFBundleVersion` to `22`.
+
+## 42. v2.0.5. Running Recording Summary
+
+### 42a. Summary State
+
+- [x] Add a summary coordinator owned by `AppModel`.
+- [x] Accrue finalized transcript sentences into summary state.
+- [x] Suppress duplicate finalized sentences before summarizing.
+- [x] Organize accrued sentences into readable paragraphs.
+- [x] Reset summary state when a new microphone transcription session starts.
+- [x] Reset summary state when a new file transcription session starts.
+
+### 42b. Summary UI
+
+- [x] Add a Recording Summary section under the transcript/fact-check grid.
+- [x] Show a clear empty state before finalized transcript sentences exist.
+- [x] Show the number of accrued sentences.
+- [x] Render summary paragraphs in a scrollable section.
+- [x] Stop forcing transcript scroll position when new text is appended.
+
+### 42c. Settings
+
+- [x] Add a persisted summary prompt/instruction setting.
+- [x] Add a summary prompt editor to the Settings popup.
+- [x] Add a summary prompt editor to the full Settings view.
+- [x] Add a reset action for the default summary prompt.
+
+### 42d. Tests and Version
+
+- [x] Add tests for summary paragraph grouping.
+- [x] Add tests for default summary prompt content.
+- [x] Bump `CFBundleShortVersionString` to `2.0.5`.
+- [x] Bump `CFBundleVersion` to `23`.
+
+## 43. v2.0.6. First-Launch Permission Relaunch
+
+### 43a. Startup Permission Flow
+
+- [x] Add an app startup permission flow owned by `AppModel`.
+- [x] Request the native microphone permission dialog on launch when macOS reports a not-determined state.
+- [x] Request the native speech-recognition permission dialog on launch when macOS reports a not-determined state.
+- [x] Continue to request native dialogs if a rebuilt/resigned app returns to not-determined permissions.
+- [x] Preserve the existing device-touch permission fallback before capture starts.
+
+### 43b. Automatic Restart
+
+- [x] Relaunch the packaged `.app` automatically after startup permission dialogs complete.
+- [x] Persist permission-flow state before restarting to avoid restart loops.
+- [x] Show a manual restart message when running outside an `.app` bundle.
+- [x] Trace first-launch permission and app-restart events.
+
+### 43c. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.0.6`.
+- [x] Bump `CFBundleVersion` to `24`.
+
+## 44. v2.0.7. Stop Fact-Checking Transcript Fragments
+
+### 44a. Regression Cause
+
+- [x] Confirmed via `/tmp/VoiceTranscribe.log` that FluidAudio partial text was being committed as finalized transcript text every 50 characters.
+- [x] Confirmed the length-based commit path added punctuation to fragments, making them look like complete sentences.
+- [x] Confirmed those artificial sentences were then queued for fact-checking.
+
+### 44b. Fix
+
+- [x] Remove length-based finalization from FluidAudio partial callbacks.
+- [x] Keep FluidAudio partial callback output as interim transcript text only.
+- [x] Preserve final transcript/fact-check flow for actual EOU callback and final drain output.
+- [x] Update requirements so partial transcript fragments must not be fact-checked.
+
+### 44c. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.0.7`.
+- [x] Bump `CFBundleVersion` to `25`.
+
+## 45. v2.0.8. Transcript Export Actions
+
+### 45a. Recording Transcript Save
+
+- [x] Save the recording transcript whenever transcript text exists, even if transcription was stopped before recording.
+- [x] Preserve the existing shared basename for recording audio, transcript text, and metadata files.
+
+### 45b. Manual Transcript Export
+
+- [x] Add `CopyText` to copy the current transcript text to the clipboard.
+- [x] Add `SaveToFile` to export the current transcript text through a save panel.
+- [x] Disable transcript export actions until transcript text is available.
+
+### 45c. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.0.8`.
+- [x] Bump `CFBundleVersion` to `26`.
+
+## 46. v2.0.9. Summary Export Actions
+
+### 46a. Manual Summary Export
+
+- [x] Add `CopyText` to copy the current recording summary to the clipboard.
+- [x] Add `SaveToFile` to export the current recording summary through a save panel.
+- [x] Disable summary export actions until summary text is available.
+
+### 46b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.0.9`.
+- [x] Bump `CFBundleVersion` to `27`.
+
+## 47. v2.1.0. Multiple LLM Endpoints
+
+### 47a. LLM Configuration
+
+- [x] Add a persisted list of LLM endpoint configurations, each with name, endpoint URL, and model.
+- [x] Migrate the previous single Ollama endpoint/model settings into the default LLM entry.
+- [x] Track the selected LLM endpoint independently from the configured endpoint list.
+- [x] Sanitize empty endpoint lists and blank endpoint fields back to usable defaults.
+
+### 47b. Fact-Check Routing
+
+- [x] Route live fact-check requests through the selected LLM endpoint.
+- [x] Store endpoint and model on queued fact-check items so existing queued work keeps its original routing.
+- [x] Update the connectivity test to target the selected LLM.
+
+### 47c. Settings UI
+
+- [x] Replace single Ollama endpoint/model fields with an editable LLM list.
+- [x] Add a selected-LLM picker.
+- [x] Add controls to add and remove configured LLM endpoints.
+
+### 47d. Tests and Version
+
+- [x] Add tests for LLM endpoint defaults and sanitization.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.1.0`.
+- [x] Bump `CFBundleVersion` to `28`.
+
+## 48. v2.1.1. Two-Column Settings Sheet
+
+### 48a. Settings Layout
+
+- [x] Split the Settings sheet into left and right columns.
+- [x] Keep transcription, permissions, and summary settings on the left.
+- [x] Move LLM fact-checking configuration to the right column.
+- [x] Add independent scrolling for each column so the dialog fits shorter screens.
+
+### 48b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.1.1`.
+- [x] Bump `CFBundleVersion` to `29`.
+
+## 49. v2.2.0. LLM Provider API Types
+
+### 49a. Provider Configuration
+
+- [x] Add an API type to each configured LLM endpoint.
+- [x] Support Ollama, OpenAI-compatible chat completions, Anthropic Messages, and Gemini generateContent endpoints.
+- [x] Add an optional API key field to each LLM endpoint configuration.
+- [x] Infer OpenAI-compatible routing for legacy remote LLM endpoints and Ollama routing for legacy local endpoints.
+
+### 49b. Provider Routing
+
+- [x] Route fact-check requests through provider-specific URL paths, headers, request bodies, and response parsers.
+- [x] Preserve existing Ollama `/api/generate` behavior.
+- [x] Use bearer auth for OpenAI-compatible endpoints.
+- [x] Use `x-api-key` plus `anthropic-version` for Anthropic endpoints.
+- [x] Use Gemini `models/{model}:generateContent` requests with API-key query support.
+
+### 49c. Tests and Version
+
+- [x] Add tests for legacy local and remote provider inference.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.2.0`.
+- [x] Bump `CFBundleVersion` to `30`.
+
+## 50. v2.2.1. Plain LLM Prompt Test
+
+### 50a. LLM Diagnostics
+
+- [x] Add a selected-LLM prompt test using `Hello, what is 10 * 20?`.
+- [x] Reuse provider-specific LLM routing without fact-check JSON parsing.
+- [x] Display the raw selected-LLM response in the app message.
+- [x] Keep the existing fact-check test as a separate diagnostic action.
+
+### 50b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.2.1`.
+- [x] Bump `CFBundleVersion` to `31`.
+
+## 51. v2.2.2. LLM Test Diagnostics
+
+### 51a. Settings Test UX
+
+- [x] Move LLM test buttons to the top of the LLM settings panel.
+- [x] Present LLM test results from the Settings sheet so results appear before closing the modal.
+
+### 51b. Request Diagnostics
+
+- [x] Keep JSON response formatting for fact-check requests.
+- [x] Do not force JSON response formatting for the plain arithmetic prompt test.
+- [x] Include LLM HTTP response bodies in surfaced HTTP errors.
+
+### 51c. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.2.2`.
+- [x] Bump `CFBundleVersion` to `32`.
+
+## 52. v2.2.3. OpenRouter Endpoint Repair
+
+### 52a. OpenRouter Configuration
+
+- [x] Add OpenRouter as a first-class LLM API type with default endpoint `https://openrouter.ai/api`.
+- [x] Detect legacy OpenRouter endpoints when loading saved LLM configurations.
+- [x] Repair mismatched profiles that saved an OpenRouter model against an OpenCode endpoint.
+
+### 52b. Request Routing
+
+- [x] Route OpenRouter through OpenAI-compatible chat completions.
+- [x] Accept OpenAI-compatible base URLs that already include `/v1` or `/v1/chat/completions`.
+- [x] Preserve `openrouter/free` as the model ID without rewriting the slash.
+
+### 52c. Tests and Version
+
+- [x] Add tests for OpenRouter provider inference and endpoint repair.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.2.3`.
+- [x] Bump `CFBundleVersion` to `33`.
+
+## 53. v2.2.4. AI Toggle
+
+### 53a. Global AI Control
+
+- [x] Add a persisted `aiEnabled` setting.
+- [x] Add a top-bar AI toggle for quick access.
+- [x] Add AI enable toggles to the Settings fact-checking sections.
+
+### 53b. Fact-Check Gating
+
+- [x] Gate live LLM fact-checking behind both the global AI toggle and the fact-check toggle.
+- [x] Disable fact-check test buttons when AI is off.
+- [x] Return a clear message if an LLM test is invoked while AI is disabled.
+
+### 53c. Tests and Version
+
+- [x] Add tests for effective AI/fact-check state.
+- [x] Add tests for disabled fact-check queue behavior.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.2.4`.
+- [x] Bump `CFBundleVersion` to `34`.
+
+## 54. v2.2.5. AI Toggle Visibility
+
+### 54a. Main Window
+
+- [x] Move the global AI toggle next to the Settings button so it is not hidden at the far right edge of the split view.
+- [x] Add the same labelled AI switch to the live transcript/fact-check header.
+- [x] Keep both switches bound to the same persisted `aiEnabled` setting.
+
+### 54b. Version
+
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.2.5`.
+- [x] Bump `CFBundleVersion` to `35`.
+
+## 55. v2.2.6. Split Menu Settings Window
+
+### 55a. macOS Settings View
+
+- [x] Split the macOS app Settings/options window into two scrollable columns.
+- [x] Move output, transcription, summary, and visualization controls to the left column.
+- [x] Move AI, LLM endpoint, test, and fact-check prompt controls to the right column.
+- [x] Widen the app Settings scene so it does not render as the old single long page.
+
+### 55b. Version
+
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.2.6`.
+- [x] Bump `CFBundleVersion` to `36`.
+
+## 56. v2.2.7. Restart and Menu Settings Repair
+
+### 56a. Relaunch Flow
+
+- [x] Fix automatic restart after permission prompts so it launches a fresh app instance.
+- [x] Avoid activating the current app instance and then terminating it.
+- [x] Trace successful fresh-instance launch attempts.
+
+### 56b. Version
+
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.2.7`.
+- [x] Bump `CFBundleVersion` to `37`.
+
+## 57. v2.2.8. Markdown Transcript Export
+
+### 57a. Requirements
+
+- [x] Add Markdown export for the current transcript session.
+- [x] Include a `# DETAILS` section with recording time, location, source, duration, transcription engine, and export timestamp.
+- [x] Include a `# RECORDING` section with a Markdown table: `date time | length | text`.
+- [x] Include the current summary when summary text is available.
+- [x] Include fact-check results when fact-check items are available.
+- [x] Include related audio, transcript, and metadata file paths when a recording session exists.
+- [x] Use `Not specified` for location until the app collects recording location explicitly.
+- [x] Escape Markdown table delimiters and line breaks in exported transcript and fact-check text.
+
+### 57b. Implementation
+
+- [x] Add `MarkdownExportService` and `MarkdownExportContext`.
+- [x] Compute transcript row length from the next segment timestamp or session end time.
+- [x] Add `AppModel.saveTranscriptMarkdownToFile()`.
+- [x] Add an Export Markdown button to the combined transcript/fact-check pane.
+- [x] Add unit coverage for Markdown export details, recording table, summary, fact checks, file paths, and table escaping.
+
+### 57c. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.2.8`.
+- [x] Bump `CFBundleVersion` to `38`.
+
+## 58. v2.2.9. Sidebar Version Footer
+
+### 58a. Left Pane UI
+
+- [x] Show the current application version at the bottom of the left source pane.
+- [x] Read version and build from the app bundle instead of hardcoding display text.
+- [x] Keep the source list scrollable while the version footer remains pinned.
+- [x] Add unit coverage for version display formatting.
+
+### 58b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.2.9`.
+- [x] Bump `CFBundleVersion` to `39`.
+
+## 59. v2.3.0. AI Results in Markdown Export
+
+### 59a. Export Content
+
+- [x] Add a dedicated `# AI RESULTS` section to Markdown exports.
+- [x] Include AI enabled and fact-check enabled state.
+- [x] Include selected LLM display name, provider, endpoint, and model.
+- [x] Include generated summary output.
+- [x] Include generated fact-check output.
+- [x] Include the fact-check prompt used at export time.
+- [x] Include the summary prompt used at export time.
+- [x] Exclude API keys from exported Markdown.
+
+### 59b. Tests and Version
+
+- [x] Update Markdown export tests for AI result metadata and prompts.
+- [x] Bump `CFBundleShortVersionString` to `2.3.0`.
+- [x] Bump `CFBundleVersion` to `40`.
+
+## 60. v2.3.1. Single-Table AI Export
+
+### 60a. Markdown Format
+
+- [x] Move sentence-level fact-check output into the main `# RECORDING` table.
+- [x] Add an `AI result` column beside each transcript row.
+- [x] Remove the separate `# FACT CHECKS` table from Markdown export.
+- [x] Remove the duplicate fact-check results list from `# AI RESULTS`.
+- [x] Keep AI endpoint metadata, selected model, and prompts in `# AI RESULTS`.
+- [x] Update requirements to require one recording table for transcript and AI result output.
+
+### 60b. Tests and Version
+
+- [x] Update Markdown export tests for the single-table format.
+- [x] Bump `CFBundleShortVersionString` to `2.3.1`.
+- [x] Bump `CFBundleVersion` to `41`.
+
+## 61. v2.3.2. LLM Compatibility and Tabbed Panels
+
+### 61a. LLM Compatibility
+
+- [x] Normalize literal escaped slashes in saved LLM endpoint and model values.
+- [x] Simplify OpenAI-compatible request bodies to `model` plus `messages`.
+- [x] Stop sending protocol-level `response_format` and `temperature` parameters to OpenAI-compatible providers.
+- [x] Verify configured OpenRouter, LiteLLM, DeepSeek, and OpenAI endpoints respond successfully with the simplified request shape.
+
+### 61b. Main Window Layout
+
+- [x] Shrink the voice chart height.
+- [x] Move Live Transcript into a tab.
+- [x] Move Recording Summary into a tab.
+- [x] Move Recent Recordings into a tab with an empty state.
+
+### 61c. Tests and Version
+
+- [x] Add coverage for escaped-slash LLM configuration normalization.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.3.2`.
+- [x] Bump `CFBundleVersion` to `42`.
+
+## 62. v2.4.0. Multi-Prompt AI Processing
+
+### 62a. Prompt Templates
+
+- [x] Add multiple named AI prompt templates.
+- [x] Store prompt templates with their enabled state and selected LLM endpoint.
+- [x] Migrate the existing fact-check prompt into the new prompt-template list.
+- [x] Add prompt-template creation, deletion, editing, reset, and model assignment controls.
+
+### 62b. Main Window Layout
+
+- [x] Replace the global AI on/off switch with per-prompt toggles.
+- [x] Move prompt toggles into the left pane with Microphones and File Sources.
+- [x] Split Settings into general settings, LLM model configuration, and prompt-template columns.
+- [x] Rename visible fact-check labels to AI Processing.
+- [x] Add a persisted transcript auto-scroll toggle.
+
+### 62c. Processing Queue
+
+- [x] Fan out each finalized complete sentence to every enabled prompt template.
+- [x] Route each prompt through its selected LLM endpoint.
+- [x] Deduplicate queued work by prompt template and normalized sentence.
+- [x] Process queued AI calls with up to three concurrent workers.
+
+### 62d. Tests and Version
+
+- [x] Add coverage for prompt-template enablement, multi-prompt fan-out, and three-call concurrency.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.0`.
+- [x] Bump `CFBundleVersion` to `43`.
+
+## 63. v2.4.1. Tabbed Settings Options
+
+### 63a. Settings Layout
+
+- [x] Replace the three-column Settings sheet with General, LLM Models, and Prompt Templates tabs.
+- [x] Apply the same tabbed options layout to the standalone Settings window.
+- [x] Keep each tab vertically scrollable so long model and prompt lists fit smaller screens.
+
+### 63b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.1`.
+- [x] Bump `CFBundleVersion` to `44`.
+
+## 64. v2.4.2. Prompt Template Refresh Fix
+
+### 64a. Prompt Template UI
+
+- [x] Forward `AppSettings.objectWillChange` through `AppModel` so settings-backed lists refresh.
+- [x] Route prompt-template add, remove, reset, and edit actions through `AppModel`.
+- [x] Explicitly publish prompt-template mutations before writing computed `@AppStorage` JSON state.
+- [x] Trace prompt-template add, remove, and reset actions.
+
+### 64b. Tests and Version
+
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.2`.
+- [x] Bump `CFBundleVersion` to `45`.
+
+## 65. v2.4.3. Global Prompt Model Override
+
+### 65a. Model and Prompt Refresh
+
+- [x] Route LLM endpoint add, edit, remove, and selected-model changes through `AppModel`.
+- [x] Explicitly publish LLM endpoint mutations before writing computed `@AppStorage` JSON state.
+- [x] Enable newly added prompt templates by default.
+
+### 65b. Global Prompt Model
+
+- [x] Add a persisted toggle for using one model across all prompts.
+- [x] Add a global prompt-model picker in the LLM Models tab.
+- [x] Disable per-prompt model pickers while the global prompt model is active.
+- [x] Route live AI processing and Markdown export metadata through the effective prompt model.
+- [x] Show global model status in the prompt sidebar and prompt editor.
+
+### 65c. Tests and Version
+
+- [x] Add coverage for global model override routing.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.3`.
+- [x] Bump `CFBundleVersion` to `46`.
+
+## 66. v2.4.4. Conversation Prompt Placeholders
+
+### 66a. Prompt Context
+
+- [x] Add a timestamped AI prompt context built from finalized transcript segments.
+- [x] Split finalized transcript segments into timestamped sentence entries for prompt context.
+- [x] Pass conversation context into every queued AI processing request.
+
+### 66b. Template Substitutions
+
+- [x] Keep `{{sentence}}` substitution support.
+- [x] Add `{{conversation}}` substitution for the full timestamped transcript context.
+- [x] Add `{{last-3}}`, `{{last-5}}`, and `{{last-10}}` substitutions for recent timestamped transcript entries.
+- [x] Accept the malformed `{{last-3}` variant as a forgiving alias.
+- [x] Add prompt editor tooltip documentation for supported placeholders.
+
+### 66c. Tests and Version
+
+- [x] Add coverage for conversation, last-N, malformed last-3, and segment splitting substitutions.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.4`.
+- [x] Bump `CFBundleVersion` to `47`.
+
+## 67. v2.4.5. Batched Prompt Questions
+
+### 67a. Global Model Batching
+
+- [x] Add a batch AI processing request path for multiple prompt questions targeting the same model.
+- [x] Enable prompt batching when the global prompt model option is active.
+- [x] Keep one visible AI result row per prompt while sending a single combined LLM request.
+- [x] Parse combined JSON batch responses back into individual prompt results.
+- [x] Fall back to per-item failures when a batch response omits a prompt result.
+
+### 67b. Queue Behavior
+
+- [x] Reserve queued batch groups before awaiting the LLM so workers do not split one batch into separate calls.
+- [x] Batch only when every queued prompt question is routed to the same LLM endpoint.
+- [x] Preserve the existing three-worker queue limit for separate sentences and non-batched prompt work.
+
+### 67c. Tests and Version
+
+- [x] Add coverage proving three prompt questions are sent as one batch call.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.5`.
+- [x] Bump `CFBundleVersion` to `48`.
+
+## 68. v2.4.6. Prompt State Substitution
+
+### 68a. Prompt State
+
+- [x] Add `{{prompt-state}}` substitution support.
+- [x] Maintain accumulated state independently for each prompt template.
+- [x] Update prompt state from each successful prompt response.
+- [x] Clear prompt state when AI processing state is reset for a new session.
+
+### 68b. Queue Ordering
+
+- [x] Inject current prompt state immediately before sending each AI request.
+- [x] Serialize concurrent calls for prompt templates that use `{{prompt-state}}`.
+- [x] Preserve batching and three-worker concurrency for prompts that do not use prompt state.
+
+### 68c. Tests and Version
+
+- [x] Add coverage for `{{prompt-state}}` rendering.
+- [x] Add coverage for state accrual between successive prompt calls.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.6`.
+- [x] Bump `CFBundleVersion` to `49`.
+
+## 69. v2.4.7. Prompt State Markdown Export
+
+### 69a. Export Content
+
+- [x] Include non-empty accumulated prompt states in Markdown transcript exports.
+- [x] Preserve prompt-template display names with each exported prompt state.
+- [x] Omit empty prompt states from the export.
+
+### 69b. Tests and Version
+
+- [x] Add Markdown export coverage for prompt states.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.7`.
+- [x] Bump `CFBundleVersion` to `50`.
+
+## 70. v2.4.8. Live Speaker Diarization
+
+### 70a. FluidAudio Pipeline
+
+- [x] Add a live FluidAudio LS-EEND diarization coordinator.
+- [x] Feed copied live microphone buffers to diarization in parallel with transcription.
+- [x] Feed copied file-transcription buffers to diarization in parallel with transcription.
+- [x] Finalize and merge diarization timeline updates when transcription stops.
+- [x] Continue transcription without speaker labels when diarization startup fails.
+
+### 70b. Transcript Annotation and Export
+
+- [x] Add speaker fields to transcript segments and speaker timeline models.
+- [x] Annotate live transcript rows with speaker labels when available.
+- [x] Include speaker labels in copied and saved transcript text.
+- [x] Add a speaker column and speaker timeline to Markdown exports.
+
+### 70c. Docs, Tests, and Version
+
+- [x] Update README, requirements, architecture notes, and agent handoff notes for diarization.
+- [x] Add coverage for speaker labels in text and Markdown exports.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.8`.
+- [x] Bump `CFBundleVersion` to `51`.
+
+## 71. v2.4.9. Root App Launcher
+
+### 71a. Launch Script
+
+- [x] Add root `run.sh` to package and launch `dist/VoiceTranscribe.app`.
+- [x] Support `./run.sh --no-build` for relaunching an existing packaged app.
+- [x] Update README and agent launch instructions to use the packaged app launcher.
+
+### 71b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.9`.
+- [x] Bump `CFBundleVersion` to `52`.
+
+## 72. v2.4.10. Speaker Placement in Live Transcript
+
+### 72a. Live Transcript UI
+
+- [x] Move speaker labels from a separate Live Transcript column to a line under Audio Source.
+- [x] Keep unknown speaker state visible under the source name.
+- [x] Update layout documentation for the source-plus-speaker row design.
+
+### 72b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.10`.
+- [x] Bump `CFBundleVersion` to `53`.
+
+## 73. v2.4.11. Visible Current Speaker Status
+
+### 73a. Live Transcript UI
+
+- [x] Add a prominent current-speaker indicator to the Live Transcript toolbar.
+- [x] Show diarization detecting, unavailable, and inactive states.
+- [x] Use the current diarized speaker as the interim-row speaker fallback.
+- [x] Document that diarization labels are anonymous speakers such as `Speaker 1`.
+
+### 73b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.11`.
+- [x] Bump `CFBundleVersion` to `54`.
+
+## 74. v2.4.12. Prompt Template Space Editing Fix
+
+### 74a. Prompt Template Editing
+
+- [x] Preserve prompt template text exactly while editing instead of trimming on every keystroke.
+- [x] Preserve prompt template names while editing, while still falling back when the trimmed name is empty.
+- [x] Keep fallback default prompt behavior for truly empty templates.
+
+### 74b. Tests and Version
+
+- [x] Add regression coverage proving prompt template names and text preserve trailing spaces during sanitization.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.12`.
+- [x] Bump `CFBundleVersion` to `55`.
+
+## 75. v2.4.13. Always-Visible Speaker Status
+
+### 75a. Live Transcript UI
+
+- [x] Move current-speaker status out of the crowded toolbar.
+- [x] Add a full-width Live Transcript speaker-detection strip that is visible before and during transcription.
+- [x] Show inactive, detecting, unavailable, and current-speaker states in that strip.
+
+### 75b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.13`.
+- [x] Bump `CFBundleVersion` to `56`.
+
+## 76. v2.4.14. Speaker-Only Transcript Column
+
+### 76a. Live Transcript UI
+
+- [x] Replace the Live Transcript `Audio Source` column with a `Speaker` column.
+- [x] Display only the speaker label or `Detecting` in transcript rows.
+- [x] Keep the full-width current-speaker status strip above the transcript grid.
+
+### 76b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.14`.
+- [x] Bump `CFBundleVersion` to `57`.
+
+## 77. v2.4.15. Clean Package Build Path
+
+### 77a. Packaging
+
+- [x] Resolve the SwiftPM build product directory with `swift build --show-bin-path`.
+- [x] Avoid packaging stale or missing executables when Swift places clean-build products outside the old architecture-specific path.
+- [x] Rebuild and relaunch the packaged app after verifying the executable no longer contains the old Live Transcript `Audio Source` label.
+
+### 77b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.15`.
+- [x] Bump `CFBundleVersion` to `58`.
+
+## 78. v2.4.16. Always-Clean Package Builds
+
+### 78a. Packaging
+
+- [x] Run `swift package clean` before every packaged app build.
+- [x] Ensure `./run.sh` uses a clean build whenever it rebuilds through `scripts/package-app.sh`.
+
+### 78b. Version
+
+- [x] Bump `CFBundleShortVersionString` to `2.4.16`.
+- [x] Bump `CFBundleVersion` to `59`.
+
+## 79. v2.4.17. Stalled FluidAudio Partial Finalization
+
+### 79a. Transcription Finalization
+
+- [x] Add a FluidAudio-only fallback that finalizes a stable interim transcript segment after a short stall.
+- [x] Capitalize and punctuate fallback-finalized interim text so AI processing receives complete sentences.
+- [x] Suppress duplicate final segments if FluidAudio later emits the same utterance through its EOU callback.
+- [x] Keep Apple Speech transcription behavior unchanged.
+
+### 79b. Tests and Version
+
+- [x] Add regression coverage for a stalled FluidAudio partial becoming a finalized transcript segment.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.17`.
+- [x] Bump `CFBundleVersion` to `60`.
+
+## 80. v2.4.18. FluidAudio Stale Partial Suppression
+
+### 80a. Transcription Finalization
+
+- [x] Remove stalled-interim fallback finalization because FluidAudio partials are cumulative and can cross speaker boundaries.
+- [x] Suppress stale partial transcript updates that repeat the latest finalized utterance.
+- [x] Suppress exact duplicate final transcript segments.
+- [x] Keep finalized transcript text driven by FluidAudio EOU callbacks.
+
+### 80b. Tests and Version
+
+- [x] Replace the stalled-finalization regression test with stale-partial suppression coverage.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.18`.
+- [x] Bump `CFBundleVersion` to `61`.
+
+## 81. v2.4.19. Apple Speech Transcript Pipeline
+
+### 81a. Transcription and Diarization
+
+- [x] Make Apple Speech the fixed live transcript engine so transcript rows use Apple's finalized segment boundaries.
+- [x] Keep FluidAudio in the live pipeline for speaker diarization only.
+- [x] Replace transcription engine pickers with a read-only pipeline summary in Settings.
+- [x] Migrate saved transcription-engine preferences back to Apple Speech.
+
+### 81b. Tests and Version
+
+- [x] Update default transcription engine regression coverage.
+- [x] Verify the test suite passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.19`.
+- [x] Bump `CFBundleVersion` to `62`.
+
+## 82. v2.4.20. SpeechVAD Sortformer Diarization
+
+### 82a. Diarization
+
+- [x] Add the local `speech-swift` checkout as a SwiftPM dependency for `SpeechVAD` and `AudioCommon`.
+- [x] Replace the live FluidAudio diarization engine with SpeechVAD Sortformer streaming diarization.
+- [x] Keep Apple Speech as the transcript segmentation engine while preserving the existing speaker annotation/export surface.
+- [x] Update build scripts to resolve and patch the MLX checkout before clean builds so generated Metal sources do not break the Xcode Metal wrapper.
+- [x] Add a root `build.sh` clean-build helper.
+
+### 82b. Tests and Version
+
+- [x] Verify `./build.sh` succeeds.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.20`.
+- [x] Bump `CFBundleVersion` to `63`.
+
+## 83. v2.4.21. Nonblocking Diarization Startup
+
+### 83a. Latency
+
+- [x] Start Apple Speech transcription before SpeechVAD Sortformer diarization startup.
+- [x] Launch diarization model loading in a background task so first transcript text is not blocked by model download/load/CoreML warmup.
+- [x] Cancel pending diarization startup when live or file transcription stops.
+- [x] Feed transcription before diarization for live and file audio buffers.
+- [x] Dispatch capture consumers in a stable priority order: transcribe, record, diarize, then any remaining consumers.
+
+### 83b. Tests and Version
+
+- [x] Verify `./build.sh` succeeds.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.21`.
+- [x] Bump `CFBundleVersion` to `64`.

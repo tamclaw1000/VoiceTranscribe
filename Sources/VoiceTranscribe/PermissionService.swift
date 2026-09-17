@@ -49,9 +49,12 @@ final class PermissionService: ObservableObject {
     func requestMicrophonePermission() async {
         hasTouchedRecordingDevice = true
         if microphoneStatus == .notDetermined {
+            Trace.event("permission.mic.requesting")
             microphoneStatus = await microphoneProvider.requestAccess()
+            Trace.event("permission.mic.requested", ["status": microphoneStatus.rawValue])
         } else {
             microphoneStatus = microphoneProvider.currentStatus()
+            Trace.event("permission.mic.current", ["status": microphoneStatus.rawValue])
         }
     }
 
@@ -77,10 +80,12 @@ final class PermissionService: ObservableObject {
     }
 
     func requestSpeechPermission() async {
+        Trace.event("permission.speech.requesting")
         await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { [weak self] status in
                 Task { @MainActor in
                     self?.speechStatus = status
+                    Trace.event("permission.speech.requested", ["status": status.rawValue])
                     continuation.resume()
                 }
             }

@@ -14,10 +14,15 @@ final class AppModel: ObservableObject {
     @Published var captureService = AudioCaptureService()
     @Published var recordingService = RecordingService()
     @Published var transcription: TranscriptionCoordinator
+    @Published var diarization = DiarizationCoordinator()
+    @Published var factCheck = FactCheckCoordinator()
+    @Published var summary = SummaryCoordinator()
 
     /// Tracks whether the user has completed the initial permissions setup flow.
     /// Persisted so we don't re-prompt on every launch after setup.
     @AppStorage("hasCompletedPermissionsSetup") var hasCompletedPermissionsSetup: Bool = false
+    @AppStorage("hasRunFirstLaunchPermissionRequest") private var hasRunFirstLaunchPermissionRequest: Bool = false
+    @Published private(set) var isRunningFirstLaunchPermissionFlow = false
 
     /// Whether Settings should auto-open (permissions are missing and not yet set up).
     var needsPermissionsSetup: Bool {
@@ -32,15 +37,83 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private static func makeInitialService() -> TranscriptionService {
-        let raw = UserDefaults.standard.string(forKey: "transcriptionEngine") ?? TranscriptionEngineKind.appleSpeech.rawValue
-        let kind = TranscriptionEngineKind(rawValue: raw) ?? .appleSpeech
-        switch kind {
-        case .appleSpeech:
-            return AppleSpeechTranscriptionService()
-        case .fluidAudio:
-            return FluidAudioTranscriptionService()
+    @discardableResult
+    func runFirstLaunchPermissionFlowIfNeeded() async -> Bool {
+        guard !isRunningFirstLaunchPermissionFlow else {
+            return false
         }
+
+        permissionService.refresh()
+        let needsMicrophonePrompt = permissionService.microphoneStatus == .notDetermined
+        let needsSpeechPrompt = permissionService.speechStatus == .notDetermined
+        guard needsMicrophonePrompt || needsSpeechPrompt else {
+            if !hasRunFirstLaunchPermissionRequest {
+                hasRunFirstLaunchPermissionRequest = true
+            }
+            markPermissionsSetupComplete()
+            return false
+        }
+
+        isRunningFirstLaunchPermissionFlow = true
+        defer { isRunningFirstLaunchPermissionFlow = false }
+
+        Trace.event("permission.firstLaunch.started", [
+            "microphone": permissionService.microphoneStatus.rawValue,
+            "speech": permissionService.speechStatus.rawValue
+        ])
+
+        if needsMicrophonePrompt {
+            await permissionService.requestMicrophonePermission()
+        }
+        if needsSpeechPrompt {
+            await permissionService.requestSpeechPermission()
+        }
+
+        permissionService.refresh()
+        hasRunFirstLaunchPermissionRequest = true
+        markPermissionsSetupComplete()
+        UserDefaults.standard.synchronize()
+
+        Trace.event("permission.firstLaunch.completed", [
+            "microphone": permissionService.microphoneStatus.rawValue,
+            "speech": permissionService.speechStatus.rawValue,
+            "canCaptureAudio": permissionService.canCaptureAudio,
+            "canTranscribe": permissionService.canTranscribe
+        ])
+
+        restartAfterPermissionDialog()
+        return true
+    }
+
+    private func restartAfterPermissionDialog() {
+        let bundleURL = Bundle.main.bundleURL
+        guard bundleURL.pathExtension == "app" else {
+            userMessage = "Permissions were updated. Please restart VoiceTranscribe to continue."
+            Trace.event("app.restart.skipped", ["reason": "notAppBundle", "bundle": bundleURL.path])
+            return
+        }
+
+        userMessage = "Permissions were updated. VoiceTranscribe will restart now."
+        Trace.event("app.restart.scheduled", ["bundle": bundleURL.path])
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            process.arguments = ["-n", bundleURL.path]
+
+            do {
+                try process.run()
+                Trace.event("app.restart.launched", ["bundle": bundleURL.path])
+                NSApp.terminate(nil)
+            } catch {
+                self.userMessage = "Permissions were updated. Please restart VoiceTranscribe manually."
+                Trace.event("app.restart.failed", ["error": error.localizedDescription])
+            }
+        }
+    }
+
+    private static func makeInitialService() -> TranscriptionService {
+        AppleSpeechTranscriptionService()
     }
     @Published var completedRecordings: [RecordingSession] = []
     @Published var userMessage: String?
@@ -62,17 +135,42 @@ final class AppModel: ObservableObject {
     @Published private(set) var fileTranscriptionProgress: Double = 0
     /// Whether a file transcription is currently running.
     @Published private(set) var isTranscribingFile: Bool = false
+    /// Display name for the source associated with the current transcript.
+    @Published private(set) var transcriptSourceName: String = "Unknown"
 
     private var cancellables = Set<AnyCancellable>()
     private var transcriptionTask: Task<Void, Never>?
     private var recordingTask: Task<Void, Never>?
     private var fileTranscriptionTask: Task<Void, Never>?
+    private var diarizationStartTask: Task<Void, Never>?
 
     init() {
         transcription = TranscriptionCoordinator(service: AppModel.makeInitialService())
+        transcription.speakerProvider = { [weak self] in
+            self?.diarization.annotationForCurrentSpeaker()
+        }
+        transcription.onFinalSegment = { [weak self] segment in
+            guard let self else { return }
+            let enabledPromptTemplates = self.settings.effectiveEnabledAIPromptTemplates
+            self.factCheck.enqueueTranscriptSegment(
+                segment,
+                enabled: self.settings.isFactCheckActive,
+                promptTemplates: enabledPromptTemplates,
+                llmEndpoints: self.settings.llmEndpoints,
+                fallbackLLM: self.settings.useGlobalPromptLLM
+                    ? self.settings.globalPromptLLMEndpoint
+                    : self.settings.selectedLLMEndpoint,
+                conversation: self.transcription.segments,
+                batchPrompts: self.settings.useGlobalPromptLLM
+            )
+            self.summary.enqueueTranscriptSegment(segment, prompt: self.settings.summaryPrompt)
+        }
 
         // Propagate nested ObservableObject changes so SwiftUI re-renders
-        // when captureService, recordingService, or transcription state changes.
+        // when settings and child services change.
+        settings.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
         captureService.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
@@ -80,6 +178,15 @@ final class AppModel: ObservableObject {
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         transcription.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        diarization.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        factCheck.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        summary.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         permissionService.objectWillChange.sink { [weak self] _ in
@@ -104,6 +211,157 @@ final class AppModel: ObservableObject {
     func requestSpeechPermission() {
         Task {
             await permissionService.requestSpeechPermission()
+        }
+    }
+
+    func setAIEnabled(_ enabled: Bool) {
+        objectWillChange.send()
+        var promptTemplates = settings.aiPromptTemplates
+        for index in promptTemplates.indices {
+            promptTemplates[index].isEnabled = enabled
+        }
+        settings.aiPromptTemplates = promptTemplates
+        Trace.event("settings.aiPromptsToggled", ["enabled": enabled])
+        if !settings.isFactCheckActive {
+            factCheck.reset()
+        }
+    }
+
+    func updateLLMEndpoint(_ endpoint: LLMEndpointConfiguration) {
+        objectWillChange.send()
+        settings.updateLLMEndpoint(endpoint)
+    }
+
+    func addLLMEndpoint() {
+        objectWillChange.send()
+        let beforeCount = settings.llmEndpoints.count
+        settings.addLLMEndpoint()
+        let afterCount = settings.llmEndpoints.count
+        Trace.event("settings.llmAdded", [
+            "beforeCount": beforeCount,
+            "afterCount": afterCount
+        ])
+    }
+
+    func removeLLMEndpoint(id: String) {
+        let llmName = settings.llmEndpoint(id: id)?.displayName ?? "unknown"
+        objectWillChange.send()
+        settings.removeLLMEndpoint(id: id)
+        Trace.event("settings.llmRemoved", ["llm": llmName])
+    }
+
+    func setSelectedLLMEndpointID(_ id: String) {
+        objectWillChange.send()
+        settings.selectedLLMEndpointID = id
+        let llmName = settings.llmEndpoint(id: id)?.displayName ?? "unknown"
+        Trace.event("settings.selectedLLMChanged", ["llm": llmName])
+    }
+
+    func setUseGlobalPromptLLM(_ enabled: Bool) {
+        objectWillChange.send()
+        settings.useGlobalPromptLLM = enabled
+        Trace.event("settings.globalPromptLLMToggled", [
+            "enabled": enabled,
+            "llm": settings.globalPromptLLMEndpoint.displayName
+        ])
+    }
+
+    func setGlobalPromptLLMEndpointID(_ id: String) {
+        objectWillChange.send()
+        settings.globalPromptLLMEndpointID = id
+        let llmName = settings.llmEndpoint(id: id)?.displayName ?? "unknown"
+        Trace.event("settings.globalPromptLLMChanged", ["llm": llmName])
+    }
+
+    func setAIPromptEnabled(id: String, enabled: Bool) {
+        guard var promptTemplate = settings.aiPromptTemplates.first(where: { $0.id == id }) else {
+            return
+        }
+
+        objectWillChange.send()
+        promptTemplate.isEnabled = enabled
+        settings.updateAIPromptTemplate(promptTemplate)
+        Trace.event("settings.aiPromptToggled", [
+            "promptTemplate": promptTemplate.displayName,
+            "enabled": enabled
+        ])
+
+        if !settings.isFactCheckActive {
+            factCheck.reset()
+        }
+    }
+
+    func updateAIPromptTemplate(_ promptTemplate: AIPromptTemplateConfiguration) {
+        objectWillChange.send()
+        settings.updateAIPromptTemplate(promptTemplate)
+        if !settings.isFactCheckActive {
+            factCheck.reset()
+        }
+    }
+
+    func addAIPromptTemplate() {
+        objectWillChange.send()
+        let beforeCount = settings.aiPromptTemplates.count
+        settings.addAIPromptTemplate()
+        let afterCount = settings.aiPromptTemplates.count
+        Trace.event("settings.aiPromptAdded", [
+            "beforeCount": beforeCount,
+            "afterCount": afterCount
+        ])
+    }
+
+    func removeAIPromptTemplate(id: String) {
+        let promptName = settings.aiPromptTemplates.first { $0.id == id }?.displayName ?? "unknown"
+        objectWillChange.send()
+        settings.removeAIPromptTemplate(id: id)
+        Trace.event("settings.aiPromptRemoved", ["promptTemplate": promptName])
+        if !settings.isFactCheckActive {
+            factCheck.reset()
+        }
+    }
+
+    func resetAIPromptTemplate(id: String) {
+        objectWillChange.send()
+        settings.resetAIPromptTemplate(id: id)
+        let promptName = settings.aiPromptTemplates.first { $0.id == id }?.displayName ?? "unknown"
+        Trace.event("settings.aiPromptReset", ["promptTemplate": promptName])
+    }
+
+    func testSelectedLLMFactCheck() {
+        Task { [weak self] in
+            guard let self else { return }
+            let promptTemplate = self.settings.enabledAIPromptTemplates.first
+                ?? self.settings.aiPromptTemplates.first
+                ?? AIPromptTemplateConfiguration.defaultConfiguration(llmEndpointID: self.settings.selectedLLMEndpointID)
+            let llm = self.settings.effectiveLLMEndpoint(for: promptTemplate)
+            do {
+                let result = try await OllamaFactCheckService(timeout: 15).factCheck(
+                    sentence: "The Earth orbits the Sun.",
+                    llm: llm,
+                    promptTemplate: promptTemplate.template,
+                    promptContext: FactCheckPromptContext(entries: [
+                        .init(timestamp: Date(), text: "The Earth orbits the Sun.")
+                    ])
+                )
+                self.userMessage = "\(promptTemplate.displayName) on \(llm.displayName) succeeded: \(result.verdict.displayName)."
+            } catch {
+                self.userMessage = "\(promptTemplate.displayName) on \(llm.displayName) failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func testSelectedLLMPlainPrompt() {
+        Task { [weak self] in
+            guard let self else { return }
+            let llm = self.settings.selectedLLMEndpoint
+            let prompt = "Hello, what is 10 * 20?"
+            do {
+                let response = try await OllamaFactCheckService(timeout: 15).generate(prompt: prompt, llm: llm)
+                let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.userMessage = "\(llm.displayName) replied: \(trimmed.isEmpty ? "(empty response)" : trimmed)"
+            } catch {
+                self.userMessage = "\(llm.displayName) prompt test failed: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -193,6 +451,10 @@ final class AppModel: ObservableObject {
             do {
                 Trace.event("transcribe.capture.ensuring", ["source": source.name])
                 try await self.ensureCapture(for: source)
+                self.transcriptSourceName = source.name
+                self.factCheck.reset()
+                self.summary.reset()
+                self.diarization.reset()
                 Trace.event("transcribe.service.starting", [
                     "source": source.name,
                     "engine": self.transcription.engineName
@@ -249,11 +511,57 @@ final class AppModel: ObservableObject {
             throw AppModelError.speechPermissionRequired
         }
 
-        try await transcription.start()
-        captureService.addConsumer(id: "transcribe") { [weak transcription] buffer, time in
-            Task { @MainActor in
-                transcription?.consume(buffer: buffer, time: time)
+        do {
+            try await transcription.start()
+            captureService.addConsumer(id: "transcribe") { [weak transcription] buffer, time in
+                Task { @MainActor in
+                    transcription?.consume(buffer: buffer, time: time)
+                }
             }
+            startDiarizationInBackground(sourceName: source.name, addLiveConsumer: true)
+        } catch {
+            throw error
+        }
+    }
+
+    private func startDiarizationInBackground(sourceName: String, addLiveConsumer: Bool) {
+        diarizationStartTask?.cancel()
+        diarizationStartTask = Task { [weak self] in
+            guard let self else { return }
+            Trace.event("diarization.backgroundStart", [
+                "source": sourceName,
+                "addLiveConsumer": addLiveConsumer ? "true" : "false"
+            ])
+            _ = await self.startDiarization(sourceName: sourceName, addLiveConsumer: addLiveConsumer)
+        }
+    }
+
+    private func startDiarization(sourceName: String, addLiveConsumer: Bool) async -> Bool {
+        do {
+            try await diarization.start()
+            if Task.isCancelled {
+                diarization.stop()
+                Trace.event("diarization.cancelled", ["source": sourceName])
+                return false
+            }
+            if addLiveConsumer {
+                captureService.addConsumer(id: "diarize") { [weak diarization] buffer, time in
+                    Task { @MainActor in
+                        diarization?.consume(buffer: buffer, time: time)
+                    }
+                }
+            }
+            return true
+        } catch {
+            if Task.isCancelled {
+                return false
+            }
+            userMessage = "Speaker diarization unavailable for \(sourceName): \(error.localizedDescription). Transcription will continue without speaker labels."
+            Trace.event("diarization.unavailable", [
+                "source": sourceName,
+                "error": error.localizedDescription
+            ])
+            return false
         }
     }
 
@@ -267,7 +575,7 @@ final class AppModel: ObservableObject {
                 "source": recordingService.activeSession?.source.name ?? "unknown"
             ])
             captureService.removeConsumer(id: "record")
-            let saveTranscript = transcription.isTranscribing && !transcription.transcriptText.isEmpty
+            let saveTranscript = !transcription.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let finalized = try recordingService.stop(
                 transcriptText: transcription.transcriptText,
                 saveTranscript: saveTranscript,
@@ -318,6 +626,179 @@ final class AppModel: ObservableObject {
     func revealRecordingInFinder() {
         guard let url = recordingFileURL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    func copyTranscriptText() {
+        let text = transcription.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            userMessage = "There is no transcript text to copy."
+            return
+        }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        Trace.event("transcript.copied", ["chars": text.count])
+        userMessage = "Transcript copied to the clipboard."
+    }
+
+    func saveTranscriptToFile() {
+        let text = transcription.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            userMessage = "There is no transcript text to save."
+            return
+        }
+
+        let panel = NSSavePanel()
+        try? FileManager.default.createDirectory(at: settings.outputFolder, withIntermediateDirectories: true)
+        panel.allowedContentTypes = [.plainText]
+        panel.canCreateDirectories = true
+        panel.directoryURL = settings.outputFolder
+        panel.nameFieldStringValue = "\(FileNamer.startTimestamp(Date()))-\(FileNamer.sourceSlug(transcriptSourceName)).txt"
+        panel.message = "Save the current transcript text."
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            Trace.file("transcript.exported", path: url.path, extra: ["chars": text.count])
+            userMessage = "Transcript saved to \(url.lastPathComponent)."
+        } catch {
+            Trace.event("transcript.exportError", [
+                "path": url.path,
+                "error": error.localizedDescription
+            ])
+            userMessage = "Could not save transcript: \(error.localizedDescription)"
+        }
+    }
+
+    func saveTranscriptMarkdownToFile() {
+        let text = transcription.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            userMessage = "There is no transcript text to export."
+            return
+        }
+
+        let context = markdownExportContext()
+        let markdown = MarkdownExportService.makeDocument(
+            context: context,
+            finalizedSegments: transcription.segments,
+            speakerSegments: diarization.segments,
+            factChecks: factCheck.items,
+            summaryParagraphs: summary.paragraphs
+        )
+
+        let panel = NSSavePanel()
+        try? FileManager.default.createDirectory(at: settings.outputFolder, withIntermediateDirectories: true)
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.canCreateDirectories = true
+        panel.directoryURL = settings.outputFolder
+        panel.nameFieldStringValue = "\(FileNamer.startTimestamp(Date()))-\(FileNamer.sourceSlug(transcriptSourceName)).md"
+        panel.message = "Export the current transcript, summary, and AI processing results as Markdown."
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        do {
+            try markdown.write(to: url, atomically: true, encoding: .utf8)
+            Trace.file("transcript.markdownExported", path: url.path, extra: ["chars": markdown.count])
+            userMessage = "Markdown exported to \(url.lastPathComponent)."
+        } catch {
+            Trace.event("transcript.markdownExportError", [
+                "path": url.path,
+                "error": error.localizedDescription
+            ])
+            userMessage = "Could not export Markdown: \(error.localizedDescription)"
+        }
+    }
+
+    private func markdownExportContext() -> MarkdownExportContext {
+        let session = recordingService.activeSession ?? completedRecordings.first
+        let fallbackStart = transcription.segments.first?.timestamp
+        let fallbackEnd = transcription.segments.last?.timestamp
+        let selectedLLM = settings.useGlobalPromptLLM
+            ? settings.globalPromptLLMEndpoint
+            : settings.selectedLLMEndpoint
+        let promptTemplateDetails = settings.effectiveAIPromptTemplates
+            .map { promptTemplate -> String in
+                let llm = settings.effectiveLLMEndpoint(for: promptTemplate)
+                return "\(promptTemplate.displayName) [\(promptTemplate.isEnabled ? "enabled" : "disabled")] on \(llm.displayName):\n\(promptTemplate.template)"
+            }
+            .joined(separator: "\n\n")
+        let promptStates = settings.effectiveAIPromptTemplates.map {
+            MarkdownExportPromptState(
+                promptName: $0.displayName,
+                state: factCheck.promptState(for: $0.id)
+            )
+        }
+
+        return MarkdownExportContext(
+            sourceName: transcriptSourceName,
+            location: "Not specified",
+            startDate: session?.startDate ?? fallbackStart,
+            endDate: session?.endDate ?? fallbackEnd,
+            exportedAt: Date(),
+            transcriptionEngine: transcription.engineName,
+            aiEnabled: settings.isFactCheckActive,
+            factCheckEnabled: settings.isFactCheckActive,
+            llmName: selectedLLM.displayName,
+            llmProvider: selectedLLM.provider.displayName,
+            llmEndpoint: selectedLLM.endpoint,
+            llmModel: selectedLLM.model,
+            promptStates: promptStates,
+            factCheckPrompt: promptTemplateDetails,
+            summaryPrompt: settings.summaryPrompt,
+            audioURL: session?.audioURL,
+            transcriptURL: session?.transcriptURL,
+            metadataURL: session?.metadataURL
+        )
+    }
+
+    func copySummaryText() {
+        let text = summary.paragraphs.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            userMessage = "There is no summary text to copy."
+            return
+        }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        Trace.event("summary.copied", ["chars": text.count])
+        userMessage = "Summary copied to the clipboard."
+    }
+
+    func saveSummaryToFile() {
+        let text = summary.paragraphs.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            userMessage = "There is no summary text to save."
+            return
+        }
+
+        let panel = NSSavePanel()
+        try? FileManager.default.createDirectory(at: settings.outputFolder, withIntermediateDirectories: true)
+        panel.allowedContentTypes = [.plainText]
+        panel.canCreateDirectories = true
+        panel.directoryURL = settings.outputFolder
+        panel.nameFieldStringValue = "\(FileNamer.startTimestamp(Date()))-\(FileNamer.sourceSlug(transcriptSourceName))-summary.txt"
+        panel.message = "Save the current recording summary."
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            Trace.file("summary.exported", path: url.path, extra: ["chars": text.count])
+            userMessage = "Summary saved to \(url.lastPathComponent)."
+        } catch {
+            Trace.event("summary.exportError", [
+                "path": url.path,
+                "error": error.localizedDescription
+            ])
+            userMessage = "Could not save summary: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - File Input Sources
@@ -392,12 +873,17 @@ final class AppModel: ObservableObject {
         activeFileSourceID = source.id
         isTranscribingFile = true
         fileTranscriptionProgress = 0
+        transcriptSourceName = source.name
+        diarization.reset()
 
         fileTranscriptionTask = Task { [weak self] in
             guard let self else { return }
 
             do {
                 try await self.transcription.start()
+                self.startDiarizationInBackground(sourceName: source.name, addLiveConsumer: false)
+                self.factCheck.reset()
+                self.summary.reset()
                 Trace.event("fileTranscribe.started", [
                     "file": source.name,
                     "engine": self.transcription.engineName
@@ -409,7 +895,10 @@ final class AppModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 500_000_000)
 
                 await MainActor.run {
+                    self.diarizationStartTask?.cancel()
+                    self.diarizationStartTask = nil
                     self.transcription.stop()
+                    self.diarization.stop()
                     self.isTranscribingFile = false
                     self.activeFileSourceID = nil
                     self.fileTranscriptionProgress = 1.0
@@ -417,14 +906,20 @@ final class AppModel: ObservableObject {
                 }
             } catch is CancellationError {
                 await MainActor.run {
+                    self.diarizationStartTask?.cancel()
+                    self.diarizationStartTask = nil
                     self.transcription.stop()
+                    self.diarization.stop()
                     self.isTranscribingFile = false
                     self.activeFileSourceID = nil
                     Trace.event("fileTranscribe.cancelled", ["file": source.name])
                 }
             } catch {
                 await MainActor.run {
+                    self.diarizationStartTask?.cancel()
+                    self.diarizationStartTask = nil
                     self.transcription.stop()
+                    self.diarization.stop()
                     self.isTranscribingFile = false
                     self.activeFileSourceID = nil
                     self.userMessage = "File transcription failed: \(error.localizedDescription)"
@@ -445,7 +940,10 @@ final class AppModel: ObservableObject {
     private func cancelFileTranscription() {
         fileTranscriptionTask?.cancel()
         fileTranscriptionTask = nil
+        diarizationStartTask?.cancel()
+        diarizationStartTask = nil
         transcription.stop()
+        diarization.stop()
         isTranscribingFile = false
         activeFileSourceID = nil
         fileTranscriptionProgress = 0
@@ -495,6 +993,7 @@ final class AppModel: ObservableObject {
 
             await MainActor.run {
                 self.transcription.consume(buffer: copy, time: time)
+                self.diarization.consume(buffer: copy, time: time)
             }
 
             framesRead += AVAudioFramePosition(frames)
@@ -563,6 +1062,7 @@ final class AppModel: ObservableObject {
 
             await MainActor.run {
                 self.transcription.consume(buffer: copy, time: time)
+                self.diarization.consume(buffer: copy, time: time)
             }
 
             framesRead += AVAudioFramePosition(pcm.frameLength)
@@ -589,8 +1089,12 @@ final class AppModel: ObservableObject {
             "segments": transcription.segments.count,
             "isTranscribing": transcription.isTranscribing
         ])
+        diarizationStartTask?.cancel()
+        diarizationStartTask = nil
+        captureService.removeConsumer(id: "diarize")
         captureService.removeConsumer(id: "transcribe")
         transcription.stop()
+        diarization.stop()
         captureService.stopIfUnused()
         Trace.event("transcribe.stopped", ["finalSegments": transcription.segments.count])
     }

@@ -10,11 +10,16 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "external/FluidAudio"),
+        .package(path: "external/speech-swift-worktree"),
     ],
     targets: [
         .executableTarget(
             name: "VoiceTranscribe",
-            dependencies: ["FluidAudio"],
+            dependencies: [
+                "FluidAudio",
+                .product(name: "AudioCommon", package: "speech-swift-worktree"),
+                .product(name: "SpeechVAD", package: "speech-swift-worktree"),
+            ],
             path: "Sources/VoiceTranscribe"
         ),
         .testTarget(

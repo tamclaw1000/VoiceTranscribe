@@ -5,10 +5,21 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var showSettings = false
+    @State private var selectedDetailTab: DetailTab = .transcript
+
+    private enum DetailTab: Hashable {
+        case transcript
+        case summary
+        case recordings
+    }
 
     var body: some View {
         NavigationSplitView {
-            sourceList
+            VStack(spacing: 0) {
+                sourceList
+                Divider()
+                AppVersionFooter()
+            }
                 .navigationTitle("VoiceTranscribe")
                 .toolbar {
                     Button {
@@ -35,8 +46,8 @@ struct ContentView: View {
             Text(appModel.userMessage ?? "")
         }
         .task {
-            // Auto-open Settings on first launch if permissions are missing.
-            if appModel.needsPermissionsSetup {
+            let requestedSystemPermissions = await appModel.runFirstLaunchPermissionFlowIfNeeded()
+            if !requestedSystemPermissions && appModel.needsPermissionsSetup {
                 showSettings = true
             }
         }
@@ -81,6 +92,14 @@ struct ContentView: View {
                     }
                 }
             }
+
+            Section("AI Prompts") {
+                ForEach(appModel.settings.aiPromptTemplates) { promptTemplate in
+                    AIPromptSourceRow(promptTemplate: promptTemplate)
+                        .environmentObject(appModel)
+                        .padding(.vertical, 3)
+                }
+            }
         }
     }
 
@@ -111,8 +130,9 @@ struct ContentView: View {
                 Text("Microphone & Speech access required")
                     .font(.caption)
                     .foregroundStyle(.orange)
-                Spacer()
             }
+
+            Spacer()
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
@@ -125,24 +145,72 @@ struct ContentView: View {
     private var mainDetail: some View {
         VStack(spacing: 0) {
             GraphPanel(snapshot: appModel.captureService.visualization)
-                .frame(height: 240)
-                .padding()
+                .frame(height: 104)
+                .padding(.horizontal)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
 
             Divider()
 
-            TranscriptPanel(
-                finalized: appModel.transcription.segments,
-                interim: appModel.transcription.interimSegment,
-                buffer: appModel.transcription.bufferSnapshot,
-                isTranscribing: appModel.transcription.isTranscribing
-            )
+            TabView(selection: $selectedDetailTab) {
+                TranscriptFactCheckPanel(
+                    finalized: appModel.transcription.segments,
+                    interim: appModel.transcription.interimSegment,
+                    factChecks: appModel.factCheck.items,
+                    currentSpeakerLabel: appModel.diarization.currentSpeakerLabel,
+                    isDiarizationActive: appModel.diarization.isStarting || appModel.diarization.isRunning,
+                    diarizationError: appModel.diarization.lastError,
+                    isFactCheckEnabled: appModel.settings.isFactCheckActive,
+                    isFactChecking: appModel.factCheck.isRunning,
+                    buffer: appModel.transcription.bufferSnapshot,
+                    isTranscribing: appModel.transcription.isTranscribing,
+                    autoScrollToBottom: $appModel.settings.autoScrollTranscript,
+                    hasTranscriptText: !appModel.transcription.transcriptText
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty,
+                    onSaveToFile: appModel.saveTranscriptToFile,
+                    onExportMarkdown: appModel.saveTranscriptMarkdownToFile,
+                    onCopyText: appModel.copyTranscriptText
+                )
+                .tabItem {
+                    Label("Live Transcript", systemImage: "text.alignleft")
+                }
+                .tag(DetailTab.transcript)
 
-            if !appModel.completedRecordings.isEmpty {
-                Divider()
+                SummaryPanel(
+                    paragraphs: appModel.summary.paragraphs,
+                    sentenceCount: appModel.summary.sentenceCount,
+                    onSaveToFile: appModel.saveSummaryToFile,
+                    onCopyText: appModel.copySummaryText
+                )
+                .tabItem {
+                    Label("Recording Summary", systemImage: "doc.text.magnifyingglass")
+                }
+                .tag(DetailTab.summary)
+
                 RecentRecordingsView(recordings: appModel.completedRecordings)
-                    .frame(height: 140)
+                    .tabItem {
+                        Label("Recent Recordings", systemImage: "folder")
+                    }
+                    .tag(DetailTab.recordings)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+}
+
+private struct AppVersionFooter: View {
+    var body: some View {
+        Text(AppVersion.displayText())
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.bar)
+            .accessibilityLabel("Application version")
+            .accessibilityValue(AppVersion.displayText())
     }
 }
 
@@ -296,6 +364,50 @@ private struct SourceConsoleView: View {
     }
 }
 
+private struct AIPromptSourceRow: View {
+    @EnvironmentObject private var appModel: AppModel
+    let promptTemplate: AIPromptTemplateConfiguration
+
+    private var llmName: String {
+        appModel.settings.effectiveLLMEndpoint(for: promptTemplate).displayName
+    }
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: {
+                appModel.settings.aiPromptTemplates
+                    .first(where: { $0.id == promptTemplate.id })?
+                    .isEnabled ?? promptTemplate.isEnabled
+            },
+            set: { enabled in
+                appModel.setAIPromptEnabled(id: promptTemplate.id, enabled: enabled)
+            }
+        )) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(promptTemplate.isEnabled ? Color.accentColor : Color.secondary)
+                    Text(promptTemplate.displayName)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                }
+                Text(llmName)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if appModel.settings.useGlobalPromptLLM {
+                    Text("Global model")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .toggleStyle(.checkbox)
+        .help(promptTemplate.isEnabled ? "Disable this AI processing prompt" : "Enable this AI processing prompt")
+    }
+}
+
 private struct PermissionStatusView: View {
     let title: String
     let status: String
@@ -316,13 +428,19 @@ private struct PermissionStatusView: View {
 
 // MARK: - Settings Sheet
 
+private enum SettingsSectionTab: Hashable {
+    case general
+    case llmModels
+    case promptTemplates
+}
+
 private struct SettingsSheet: View {
     @EnvironmentObject private var appModel: AppModel
     @Binding var isPresented: Bool
+    @State private var selectedSettingsTab: SettingsSectionTab = .general
 
     var body: some View {
         VStack(spacing: 16) {
-            // Header
             HStack {
                 Label("Settings", systemImage: "gearshape")
                     .font(.title2.bold())
@@ -339,39 +457,70 @@ private struct SettingsSheet: View {
 
             Divider()
 
-            // Transcription engine
+            TabView(selection: $selectedSettingsTab) {
+                ScrollView {
+                    leftSettingsColumn
+                        .padding(.horizontal, 2)
+                }
+                .tabItem {
+                    Label("General", systemImage: "slider.horizontal.3")
+                }
+                .tag(SettingsSectionTab.general)
+
+                ScrollView {
+                    modelSettingsColumn
+                        .padding(.horizontal, 2)
+                }
+                .tabItem {
+                    Label("LLM Models", systemImage: "server.rack")
+                }
+                .tag(SettingsSectionTab.llmModels)
+
+                ScrollView {
+                    promptTemplateSettingsColumn
+                        .padding(.horizontal, 2)
+                }
+                .tabItem {
+                    Label("Prompt Templates", systemImage: "text.badge.plus")
+                }
+                .tag(SettingsSectionTab.promptTemplates)
+            }
+        }
+        .padding()
+        .frame(width: 720, height: 680)
+        .alert("VoiceTranscribe", isPresented: Binding(
+            get: { appModel.userMessage != nil },
+            set: { if !$0 { appModel.userMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {
+                appModel.userMessage = nil
+            }
+        } message: {
+            Text(appModel.userMessage ?? "")
+        }
+    }
+
+    private var leftSettingsColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Transcription Engine", systemImage: "text.bubble")
+                    Label("Speech Pipeline", systemImage: "text.bubble")
                         .font(.headline)
-                    Picker("Engine", selection: Binding(
-                        get: { appModel.settings.transcriptionEngine },
-                        set: { newEngine in
-                            appModel.transcription.setEngine(newEngine)
-                            appModel.settings.transcriptionEngine = newEngine
-                        }
-                    )) {
-                        ForEach(TranscriptionEngineKind.allCases) { engine in
-                            Text(engine.displayName).tag(engine)
-                        }
-                    }
-                    .pickerStyle(.radioGroup)
-                    .disabled(appModel.transcription.isTranscribing)
-                    if appModel.transcription.isTranscribing {
-                        Text("Stop transcription before changing the engine.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Label("Apple Speech transcript segmentation", systemImage: "text.quote")
+                        .font(.caption)
+                    Label("SpeechVAD Sortformer speaker diarization", systemImage: "person.wave.2")
+                        .font(.caption)
+                    Text("Transcript rows are finalized by Apple Speech; speaker labels are detected separately by SpeechVAD Sortformer.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
-            // Permissions
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Permissions", systemImage: "lock.shield")
                         .font(.headline)
 
-                    // Mic
                     HStack {
                         PermissionStatusView(
                             title: "Microphone",
@@ -388,7 +537,6 @@ private struct SettingsSheet: View {
                         .disabled(appModel.permissionService.microphoneStatus == .authorized)
                     }
 
-                    // Speech
                     HStack {
                         PermissionStatusView(
                             title: "Speech Recognition",
@@ -405,7 +553,6 @@ private struct SettingsSheet: View {
                         .disabled(appModel.permissionService.speechStatus == .authorized)
                     }
 
-                    // System Settings shortcut
                     Divider()
                     Button {
                         appModel.permissionService.openSystemPrivacySettings()
@@ -418,10 +565,86 @@ private struct SettingsSheet: View {
                 }
             }
 
-            Spacer()
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Summary", systemImage: "doc.text.magnifyingglass")
+                        .font(.headline)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Summary Prompt")
+                                .font(.caption.weight(.semibold))
+                            Spacer()
+                            Button("Reset") {
+                                appModel.settings.resetSummaryPrompt()
+                            }
+                            .font(.caption)
+                            .buttonStyle(.link)
+                        }
+
+                        TextEditor(text: $appModel.settings.summaryPrompt)
+                            .font(.caption.monospaced())
+                            .frame(minHeight: 120)
+                            .scrollContentBackground(.hidden)
+                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.secondary.opacity(0.18))
+                            )
+                    }
+                }
+            }
         }
-        .padding()
-        .frame(width: 420, height: 380)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var modelSettingsColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("LLM Models", systemImage: "server.rack")
+                        .font(.headline)
+
+                    GlobalPromptLLMControl()
+                        .environmentObject(appModel)
+
+                    HStack {
+                        Button {
+                            appModel.testSelectedLLMPlainPrompt()
+                        } label: {
+                            Label("Test Prompt", systemImage: "message")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            appModel.testSelectedLLMFactCheck()
+                        } label: {
+                            Label("Test AI Processing", systemImage: "network")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    LLMEndpointSettingsView(compact: true)
+                        .environmentObject(appModel)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var promptTemplateSettingsColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Prompt Templates", systemImage: "text.badge.plus")
+                        .font(.headline)
+
+                    AIPromptTemplateSettingsView(compact: true)
+                        .environmentObject(appModel)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func microphoneStatusText(_ status: AVAuthorizationStatus) -> String {
@@ -442,6 +665,253 @@ private struct SettingsSheet: View {
         case .notDetermined: return "Not Requested"
         @unknown default:  return "Unknown"
         }
+    }
+}
+
+private struct LLMEndpointSettingsView: View {
+    @EnvironmentObject private var appModel: AppModel
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 8 : 12) {
+            Picker("Selected LLM", selection: selectedLLMBinding) {
+                ForEach(appModel.settings.llmEndpoints) { endpoint in
+                    Text(endpoint.displayName).tag(endpoint.id)
+                }
+            }
+
+            ForEach(appModel.settings.llmEndpoints) { endpoint in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        TextField("Name", text: stringBinding(for: endpoint, keyPath: \.name))
+                            .textFieldStyle(.roundedBorder)
+                        Button {
+                            appModel.removeLLMEndpoint(id: endpoint.id)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .disabled(appModel.settings.llmEndpoints.count <= 1)
+                        .help("Remove this LLM")
+                    }
+
+                    Picker("API Type", selection: providerBinding(for: endpoint)) {
+                        ForEach(LLMProviderKind.allCases) { provider in
+                            Text(provider.displayName).tag(provider)
+                        }
+                    }
+
+                    TextField("Endpoint URL", text: stringBinding(for: endpoint, keyPath: \.endpoint))
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Model", text: stringBinding(for: endpoint, keyPath: \.model))
+                        .textFieldStyle(.roundedBorder)
+                    SecureField("API Key", text: stringBinding(for: endpoint, keyPath: \.apiKey))
+                        .textFieldStyle(.roundedBorder)
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.18))
+                )
+            }
+
+            Button {
+                appModel.addLLMEndpoint()
+            } label: {
+                Label("Add LLM", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private func stringBinding(
+        for endpoint: LLMEndpointConfiguration,
+        keyPath: WritableKeyPath<LLMEndpointConfiguration, String>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                appModel.settings.llmEndpoint(id: endpoint.id)?[keyPath: keyPath] ?? ""
+            },
+            set: { value in
+                var updated = appModel.settings.llmEndpoint(id: endpoint.id) ?? endpoint
+                updated[keyPath: keyPath] = value
+                appModel.updateLLMEndpoint(updated)
+            }
+        )
+    }
+
+    private func providerBinding(for endpoint: LLMEndpointConfiguration) -> Binding<LLMProviderKind> {
+        Binding(
+            get: {
+                appModel.settings.llmEndpoint(id: endpoint.id)?.provider ?? .ollama
+            },
+            set: { provider in
+                var updated = appModel.settings.llmEndpoint(id: endpoint.id) ?? endpoint
+                updated.provider = provider
+                if updated.endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || LLMProviderKind.allCases.map(\.defaultEndpoint).contains(updated.endpoint) {
+                    updated.endpoint = provider.defaultEndpoint
+                }
+                appModel.updateLLMEndpoint(updated)
+            }
+        )
+    }
+
+    private var selectedLLMBinding: Binding<String> {
+        Binding(
+            get: { appModel.settings.selectedLLMEndpointID },
+            set: { id in appModel.setSelectedLLMEndpointID(id) }
+        )
+    }
+}
+
+private struct GlobalPromptLLMControl: View {
+    @EnvironmentObject private var appModel: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: Binding(
+                get: { appModel.settings.useGlobalPromptLLM },
+                set: { appModel.setUseGlobalPromptLLM($0) }
+            )) {
+                Label("Use one model for all prompts", systemImage: "link")
+            }
+            .toggleStyle(.checkbox)
+
+            Picker("Prompt Model", selection: Binding(
+                get: { appModel.settings.globalPromptLLMEndpointID },
+                set: { appModel.setGlobalPromptLLMEndpointID($0) }
+            )) {
+                ForEach(appModel.settings.llmEndpoints) { endpoint in
+                    Text(endpoint.displayName).tag(endpoint.id)
+                }
+            }
+            .disabled(!appModel.settings.useGlobalPromptLLM)
+
+            Text(appModel.settings.useGlobalPromptLLM
+                ? "All enabled prompts will use \(appModel.settings.globalPromptLLMEndpoint.displayName)."
+                : "Each prompt uses its own model selection.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.secondary.opacity(0.18))
+        )
+    }
+}
+
+private struct AIPromptTemplateSettingsView: View {
+    @EnvironmentObject private var appModel: AppModel
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 8 : 12) {
+            ForEach(appModel.settings.aiPromptTemplates) { promptTemplate in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Toggle("Enabled", isOn: boolBinding(for: promptTemplate, keyPath: \.isEnabled))
+                            .toggleStyle(.checkbox)
+                        Spacer()
+                        Button {
+                            appModel.removeAIPromptTemplate(id: promptTemplate.id)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .disabled(appModel.settings.aiPromptTemplates.count <= 1)
+                        .help("Remove this prompt template")
+                    }
+
+                    TextField("Name", text: stringBinding(for: promptTemplate, keyPath: \.name))
+                        .textFieldStyle(.roundedBorder)
+
+                    Picker("Model", selection: stringBinding(for: promptTemplate, keyPath: \.llmEndpointID)) {
+                        ForEach(appModel.settings.llmEndpoints) { endpoint in
+                            Text(endpoint.displayName).tag(endpoint.id)
+                        }
+                    }
+                    .disabled(appModel.settings.useGlobalPromptLLM)
+                    if appModel.settings.useGlobalPromptLLM {
+                        Text("Using global model: \(appModel.settings.globalPromptLLMEndpoint.displayName)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("Template")
+                            .font(.caption.weight(.semibold))
+                            .help("Supports {{sentence}}, {{conversation}}, {{last-3}}, {{last-5}}, {{last-10}}, and {{prompt-state}}.")
+                        Spacer()
+                        Button("Reset") {
+                            appModel.resetAIPromptTemplate(id: promptTemplate.id)
+                        }
+                        .font(.caption)
+                        .buttonStyle(.link)
+                    }
+
+                    TextEditor(text: stringBinding(for: promptTemplate, keyPath: \.template))
+                        .font(.caption.monospaced())
+                        .frame(minHeight: compact ? 145 : 190)
+                        .scrollContentBackground(.hidden)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.secondary.opacity(0.18))
+                        )
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.18))
+                )
+            }
+
+            Button {
+                appModel.addAIPromptTemplate()
+            } label: {
+                Label("Add Prompt", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private func stringBinding(
+        for promptTemplate: AIPromptTemplateConfiguration,
+        keyPath: WritableKeyPath<AIPromptTemplateConfiguration, String>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                appModel.settings.aiPromptTemplates
+                    .first(where: { $0.id == promptTemplate.id })?[keyPath: keyPath] ?? ""
+            },
+            set: { value in
+                var updated = appModel.settings.aiPromptTemplates
+                    .first(where: { $0.id == promptTemplate.id }) ?? promptTemplate
+                updated[keyPath: keyPath] = value
+                appModel.updateAIPromptTemplate(updated)
+            }
+        )
+    }
+
+    private func boolBinding(
+        for promptTemplate: AIPromptTemplateConfiguration,
+        keyPath: WritableKeyPath<AIPromptTemplateConfiguration, Bool>
+    ) -> Binding<Bool> {
+        Binding(
+            get: {
+                appModel.settings.aiPromptTemplates
+                    .first(where: { $0.id == promptTemplate.id })?[keyPath: keyPath] ?? false
+            },
+            set: { value in
+                var updated = appModel.settings.aiPromptTemplates
+                    .first(where: { $0.id == promptTemplate.id }) ?? promptTemplate
+                updated[keyPath: keyPath] = value
+                appModel.updateAIPromptTemplate(updated)
+            }
+        )
     }
 }
 
@@ -512,11 +982,22 @@ private struct GraphPanel: View {
     }
 }
 
-private struct TranscriptPanel: View {
+private struct TranscriptFactCheckPanel: View {
     let finalized: [TranscriptSegment]
     let interim: TranscriptSegment?
+    let factChecks: [FactCheckItem]
+    let currentSpeakerLabel: String?
+    let isDiarizationActive: Bool
+    let diarizationError: String?
+    let isFactCheckEnabled: Bool
+    let isFactChecking: Bool
     let buffer: TranscriptionBufferSnapshot
     let isTranscribing: Bool
+    @Binding var autoScrollToBottom: Bool
+    let hasTranscriptText: Bool
+    let onSaveToFile: () -> Void
+    let onExportMarkdown: () -> Void
+    let onCopyText: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -524,13 +1005,86 @@ private struct TranscriptPanel: View {
                 Label("Live Transcript", systemImage: "text.alignleft")
                     .font(.headline)
                 Spacer()
+
+                Toggle(isOn: $autoScrollToBottom) {
+                    Label("Auto-scroll", systemImage: "arrow.down.to.line")
+                }
+                .toggleStyle(.checkbox)
+                .help("Scroll to the latest transcript text while speech is processed")
+
+                Button {
+                    onCopyText()
+                } label: {
+                    Label("CopyText", systemImage: "doc.on.doc")
+                }
+                .disabled(!hasTranscriptText)
+                .help("Copy transcript text to the clipboard")
+
+                Button {
+                    onSaveToFile()
+                } label: {
+                    Label("SaveToFile", systemImage: "square.and.arrow.down")
+                }
+                .disabled(!hasTranscriptText)
+                .help("Save transcript text to a file")
+
+                Button {
+                    onExportMarkdown()
+                } label: {
+                    Label("ExportMarkdown", systemImage: "doc.richtext")
+                }
+                .disabled(!hasTranscriptText)
+                .help("Export transcript, summary, and AI processing results as Markdown")
+
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(factCheckStatusColor)
+                        .frame(width: 7, height: 7)
+                    Text(factCheckStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 TranscriptionStatusView(buffer: buffer, isTranscribing: isTranscribing)
                     .frame(width: 260)
             }
 
+            HStack(spacing: 8) {
+                Image(systemName: "person.wave.2.fill")
+                    .foregroundStyle(currentSpeakerColor)
+                Text(currentSpeakerStatusText)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(currentSpeakerColor)
+                Spacer()
+                Text("SpeechVAD Sortformer diarization")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(currentSpeakerColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(currentSpeakerColor.opacity(0.25))
+            )
+            .help(currentSpeakerHelpText)
+
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                        GridRow {
+                            Text("Timestamp")
+                                .frame(width: 76, alignment: .leading)
+                            Text("Speaker")
+                                .frame(width: 150, alignment: .leading)
+                            Text("Text")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                        Divider()
+                            .gridCellColumns(3)
+
                         if finalized.isEmpty && interim == nil {
                             ContentUnavailableView(
                                 "No Transcript",
@@ -538,27 +1092,276 @@ private struct TranscriptPanel: View {
                                 description: Text("Start transcription to see speech as it is processed.")
                             )
                             .frame(maxWidth: .infinity, minHeight: 180)
+                            .gridCellColumns(3)
                         } else {
                             ForEach(finalized) { segment in
-                                Text(segment.text)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                transcriptRows(
+                                    segment: segment,
+                                    fallbackSpeakerLabel: currentSpeakerLabel,
+                                    factChecks: factChecks(for: segment),
+                                    isInterim: false
+                                )
                             }
                             if let interim {
-                                Text(interim.text)
-                                    .foregroundStyle(.secondary)
-                                    .italic()
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .id("interim")
+                                transcriptRows(
+                                    segment: interim,
+                                    fallbackSpeakerLabel: currentSpeakerLabel,
+                                    factChecks: [],
+                                    isInterim: true
+                                )
                             }
                         }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id(Self.bottomScrollID)
+                            .gridCellColumns(3)
                     }
                     .padding(.horizontal)
                     .padding(.bottom)
                 }
-                .onChange(of: finalized.count) {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("interim", anchor: .bottom)
+                .onChange(of: finalized.count) { _, _ in
+                    scrollToBottom(proxy)
+                }
+                .onChange(of: interim?.text ?? "") { _, _ in
+                    scrollToBottom(proxy)
+                }
+            }
+        }
+        .padding()
+    }
+
+    @ViewBuilder
+    private func transcriptRows(
+        segment: TranscriptSegment,
+        fallbackSpeakerLabel: String?,
+        factChecks: [FactCheckItem],
+        isInterim: Bool
+    ) -> some View {
+        let speakerLabel = segment.speakerLabel ?? fallbackSpeakerLabel
+        GridRow(alignment: .top) {
+            Text(timestampText(for: segment.timestamp))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 76, alignment: .leading)
+
+            Text(speakerLabel ?? "Detecting")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(speakerLabel == nil ? Color.secondary : Color.blue)
+                .lineLimit(1)
+            .frame(width: 150, alignment: .leading)
+
+            Text(segment.text)
+                .foregroundStyle(isInterim ? .secondary : .primary)
+                .italic(isInterim)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        GridRow(alignment: .top) {
+            Color.clear
+                .frame(width: 76, height: 1)
+            Color.clear
+                .frame(width: 150, height: 1)
+            VStack(alignment: .leading, spacing: 6) {
+                if isInterim {
+                    factCheckDetail(label: "AI Processing", badge: "Pending", color: .secondary, text: "Will run when the sentence is finalized.")
+                } else if !isFactCheckEnabled {
+                    factCheckDetail(label: "AI Processing", badge: "Disabled", color: .secondary, text: "No AI prompts are enabled.")
+                } else if factChecks.isEmpty {
+                    factCheckDetail(label: "AI Processing", badge: "Queued", color: .secondary, text: "Waiting for a complete sentence match.")
+                } else {
+                    ForEach(factChecks) { item in
+                        factCheckDetail(for: item)
                     }
+                }
+            }
+        }
+    }
+
+    private func factCheckDetail(for item: FactCheckItem) -> some View {
+        let label = item.promptTemplateName
+        switch item.state {
+        case .queued:
+            return factCheckDetail(label: label, badge: "Queued", color: .secondary, text: "Waiting for the selected LLM.")
+        case .checking:
+            return factCheckDetail(label: label, badge: "Checking", color: .orange, text: "AI request in progress.")
+        case .failed(let message):
+            return factCheckDetail(label: label, badge: "Failed", color: .red, text: message)
+        case .completed(let result):
+            return factCheckDetail(label: label, badge: "Result", color: color(for: result.verdict), text: result.displayText)
+        }
+    }
+
+    private func factCheckDetail(label: String, badge: String, color: Color, text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 104, alignment: .leading)
+            Text(badge)
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .foregroundStyle(color)
+                .background(color.opacity(0.14), in: Capsule())
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.bottom, 8)
+    }
+
+    private func factChecks(for segment: TranscriptSegment) -> [FactCheckItem] {
+        let segmentText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSegment = FactCheckCoordinator.normalizedSentence(segmentText)
+        let normalizedSentences = Set(FactCheckCoordinator.completeSentences(in: segmentText).map {
+            FactCheckCoordinator.normalizedSentence($0)
+        })
+
+        return factChecks.filter { item in
+            let normalizedItem = FactCheckCoordinator.normalizedSentence(item.sentence)
+            return normalizedItem == normalizedSegment
+                || normalizedSentences.contains(normalizedItem)
+                || segmentText.localizedCaseInsensitiveContains(item.sentence)
+        }
+    }
+
+    private func timestampText(for date: Date) -> String {
+        Self.timestampFormatter.string(from: date)
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        guard autoScrollToBottom else {
+            return
+        }
+
+        withAnimation(.easeOut(duration: 0.16)) {
+            proxy.scrollTo(Self.bottomScrollID, anchor: .bottom)
+        }
+    }
+
+    private var factCheckStatusText: String {
+        if !isFactCheckEnabled {
+            return "Disabled"
+        }
+        return isFactChecking ? "Processing" : "Ready"
+    }
+
+    private var currentSpeakerStatusText: String {
+        if let currentSpeakerLabel, !currentSpeakerLabel.isEmpty {
+            return "Current speaker: \(currentSpeakerLabel)"
+        }
+        if let diarizationError, !diarizationError.isEmpty {
+            return "Speaker detection unavailable"
+        }
+        if isDiarizationActive {
+            return "Current speaker: Detecting"
+        }
+        return "Current speaker: Not active"
+    }
+
+    private var currentSpeakerHelpText: String {
+        if let diarizationError, !diarizationError.isEmpty {
+            return diarizationError
+        }
+        return "SpeechVAD Sortformer diarization distinguishes anonymous speakers as Speaker 1, Speaker 2, and so on."
+    }
+
+    private var currentSpeakerColor: Color {
+        if currentSpeakerLabel != nil {
+            return .blue
+        }
+        if diarizationError != nil {
+            return .orange
+        }
+        return .secondary
+    }
+
+    private var factCheckStatusColor: Color {
+        if !isFactCheckEnabled {
+            return .secondary
+        }
+        return isFactChecking ? .orange : .green
+    }
+
+    private func color(for verdict: FactCheckVerdict) -> Color {
+        switch verdict {
+        case .supported:
+            return .green
+        case .questionable:
+            return .orange
+        case .falseClaim:
+            return .red
+        case .unverifiable:
+            return .blue
+        case .notFactual:
+            return .secondary
+        }
+    }
+
+    private static let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
+    private static let bottomScrollID = "transcript-bottom"
+}
+
+private struct SummaryPanel: View {
+    let paragraphs: [String]
+    let sentenceCount: Int
+    let onSaveToFile: () -> Void
+    let onCopyText: () -> Void
+
+    private var hasSummaryText: Bool {
+        !paragraphs.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Recording Summary", systemImage: "doc.text.magnifyingglass")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    onCopyText()
+                } label: {
+                    Label("CopyText", systemImage: "doc.on.doc")
+                }
+                .disabled(!hasSummaryText)
+                .help("Copy summary text to the clipboard")
+
+                Button {
+                    onSaveToFile()
+                } label: {
+                    Label("SaveToFile", systemImage: "square.and.arrow.down")
+                }
+                .disabled(!hasSummaryText)
+                .help("Save summary text to a file")
+
+                Text("\(sentenceCount) sentences")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if paragraphs.isEmpty {
+                ContentUnavailableView(
+                    "No Summary Yet",
+                    systemImage: "doc.text",
+                    description: Text("Finalized transcript sentences will be organized here as the recording grows.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 90)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                            Text(paragraph)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(.trailing, 4)
                 }
             }
         }
@@ -620,21 +1423,30 @@ private struct RecentRecordingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Recent Recordings", systemImage: "folder")
                 .font(.headline)
-            List(recordings) { recording in
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(recording.basename)
-                            .font(.caption.weight(.semibold))
-                        Text(recording.audioURL.path)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+            if recordings.isEmpty {
+                ContentUnavailableView(
+                    "No Recent Recordings",
+                    systemImage: "folder",
+                    description: Text("Completed recordings will appear here.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 180)
+            } else {
+                List(recordings) { recording in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(recording.basename)
+                                .font(.caption.weight(.semibold))
+                            Text(recording.audioURL.path)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(recording.duration, format: .number.precision(.fractionLength(1)))
+                            .font(.caption)
                     }
-                    Spacer()
-                    Text(recording.duration, format: .number.precision(.fractionLength(1)))
-                        .font(.caption)
                 }
+                .listStyle(.plain)
             }
-            .listStyle(.plain)
         }
         .padding()
     }
@@ -642,56 +1454,175 @@ private struct RecentRecordingsView: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var appModel: AppModel
+    @State private var selectedSettingsTab: SettingsSectionTab = .general
 
     var body: some View {
-        Form {
-            Section("Output") {
-                HStack {
-                    TextField("Folder", text: $appModel.settings.outputFolderPath)
-                    Button {
-                        chooseOutputFolder()
-                    } label: {
-                        Label("Choose", systemImage: "folder")
-                    }
-                }
+        TabView(selection: $selectedSettingsTab) {
+            ScrollView {
+                settingsLeftColumn
+                    .padding(.horizontal, 2)
+            }
+            .tabItem {
+                Label("General", systemImage: "slider.horizontal.3")
+            }
+            .tag(SettingsSectionTab.general)
 
-                Picker("Audio Format", selection: Binding(
-                    get: { appModel.settings.audioOutputFormat },
-                    set: { appModel.settings.audioOutputFormat = $0 }
-                )) {
-                    ForEach(AudioOutputFormat.allCases) { format in
-                        Text(format.displayName).tag(format)
+            ScrollView {
+                settingsModelColumn
+                    .padding(.horizontal, 2)
+            }
+            .tabItem {
+                Label("LLM Models", systemImage: "server.rack")
+            }
+            .tag(SettingsSectionTab.llmModels)
+
+            ScrollView {
+                settingsPromptColumn
+                    .padding(.horizontal, 2)
+            }
+            .tabItem {
+                Label("Prompt Templates", systemImage: "text.badge.plus")
+            }
+            .tag(SettingsSectionTab.promptTemplates)
+        }
+        .padding()
+        .frame(minWidth: 680, minHeight: 560)
+    }
+
+    private var settingsLeftColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Output", systemImage: "folder")
+                        .font(.headline)
+
+                    HStack {
+                        TextField("Folder", text: $appModel.settings.outputFolderPath)
+                            .textFieldStyle(.roundedBorder)
+                        Button {
+                            chooseOutputFolder()
+                        } label: {
+                            Label("Choose", systemImage: "folder")
+                        }
+                    }
+
+                    Picker("Audio Format", selection: Binding(
+                        get: { appModel.settings.audioOutputFormat },
+                        set: { appModel.settings.audioOutputFormat = $0 }
+                    )) {
+                        ForEach(AudioOutputFormat.allCases) { format in
+                            Text(format.displayName).tag(format)
+                        }
                     }
                 }
             }
 
-            Section("Transcription") {
-                Picker("Engine", selection: Binding(
-                    get: { appModel.settings.transcriptionEngine },
-                    set: { newEngine in
-                        appModel.transcription.setEngine(newEngine)
-                        appModel.settings.transcriptionEngine = newEngine
-                    }
-                )) {
-                    ForEach(TranscriptionEngineKind.allCases) { engine in
-                        Text(engine.displayName).tag(engine)
-                    }
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Transcription", systemImage: "text.bubble")
+                        .font(.headline)
+
+                    Label("Apple Speech transcript segmentation", systemImage: "text.quote")
+                        .font(.caption)
+                    Label("SpeechVAD Sortformer speaker diarization", systemImage: "person.wave.2")
+                        .font(.caption)
+
+                    Toggle("Save transcripts automatically", isOn: $appModel.settings.saveTranscriptsAutomatically)
                 }
-                .disabled(appModel.transcription.isTranscribing)
-                Toggle("Save transcripts automatically", isOn: $appModel.settings.saveTranscriptsAutomatically)
             }
 
-            Section("Visualization") {
-                Slider(
-                    value: $appModel.settings.visualizationSensitivity,
-                    in: 0.25...3.0,
-                    step: 0.25
-                ) {
-                    Text("Sensitivity")
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Summary", systemImage: "doc.text.magnifyingglass")
+                        .font(.headline)
+
+                    HStack {
+                        Text("Summary Prompt")
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Button("Reset") {
+                            appModel.settings.resetSummaryPrompt()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.link)
+                    }
+
+                    TextEditor(text: $appModel.settings.summaryPrompt)
+                        .font(.caption.monospaced())
+                        .frame(minHeight: 150)
+                        .scrollContentBackground(.hidden)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.secondary.opacity(0.18))
+                        )
+                }
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Visualization", systemImage: "waveform")
+                        .font(.headline)
+                    Slider(
+                        value: $appModel.settings.visualizationSensitivity,
+                        in: 0.25...3.0,
+                        step: 0.25
+                    ) {
+                        Text("Sensitivity")
+                    }
                 }
             }
         }
-        .padding()
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var settingsModelColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("LLM Models", systemImage: "server.rack")
+                        .font(.headline)
+
+                    GlobalPromptLLMControl()
+                        .environmentObject(appModel)
+
+                    HStack {
+                        Button {
+                            appModel.testSelectedLLMPlainPrompt()
+                        } label: {
+                            Label("Test Prompt", systemImage: "message")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            appModel.testSelectedLLMFactCheck()
+                        } label: {
+                            Label("Test AI Processing", systemImage: "network")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    LLMEndpointSettingsView(compact: true)
+                        .environmentObject(appModel)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var settingsPromptColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Prompt Templates", systemImage: "text.badge.plus")
+                        .font(.headline)
+
+                    AIPromptTemplateSettingsView(compact: true)
+                        .environmentObject(appModel)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func chooseOutputFolder() {

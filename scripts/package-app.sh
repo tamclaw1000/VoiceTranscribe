@@ -9,12 +9,15 @@ CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 
 cd "$ROOT_DIR"
+swift package clean
+"$ROOT_DIR/scripts/prepare-speech-swift.sh"
 swift build -c "$CONFIGURATION"
+BIN_PATH="$(swift build -c "$CONFIGURATION" --show-bin-path)"
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR"
 
-cp "$ROOT_DIR/.build/arm64-apple-macosx/$CONFIGURATION/$APP_NAME" "$MACOS_DIR/$APP_NAME"
+cp "$BIN_PATH/$APP_NAME" "$MACOS_DIR/$APP_NAME"
 cp "$ROOT_DIR/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
 
 if command -v codesign >/dev/null 2>&1; then

@@ -70,6 +70,31 @@ enum FileNamer {
     }
 }
 
+enum AppVersion {
+    static func displayText(bundle: Bundle = .main) -> String {
+        displayText(
+            shortVersion: bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+            build: bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        )
+    }
+
+    static func displayText(shortVersion: String?, build: String?) -> String {
+        let version = shortVersion?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let build = build?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch (version?.isEmpty == false ? version : nil, build?.isEmpty == false ? build : nil) {
+        case let (version?, build?):
+            return "Version \(version) (\(build))"
+        case let (version?, nil):
+            return "Version \(version)"
+        case let (nil, build?):
+            return "Build \(build)"
+        case (nil, nil):
+            return "Version unavailable"
+        }
+    }
+}
+
 struct BoundedBuffer<Element> {
     private(set) var elements: [Element] = []
     let capacity: Int
@@ -102,10 +127,10 @@ struct TranscriptDocument {
     }
 
     var plainText: String {
-        let finalText = finalized.map(\.text).joined(separator: "\n")
+        let finalText = finalized.map(\.textWithSpeaker).joined(separator: "\n")
         guard let interim else {
             return finalText
         }
-        return finalText.isEmpty ? interim.text : "\(finalText)\n\(interim.text)"
+        return finalText.isEmpty ? interim.textWithSpeaker : "\(finalText)\n\(interim.textWithSpeaker)"
     }
 }

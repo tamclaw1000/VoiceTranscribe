@@ -173,6 +173,7 @@ struct ContentView: View {
                     hasTranscriptText: !appModel.transcription.transcriptText
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .isEmpty,
+                    onCycleSpeaker: appModel.cycleTranscriptSegmentSpeaker,
                     onSetSpeakerName: appModel.setSpeakerName,
                     onResetSpeakerName: appModel.resetSpeakerName,
                     onResetAllSpeakerNames: appModel.resetAllSpeakerNames,
@@ -252,22 +253,25 @@ private struct SourceRow: View {
                 // Transcribe / Stop button
                 let permissionsOK = appModel.permissionService.canCaptureAudio
                     && appModel.permissionService.canTranscribe
+                let sourceActionBusy = appModel.isSourceActionBusy
+                let isTranscribingSource = appModel.isTranscribing(source)
+                let isRecordingSource = appModel.isRecording(source)
 
                 Button {
                     appModel.toggleTranscribe(for: source)
                 } label: {
                     HStack(spacing: 5) {
-                        Image(systemName: appModel.isTranscribing(source) ? "text.bubble.fill" : "text.bubble")
+                        Image(systemName: isTranscribingSource ? "text.bubble.fill" : "text.bubble")
                             .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(appModel.isTranscribing(source) ? Color.green : Color.secondary)
-                        Text(appModel.isTranscribing(source) ? "Stop" : "Transcribe")
-                            .foregroundStyle(appModel.isTranscribing(source) ? Color.green : Color.primary)
+                            .foregroundStyle(isTranscribingSource ? Color.green : Color.secondary)
+                        Text(isTranscribingSource ? "Stop" : "Transcribe")
+                            .foregroundStyle(isTranscribingSource ? Color.green : Color.primary)
                     }
                 }
-                .tint(appModel.isTranscribing(source) ? .green : .accentColor)
-                .disabled(!permissionsOK)
-                .help(!permissionsOK ? "Microphone and speech recognition permissions are required" : "")
-                .accessibilityValue(appModel.isTranscribing(source) ? "Active" : "Inactive")
+                .tint(isTranscribingSource ? .green : .accentColor)
+                .disabled(!permissionsOK || (sourceActionBusy && !isTranscribingSource))
+                .help(!permissionsOK ? "Microphone and speech recognition permissions are required" : (sourceActionBusy && !isTranscribingSource ? "Another audio source is starting or stopping." : ""))
+                .accessibilityValue(isTranscribingSource ? "Active" : "Inactive")
 
                 // Record checkbox
                 Toggle(isOn: Binding(
@@ -275,13 +279,13 @@ private struct SourceRow: View {
                     set: { _ in appModel.toggleRecord(for: source) }
                 )) {
                     HStack(spacing: 4) {
-                        Image(systemName: appModel.isRecording(source) ? "record.circle.fill" : "record.circle")
-                            .foregroundStyle(appModel.isRecording(source) ? .red : .secondary)
+                        Image(systemName: isRecordingSource ? "record.circle.fill" : "record.circle")
+                            .foregroundStyle(isRecordingSource ? .red : .secondary)
                         Text("Record")
                     }
                 }
                 .toggleStyle(.checkbox)
-                .disabled(!permissionsOK)
+                .disabled(!permissionsOK || (sourceActionBusy && !isRecordingSource))
 
                 if let filename = appModel.recordingFilename {
                     Button {
@@ -845,12 +849,15 @@ private struct TranscriptFactCheckPanel: View {
     let isTranscribing: Bool
     @Binding var autoScrollToBottom: Bool
     let hasTranscriptText: Bool
+    let onCycleSpeaker: (UUID) -> Void
     let onSetSpeakerName: (String, String) -> Void
     let onResetSpeakerName: (String) -> Void
     let onResetAllSpeakerNames: () -> Void
     let onSaveToFile: () -> Void
     let onExportMarkdown: () -> Void
     let onCopyText: () -> Void
+
+    @State private var isSpeakerConfigurationExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -992,55 +999,70 @@ private struct TranscriptFactCheckPanel: View {
 
     private var speakerNameEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Label("Speakers", systemImage: "person.2")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    onResetAllSpeakerNames()
-                } label: {
-                    Label("Reset All", systemImage: "arrow.counterclockwise")
+            DisclosureGroup(isExpanded: $isSpeakerConfigurationExpanded) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Spacer()
+                        Button {
+                            onResetAllSpeakerNames()
+                        } label: {
+                            Label("Reset All", systemImage: "arrow.counterclockwise")
+                        }
+                        .font(.caption)
+                        .disabled(!speakerNameItems.contains(where: \.hasCustomName))
+                        .help("Reset all speaker names to their generated Speaker N labels")
+                    }
+
+                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
+                        ForEach(speakerNameItems) { item in
+                            GridRow {
+                                Text(item.speakerID)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(speakerColor(for: item.speakerID))
+                                    .lineLimit(1)
+                                    .frame(width: 88, alignment: .leading)
+
+                                TextField(
+                                    item.speakerID,
+                                    text: Binding(
+                                        get: { item.customName },
+                                        set: { onSetSpeakerName(item.speakerID, $0) }
+                                    )
+                                )
+                                .textFieldStyle(.roundedBorder)
+                                .frame(minWidth: 140, maxWidth: 260)
+                                .help("Enter a display name for \(item.speakerID)")
+
+                                Text(item.displayName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                Button {
+                                    onResetSpeakerName(item.speakerID)
+                                } label: {
+                                    Image(systemName: "arrow.counterclockwise")
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(!item.hasCustomName)
+                                .help("Reset \(item.speakerID) to its generated name")
+                            }
+                        }
+                    }
                 }
-                .font(.caption)
-                .disabled(!speakerNameItems.contains(where: \.hasCustomName))
-                .help("Reset all speaker names to their generated Speaker N labels")
-            }
-
-            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
-                ForEach(speakerNameItems) { item in
-                    GridRow {
-                        Text(item.speakerID)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(speakerColor(for: item.speakerID))
-                            .lineLimit(1)
-                            .frame(width: 88, alignment: .leading)
-
-                        TextField(
-                            item.speakerID,
-                            text: Binding(
-                                get: { item.customName },
-                                set: { onSetSpeakerName(item.speakerID, $0) }
-                            )
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: 140, maxWidth: 260)
-                        .help("Enter a display name for \(item.speakerID)")
-
-                        Text(item.displayName)
+                .padding(.top, 8)
+            } label: {
+                HStack(spacing: 8) {
+                    Label("Speaker Configuration", systemImage: "person.2")
+                        .font(.caption.weight(.semibold))
+                    Text("\(speakerNameItems.count) detected")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if speakerNameItems.contains(where: \.hasCustomName) {
+                        Text("custom names")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Button {
-                            onResetSpeakerName(item.speakerID)
-                        } label: {
-                            Image(systemName: "arrow.counterclockwise")
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(!item.hasCustomName)
-                        .help("Reset \(item.speakerID) to its generated name")
                     }
                 }
             }
@@ -1070,11 +1092,20 @@ private struct TranscriptFactCheckPanel: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 76, alignment: .leading)
 
-            Text(speakerLabel ?? "Detecting")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(speakerColor(for: speakerID ?? speakerLabel))
-                .lineLimit(1)
+            Button {
+                onCycleSpeaker(segment.id)
+            } label: {
+                Text(speakerLabel ?? "Detecting")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(SpeakerLabelButtonStyle(color: speakerColor(for: speakerID ?? speakerLabel)))
             .frame(width: 150, alignment: .leading)
+            .disabled(speakerNameItems.isEmpty)
+            .help(speakerNameItems.isEmpty ? "No detected speakers to cycle." : "Click to cycle this row through detected speakers.")
+            .accessibilityLabel("Speaker \(speakerLabel ?? "Detecting")")
+            .accessibilityHint("Cycles this transcript row through detected speakers.")
 
             Text(segment.text)
                 .foregroundStyle(isInterim ? .secondary : .primary)
@@ -1253,6 +1284,32 @@ private struct TranscriptFactCheckPanel: View {
     }()
 
     private static let bottomScrollID = "transcript-bottom"
+}
+
+private struct SpeakerLabelButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? color : .secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+            .background(
+                color.opacity(isEnabled ? (configuration.isPressed ? 0.22 : 0.10) : 0.05),
+                in: RoundedRectangle(cornerRadius: 6)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(color.opacity(isEnabled ? (configuration.isPressed ? 0.55 : 0.28) : 0.12))
+            )
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .opacity(isEnabled ? 1 : 0.65)
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+    }
 }
 
 private struct SummaryPanel: View {

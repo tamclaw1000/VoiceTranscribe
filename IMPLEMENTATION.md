@@ -1764,3 +1764,40 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify `swift test` passes.
 - [x] Bump `CFBundleShortVersionString` to `2.4.27`.
 - [x] Bump `CFBundleVersion` to `70`.
+
+## 90. v2.4.28. Transcript Speaker Cycling
+
+### 90a. Live Transcript Corrections
+
+- [x] Make each transcript row's speaker label clickable when detected speakers are available.
+- [x] Cycle the clicked row through the current generated speaker IDs using the stable speaker sort order.
+- [x] Preserve custom speaker names when a row is reassigned to a renamed speaker.
+- [x] Store the correction on the individual transcript segment so Copy Text, Save to File, and Markdown export use the corrected label.
+- [x] Collapse the speaker rename/reset controls behind a Speaker Configuration disclosure panel.
+- [x] Suppress the first-launch permission success alert when permissions are granted or updated.
+
+### 90b. Tests and Version
+
+- [x] Add coverage for individual segment speaker reassignment in transcript documents and the transcription coordinator.
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.28`.
+- [x] Bump `CFBundleVersion` to `71`.
+
+## 91. v2.4.29. Capture Source Switching Crash Fix
+
+### 91a. BlackHole and Microphone Switching
+
+- [x] Review the `VoiceTranscribe-2026-09-17-171854.ips` crash report and identify a main-thread SwiftUI/AppKit hit-testing crash during source toggling.
+- [x] Prevent new source actions while recording/transcription/capture switching is already starting.
+- [x] Allow active source controls to stop while blocking inactive source starts during transitions.
+- [x] Stop active recording/transcription modes cleanly before switching the shared `AudioCaptureService` to a different input device.
+- [x] Ignore queued audio tap buffers from stale capture generations after a source is stopped or switched.
+- [x] Replace the audio tap's `MainActor.assumeIsolated` handoff with an explicit `Task { @MainActor }` handoff.
+
+### 91b. Tests and Version
+
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.29`.
+- [x] Bump `CFBundleVersion` to `72`.

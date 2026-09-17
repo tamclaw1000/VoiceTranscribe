@@ -17,6 +17,7 @@ final class AudioCaptureService: ObservableObject {
     private var levelHistory = BoundedBuffer<Float>(capacity: 180)
     private var lastVisualizationUpdate = Date.distantPast
     private let visualizationInterval: TimeInterval = 1.0 / 30.0
+    private var captureGeneration = 0
 
     var isRunning: Bool {
         engine.isRunning
@@ -33,6 +34,8 @@ final class AudioCaptureService: ObservableObject {
 
         Trace.event("capture.starting", ["source": source.name, "deviceID": source.audioDeviceID])
         stop()
+        captureGeneration += 1
+        let generation = captureGeneration
         status = .starting
         activeSource = source
 
@@ -60,10 +63,11 @@ final class AudioCaptureService: ObservableObject {
             guard let copiedBuffer = Self.copyBuffer(buffer) else {
                 return
             }
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    self?.process(buffer: copiedBuffer, time: time)
+            Task { @MainActor [weak self] in
+                guard let self, self.captureGeneration == generation else {
+                    return
                 }
+                self.process(buffer: copiedBuffer, time: time)
             }
         }
 
@@ -91,6 +95,7 @@ final class AudioCaptureService: ObservableObject {
     }
 
     func stop() {
+        captureGeneration += 1
         if engine.isRunning {
             Trace.event("capture.stopped", ["source": activeSource?.name ?? "none"])
             engine.inputNode.removeTap(onBus: 0)

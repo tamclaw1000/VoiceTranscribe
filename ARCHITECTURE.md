@@ -35,7 +35,7 @@ VoiceTranscribeApp
 ### Data Flow
 
 ```
-Mic → AVAudioEngine tap → copyBuffer() → DispatchQueue.main
+Mic → AVAudioEngine tap → copyBuffer() → Task { @MainActor }
   → process() → metrics + visualization (30fps throttle)
   → fan out to registered consumers (listen/record/transcribe)
 ```
@@ -79,6 +79,10 @@ captureService.objectWillChange.sink { [weak self] _ in
 ### ⚠️ AVAudioEngine Tap Must Copy Buffers
 
 Tap callback buffers are transient — they're invalidated after the callback returns. Always `memcpy` or `deepCopy()` before fanning out to async consumers. RecordingService and TranscriptionService both do their own copies too.
+
+### ⚠️ Capture Source Switches Must Be Serialized
+
+`AudioCaptureService` is shared by listen, record, and transcription modes. Before switching from one physical/virtual input source to another, stop active recording/transcription consumers, stop the engine, then start the new source. The capture service uses a `captureGeneration` guard so queued tap callbacks from an old source are ignored after a stop or switch.
 
 ### ⚠️ SpeechAnalyzer Input Stream Ordering
 
@@ -173,6 +177,8 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.29 | 72 | Hardened BlackHole/microphone capture switching to stop active modes cleanly and ignore stale tap buffers |
+| 2.4.28 | 71 | Added click-to-cycle speaker correction for individual Live Transcript rows |
 | 2.4.27 | 70 | Added Live Transcript speaker-name editing with per-speaker and reset-all controls |
 | 2.4.26 | 69 | Downmixed multichannel capture buffers before Apple Speech analysis so BlackHole and aggregate-device input can transcribe reliably |
 | 2.4.25 | 68 | Runs an active AI health test when AI processing is re-enabled from a disabled state |

@@ -283,6 +283,22 @@ import Testing
     #expect(document.plainText == "[Speaker 1] hello\n[Speaker 1] working")
 }
 
+@Test func transcriptDocumentUpdatesIndividualSegmentSpeaker() {
+    let first = TranscriptSegment(text: "hello", isFinal: true, speakerID: "Speaker 1")
+    let second = TranscriptSegment(text: "world", isFinal: true, speakerID: "Speaker 1")
+    var document = TranscriptDocument()
+    document.apply(first)
+    document.apply(second)
+
+    document.updateSegmentSpeaker(
+        segmentID: second.id,
+        speakerID: "Speaker 2",
+        speakerName: "Dana"
+    )
+
+    #expect(document.plainText == "[Speaker 1] hello\n[Dana] world")
+}
+
 @Test @MainActor func fluidAudioStalePartialAfterFinalSegmentIsSuppressed() async throws {
     let service = FakeTranscriptionService(engineName: "FluidAudio Test")
     let coordinator = TranscriptionCoordinator(service: service)
@@ -301,6 +317,28 @@ import Testing
     #expect(coordinator.interimSegment == nil)
     #expect(coordinator.segments.map(\.text) == ["This sentence is complete."])
     #expect(coordinator.segments.compactMap(\.speakerLabel) == ["Speaker 1"])
+}
+
+@Test @MainActor func transcriptionCoordinatorUpdatesIndividualSegmentSpeaker() async throws {
+    let service = FakeTranscriptionService(engineName: "Speaker Cycle Test")
+    let coordinator = TranscriptionCoordinator(service: service)
+    coordinator.speakerProvider = {
+        ("Speaker 1", nil)
+    }
+
+    try await coordinator.start()
+    service.emit(TranscriptSegment(text: "This speaker is wrong.", isFinal: true))
+    try await Task.sleep(for: .milliseconds(20))
+    let segmentID = try #require(coordinator.segments.first?.id)
+
+    coordinator.updateSegmentSpeaker(
+        segmentID: segmentID,
+        speakerID: "Speaker 2",
+        speakerName: "Dana"
+    )
+
+    #expect(coordinator.segments.map(\.speakerLabel) == ["Dana"])
+    #expect(coordinator.transcriptText == "[Dana] This speaker is wrong.")
 }
 
 @Test func markdownExportIncludesDetailsRecordingSummaryAndFactChecks() {

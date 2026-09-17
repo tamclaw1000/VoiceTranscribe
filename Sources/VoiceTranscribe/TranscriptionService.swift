@@ -346,6 +346,35 @@ final class TranscriptionCoordinator: ObservableObject {
         ])
     }
 
+    func updateSegmentSpeaker(segmentID: UUID, speakerID: String?, speakerName: String?) {
+        segments = segments.map { segment in
+            guard segment.id == segmentID else {
+                return segment
+            }
+            var copy = segment
+            copy.speakerID = speakerID
+            copy.speakerName = speakerName
+            return copy
+        }
+
+        if var interimSegment, interimSegment.id == segmentID {
+            interimSegment.speakerID = speakerID
+            interimSegment.speakerName = speakerName
+            self.interimSegment = interimSegment
+        }
+
+        transcript.updateSegmentSpeaker(
+            segmentID: segmentID,
+            speakerID: speakerID,
+            speakerName: speakerName
+        )
+        Trace.event("transcription.segmentSpeaker.updated", [
+            "segmentID": segmentID.uuidString,
+            "speakerID": speakerID ?? "",
+            "speakerName": speakerName ?? ""
+        ])
+    }
+
     private func apply(_ segment: TranscriptSegment) {
         var segment = segment
         if let speaker = speakerProvider?() {

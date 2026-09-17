@@ -101,7 +101,6 @@ final class AppModel: ObservableObject {
         // Experiment: avoid automatic relaunch after first-launch permission prompts.
         // Restore this call if macOS still requires a fresh app process before capture works.
         // restartAfterPermissionDialog()
-        userMessage = "Permissions were updated. Continue without restarting VoiceTranscribe."
         Trace.event("app.restart.disabledForPermissionExperiment")
         return true
     }
@@ -145,6 +144,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var isStartingTranscription = false
     /// Guards against double‑click races while recording is still starting.
     @Published private(set) var isStartingRecording = false
+    /// Guards source switching so capture teardown/startup does not overlap.
+    @Published private(set) var isSwitchingCaptureSource = false
 
     // MARK: - File Input Sources
 
@@ -223,6 +224,10 @@ final class AppModel: ObservableObject {
         captureService.activeSource?.id
     }
 
+    var isSourceActionBusy: Bool {
+        isStartingRecording || isStartingTranscription || isSwitchingCaptureSource
+    }
+
     var speakerNameEditorItems: [SpeakerNameEditorItem] {
         let ids = knownSpeakerIDs()
         return ids.map { speakerID in
@@ -266,6 +271,36 @@ final class AppModel: ObservableObject {
         Trace.event("speaker.names.resetAll")
     }
 
+    func cycleTranscriptSegmentSpeaker(segmentID: UUID) {
+        let speakerIDs = knownSpeakerIDs()
+        guard !speakerIDs.isEmpty else {
+            return
+        }
+
+        let currentSpeakerID = transcription.segments.first { $0.id == segmentID }?.speakerID
+            ?? (transcription.interimSegment?.id == segmentID ? transcription.interimSegment?.speakerID : nil)
+        let nextSpeakerID: String
+        if let currentSpeakerID, let index = speakerIDs.firstIndex(of: currentSpeakerID) {
+            nextSpeakerID = speakerIDs[(index + 1) % speakerIDs.count]
+        } else {
+            nextSpeakerID = speakerIDs[0]
+        }
+        let speakerName = speakerName(for: nextSpeakerID)
+
+        transcription.updateSegmentSpeaker(
+            segmentID: segmentID,
+            speakerID: nextSpeakerID,
+            speakerName: speakerName
+        )
+        objectWillChange.send()
+        Trace.event("speaker.segment.cycled", [
+            "segmentID": segmentID.uuidString,
+            "fromSpeakerID": currentSpeakerID ?? "",
+            "toSpeakerID": nextSpeakerID,
+            "speakerName": speakerName ?? ""
+        ])
+    }
+
     private func knownSpeakerIDs() -> [String] {
         var ids = Set<String>()
         for segment in diarization.segments {
@@ -283,6 +318,12 @@ final class AppModel: ObservableObject {
             ids.insert(speakerID)
         }
         return ids.sorted(by: speakerSort)
+    }
+
+    private func speakerName(for speakerID: String) -> String? {
+        diarization.speakerName(for: speakerID)
+            ?? transcription.segments.first { $0.speakerID == speakerID }?.speakerName
+            ?? (transcription.interimSegment?.speakerID == speakerID ? transcription.interimSegment?.speakerName : nil)
     }
 
     private func speakerSort(_ lhs: String, _ rhs: String) -> Bool {
@@ -624,6 +665,7 @@ final class AppModel: ObservableObject {
 
     func toggleRecord(for source: SoundInputSource) {
         let isCurrentlyRecording = recordingService.isRecording
+        let isRecordingSource = isRecording(source)
         Trace.button(
             isCurrentlyRecording ? "record.stop" : "record.start",
             source: source.name,
@@ -631,12 +673,15 @@ final class AppModel: ObservableObject {
         )
 
         if isCurrentlyRecording {
+            if isRecordingSource {
+                stopRecording()
+                return
+            }
             stopRecording()
-            return
         }
 
-        guard !isStartingRecording else {
-            Trace.event("record.guard.skip", ["reason": "alreadyStarting"])
+        guard !isSourceActionBusy else {
+            Trace.event("record.guard.skip", ["reason": "sourceActionBusy"])
             return
         }
 
@@ -677,7 +722,8 @@ final class AppModel: ObservableObject {
 
     func toggleTranscribe(for source: SoundInputSource) {
         let isCurrentlyTranscribing = transcription.isTranscribing
-        let isStarting = transcription.isStarting || isStartingTranscription
+        let isTranscribingSource = isTranscribing(source)
+        let isStarting = transcription.isStarting || isStartingTranscription || isSwitchingCaptureSource
         Trace.button(
             isCurrentlyTranscribing ? "transcribe.stop" : "transcribe.start",
             source: source.name,
@@ -690,12 +736,15 @@ final class AppModel: ObservableObject {
         )
 
         if isCurrentlyTranscribing {
+            if isTranscribingSource {
+                stopTranscription()
+                return
+            }
             stopTranscription()
-            return
         }
 
         guard !isStarting else {
-            Trace.event("transcribe.guard.skip", ["reason": "alreadyStarting"])
+            Trace.event("transcribe.guard.skip", ["reason": "sourceActionBusy"])
             return
         }
 
@@ -758,8 +807,30 @@ final class AppModel: ObservableObject {
         }
 
         if captureService.activeSource?.id != source.id {
+            isSwitchingCaptureSource = true
+            defer { isSwitchingCaptureSource = false }
+
+            stopActiveCaptureModesForSourceSwitch(to: source)
             captureService.stop()
             try captureService.start(source: source)
+        }
+    }
+
+    private func stopActiveCaptureModesForSourceSwitch(to source: SoundInputSource) {
+        let oldSourceName = captureService.activeSource?.name ?? "none"
+        Trace.event("capture.sourceSwitch.preparing", [
+            "from": oldSourceName,
+            "to": source.name,
+            "recording": recordingService.isRecording ? "true" : "false",
+            "transcribing": transcription.isTranscribing ? "true" : "false",
+            "transcriptionStarting": transcription.isStarting ? "true" : "false"
+        ])
+
+        if recordingService.isRecording {
+            stopRecording()
+        }
+        if transcription.isTranscribing || transcription.isStarting {
+            stopTranscription()
         }
     }
 

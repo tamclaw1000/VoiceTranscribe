@@ -175,6 +175,15 @@ final class AppModel: ObservableObject {
     private var aiReachabilityTask: Task<Void, Never>?
     private var hasRunLaunchAIReachabilityTest = false
     private var nextForcedVoiceNumber = 1
+    private var lastTranscriptionStopAt: Date?
+    /// Minimum gap enforced between a transcribe stop and the next start, to avoid
+    /// restarting capture/transcription/diarization while AppKit is still settling
+    /// from the teardown's view/state churn (see crash reports with fault address
+    /// 0x141300b9 in NSViewResponder.platformCurrentEvent.getter). Telemetry from a
+    /// repeat crash on build 79 showed the crash landing ~2s after a restart even
+    /// when the stop/start clicks were more than 300ms apart, so the window is sized
+    /// to that observed settle time rather than to click-to-click latency.
+    private let transcriptionRestartCooldown: TimeInterval = 2.0
 
     init() {
         transcription = TranscriptionCoordinator(service: AppModel.makeInitialService())
@@ -907,6 +916,16 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             defer { self.isStartingTranscription = false }
 
+            if let lastStop = self.lastTranscriptionStopAt {
+                let elapsed = Date().timeIntervalSince(lastStop)
+                let remaining = self.transcriptionRestartCooldown - elapsed
+                if remaining > 0 {
+                    Trace.event("transcribe.restart.cooldown", ["waitSeconds": remaining])
+                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                    if Task.isCancelled { return }
+                }
+            }
+
             do {
                 Trace.event("transcribe.capture.ensuring", ["source": source.name])
                 try await self.ensureCapture(for: source)
@@ -1634,6 +1653,7 @@ final class AppModel: ObservableObject {
         transcription.stop()
         diarization.stop()
         captureService.stopIfUnused()
+        lastTranscriptionStopAt = Date()
         Trace.event("transcribe.stopped", ["finalSegments": transcription.segments.count])
     }
 }

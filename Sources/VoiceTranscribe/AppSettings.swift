@@ -257,14 +257,14 @@ struct AIPromptTemplateConfiguration: Identifiable, Codable, Equatable {
 
     static func defaultConfiguration(
         llmEndpointID: String = LLMEndpointConfiguration.defaultID,
-        template: String = FactCheckPrompt.defaultTemplate,
+        template: String = AIPromptPrompt.defaultTemplate,
         isEnabled: Bool = true
     ) -> AIPromptTemplateConfiguration {
         AIPromptTemplateConfiguration(
             id: defaultID,
             name: defaultName,
             llmEndpointID: llmEndpointID,
-            template: template.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? FactCheckPrompt.defaultTemplate : template,
+            template: template.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? AIPromptPrompt.defaultTemplate : template,
             isEnabled: isEnabled
         )
     }
@@ -289,7 +289,7 @@ struct AIPromptTemplateConfiguration: Identifiable, Codable, Equatable {
                 copy.name = "AI Prompt \(index + 1)"
             }
             if copy.template.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                copy.template = FactCheckPrompt.defaultTemplate
+                copy.template = AIPromptPrompt.defaultTemplate
             }
             if !availableLLMEndpointIDs.isEmpty,
                !availableLLMEndpointIDs.contains(copy.llmEndpointID) {
@@ -417,8 +417,6 @@ final class AppSettings: ObservableObject {
     @AppStorage("saveTranscriptsAutomatically") var saveTranscriptsAutomatically: Bool = true
     @AppStorage("autoScrollTranscript") var autoScrollTranscript: Bool = true
     @AppStorage("visualizationSensitivity") var visualizationSensitivity: Double = 1.0
-    @AppStorage("aiEnabled") var aiEnabled: Bool = true
-    @AppStorage("factCheckEnabled") var factCheckEnabled: Bool = true
     @AppStorage("ollamaEndpoint") var ollamaEndpoint: String = "http://localhost:11434"
     @AppStorage("ollamaModel") var ollamaModel: String = "igorls/gemma-4-12B-it-heretic-GGUF"
     @AppStorage("llmEndpointsJSON") private var llmEndpointsJSON: String = ""
@@ -426,7 +424,6 @@ final class AppSettings: ObservableObject {
     @AppStorage("useGlobalPromptLLM") var useGlobalPromptLLM: Bool = false
     @AppStorage("globalPromptLLMEndpointID") var globalPromptLLMEndpointID: String = LLMEndpointConfiguration.defaultID
     @AppStorage("aiPromptTemplatesJSON") private var aiPromptTemplatesJSON: String = ""
-    @AppStorage("ollamaFactCheckPrompt") var ollamaFactCheckPrompt: String = FactCheckPrompt.defaultTemplate
     @AppStorage("summaryPrompt") var summaryPrompt: String = SummaryPrompt.defaultTemplate
     @AppStorage("jevAPIKey") var jevAPIKey: String = ""
     @AppStorage("jevBaseURL") var jevBaseURL: String = "https://api.typesafe.ai"
@@ -462,7 +459,7 @@ final class AppSettings: ObservableObject {
         URL(string: ollamaEndpoint) ?? URL(string: "http://localhost:11434")!
     }
 
-    var isFactCheckActive: Bool {
+    var isAIPromptActive: Bool {
         !enabledAIPromptTemplates.isEmpty
     }
 
@@ -516,9 +513,7 @@ final class AppSettings: ObservableObject {
                   let decoded = try? JSONDecoder().decode([AIPromptTemplateConfiguration].self, from: data) else {
                 return [
                     AIPromptTemplateConfiguration.defaultConfiguration(
-                        llmEndpointID: selectedLLMEndpointID,
-                        template: ollamaFactCheckPrompt,
-                        isEnabled: aiEnabled && factCheckEnabled
+                        llmEndpointID: selectedLLMEndpointID
                     )
                 ]
             }
@@ -595,10 +590,6 @@ final class AppSettings: ObservableObject {
         aiPromptTemplates = aiPromptTemplates
     }
 
-    func resetFactCheckPrompt() {
-        ollamaFactCheckPrompt = FactCheckPrompt.defaultTemplate
-    }
-
     func updateAIPromptTemplate(_ promptTemplate: AIPromptTemplateConfiguration) {
         var promptTemplates = aiPromptTemplates
         if let index = promptTemplates.firstIndex(where: { $0.id == promptTemplate.id }) {
@@ -614,7 +605,7 @@ final class AppSettings: ObservableObject {
             id: UUID().uuidString,
             name: "AI Prompt \(nextNumber)",
             llmEndpointID: selectedLLMEndpointID,
-            template: FactCheckPrompt.defaultTemplate,
+            template: AIPromptPrompt.defaultTemplate,
             isEnabled: true
         )
         promptTemplates.append(promptTemplate)
@@ -634,7 +625,7 @@ final class AppSettings: ObservableObject {
         guard var promptTemplate = aiPromptTemplates.first(where: { $0.id == id }) else {
             return
         }
-        promptTemplate.template = FactCheckPrompt.defaultTemplate
+        promptTemplate.template = AIPromptPrompt.defaultTemplate
         updateAIPromptTemplate(promptTemplate)
     }
 
@@ -729,9 +720,7 @@ final class AppSettings: ObservableObject {
 
         aiPromptTemplates = [
             AIPromptTemplateConfiguration.defaultConfiguration(
-                llmEndpointID: selectedLLMEndpointID,
-                template: ollamaFactCheckPrompt,
-                isEnabled: aiEnabled && factCheckEnabled
+                llmEndpointID: selectedLLMEndpointID
             )
         ]
     }

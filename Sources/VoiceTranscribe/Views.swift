@@ -171,17 +171,17 @@ struct ContentView: View {
             Divider()
 
             TabView(selection: $selectedDetailTab) {
-                TranscriptFactCheckPanel(
+                TranscriptAIPromptPanel(
                     finalized: appModel.transcription.segments,
                     interim: appModel.transcription.interimSegment,
-                    factChecks: appModel.factCheck.items,
+                    aiPrompts: appModel.aiPrompt.items,
                     speakerNameItems: appModel.speakerNameEditorItems,
                     currentSpeakerID: appModel.diarization.currentSpeakerID,
                     currentSpeakerLabel: appModel.diarization.currentSpeakerLabel,
                     isDiarizationActive: appModel.diarization.isStarting || appModel.diarization.isRunning,
                     diarizationError: appModel.diarization.lastError,
-                    isFactCheckEnabled: appModel.settings.isFactCheckActive,
-                    isFactChecking: appModel.factCheck.isRunning,
+                    isAIPromptEnabled: appModel.settings.isAIPromptActive,
+                    isAIPrompting: appModel.aiPrompt.isRunning,
                     jevResults: appModel.jev.items,
                     isJevEnabled: appModel.settings.isJevActive,
                     buffer: appModel.transcription.bufferSnapshot,
@@ -1145,17 +1145,17 @@ private struct GraphPanel: View {
     }
 }
 
-private struct TranscriptFactCheckPanel: View {
+private struct TranscriptAIPromptPanel: View {
     let finalized: [TranscriptSegment]
     let interim: TranscriptSegment?
-    let factChecks: [FactCheckItem]
+    let aiPrompts: [AIPromptItem]
     let speakerNameItems: [SpeakerNameEditorItem]
     let currentSpeakerID: String?
     let currentSpeakerLabel: String?
     let isDiarizationActive: Bool
     let diarizationError: String?
-    let isFactCheckEnabled: Bool
-    let isFactChecking: Bool
+    let isAIPromptEnabled: Bool
+    let isAIPrompting: Bool
     let jevResults: [JevResultItem]
     let isJevEnabled: Bool
     let buffer: TranscriptionBufferSnapshot
@@ -1213,9 +1213,9 @@ private struct TranscriptFactCheckPanel: View {
 
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(factCheckStatusColor)
+                        .fill(aiPromptStatusColor)
                         .frame(width: 7, height: 7)
-                    Text(factCheckStatusText)
+                    Text(aiPromptStatusText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1288,7 +1288,7 @@ private struct TranscriptFactCheckPanel: View {
                                 segment: segment,
                                 fallbackSpeakerID: currentSpeakerID,
                                 fallbackSpeakerLabel: currentSpeakerLabel,
-                                factChecks: factChecks(for: segment),
+                                aiPrompts: aiPrompts(for: segment),
                                 jevItems: jevResults(for: segment),
                                 isInterim: false
                             )
@@ -1298,7 +1298,7 @@ private struct TranscriptFactCheckPanel: View {
                                 segment: interim,
                                 fallbackSpeakerID: currentSpeakerID,
                                 fallbackSpeakerLabel: currentSpeakerLabel,
-                                factChecks: [],
+                                aiPrompts: [],
                                 jevItems: [],
                                 isInterim: true
                             )
@@ -1452,7 +1452,7 @@ private struct TranscriptFactCheckPanel: View {
         segment: TranscriptSegment,
         fallbackSpeakerID: String?,
         fallbackSpeakerLabel: String?,
-        factChecks: [FactCheckItem],
+        aiPrompts: [AIPromptItem],
         jevItems: [JevResultItem],
         isInterim: Bool
     ) -> some View {
@@ -1508,7 +1508,7 @@ private struct TranscriptFactCheckPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
 
-        if isFactCheckEnabled {
+        if isAIPromptEnabled {
             GridRow(alignment: .top) {
                 Color.clear
                     .frame(width: 76, height: 1)
@@ -1516,12 +1516,12 @@ private struct TranscriptFactCheckPanel: View {
                     .frame(width: 150, height: 1)
                 VStack(alignment: .leading, spacing: 6) {
                     if isInterim {
-                        factCheckDetail(label: "AI Processing", badge: "Pending", color: .secondary, text: "Will run when the sentence is finalized.")
-                    } else if factChecks.isEmpty {
-                        factCheckDetail(label: "AI Processing", badge: "Queued", color: .secondary, text: "Waiting for a complete sentence match.")
+                        resultDetail(label: "AI Processing", badge: "Pending", color: .secondary, text: "Will run when the sentence is finalized.")
+                    } else if aiPrompts.isEmpty {
+                        resultDetail(label: "AI Processing", badge: "Queued", color: .secondary, text: "Waiting for a complete sentence match.")
                     } else {
-                        ForEach(factChecks) { item in
-                            factCheckDetail(for: item)
+                        ForEach(aiPrompts) { item in
+                            aiPromptDetail(for: item)
                         }
                     }
                 }
@@ -1536,9 +1536,9 @@ private struct TranscriptFactCheckPanel: View {
                     .frame(width: 150, height: 1)
                 VStack(alignment: .leading, spacing: 6) {
                     if isInterim {
-                        factCheckDetail(label: "Jev", badge: "Pending", color: .secondary, text: "Will run when the sentence is finalized.")
+                        resultDetail(label: "Jev", badge: "Pending", color: .secondary, text: "Will run when the sentence is finalized.")
                     } else if jevItems.isEmpty {
-                        factCheckDetail(label: "Jev", badge: "Queued", color: .secondary, text: "Waiting for a complete sentence match.")
+                        resultDetail(label: "Jev", badge: "Queued", color: .secondary, text: "Waiting for a complete sentence match.")
                     } else {
                         ForEach(jevItems) { item in
                             jevDetail(for: item)
@@ -1549,21 +1549,21 @@ private struct TranscriptFactCheckPanel: View {
         }
     }
 
-    private func factCheckDetail(for item: FactCheckItem) -> some View {
+    private func aiPromptDetail(for item: AIPromptItem) -> some View {
         let label = item.promptTemplateName
         switch item.state {
         case .queued:
-            return factCheckDetail(label: label, badge: "Queued", color: .secondary, text: "Waiting for the selected LLM.")
+            return resultDetail(label: label, badge: "Queued", color: .secondary, text: "Waiting for the selected LLM.")
         case .checking:
-            return factCheckDetail(label: label, badge: "Checking", color: .orange, text: "AI request in progress.")
+            return resultDetail(label: label, badge: "Checking", color: .orange, text: "AI request in progress.")
         case .failed(let message):
-            return factCheckDetail(label: label, badge: "Failed", color: .red, text: message)
+            return resultDetail(label: label, badge: "Failed", color: .red, text: message)
         case .completed(let result):
-            return factCheckDetail(label: label, badge: "Result", color: color(for: result.verdict), text: result.displayText)
+            return resultDetail(label: label, badge: "Result", color: color(for: result.verdict), text: result.displayText)
         }
     }
 
-    private func factCheckDetail(label: String, badge: String, color: Color, text: String) -> some View {
+    private func resultDetail(label: String, badge: String, color: Color, text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(label)
                 .font(.caption.weight(.semibold))
@@ -1583,15 +1583,15 @@ private struct TranscriptFactCheckPanel: View {
         .padding(.bottom, 8)
     }
 
-    private func factChecks(for segment: TranscriptSegment) -> [FactCheckItem] {
+    private func aiPrompts(for segment: TranscriptSegment) -> [AIPromptItem] {
         let segmentText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedSegment = FactCheckCoordinator.normalizedSentence(segmentText)
-        let normalizedSentences = Set(FactCheckCoordinator.completeSentences(in: segmentText).map {
-            FactCheckCoordinator.normalizedSentence($0)
+        let normalizedSegment = AIPromptCoordinator.normalizedSentence(segmentText)
+        let normalizedSentences = Set(AIPromptCoordinator.completeSentences(in: segmentText).map {
+            AIPromptCoordinator.normalizedSentence($0)
         })
 
-        return factChecks.filter { item in
-            let normalizedItem = FactCheckCoordinator.normalizedSentence(item.sentence)
+        return aiPrompts.filter { item in
+            let normalizedItem = AIPromptCoordinator.normalizedSentence(item.sentence)
             return normalizedItem == normalizedSegment
                 || normalizedSentences.contains(normalizedItem)
                 || segmentText.localizedCaseInsensitiveContains(item.sentence)
@@ -1602,25 +1602,25 @@ private struct TranscriptFactCheckPanel: View {
         let label = item.queryName
         switch item.state {
         case .queued:
-            return factCheckDetail(label: label, badge: "Queued", color: .secondary, text: "Waiting for Jev.")
+            return resultDetail(label: label, badge: "Queued", color: .secondary, text: "Waiting for Jev.")
         case .checking:
-            return factCheckDetail(label: label, badge: "Checking", color: .orange, text: "Jev request in progress.")
+            return resultDetail(label: label, badge: "Checking", color: .orange, text: "Jev request in progress.")
         case .failed(let message):
-            return factCheckDetail(label: label, badge: "Failed", color: .red, text: message)
+            return resultDetail(label: label, badge: "Failed", color: .red, text: message)
         case .completed(let answer):
-            return factCheckDetail(label: label, badge: "Result", color: .accentColor, text: answer.displayText)
+            return resultDetail(label: label, badge: "Result", color: .accentColor, text: answer.displayText)
         }
     }
 
     private func jevResults(for segment: TranscriptSegment) -> [JevResultItem] {
         let segmentText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedSegment = FactCheckCoordinator.normalizedSentence(segmentText)
-        let normalizedSentences = Set(FactCheckCoordinator.completeSentences(in: segmentText).map {
-            FactCheckCoordinator.normalizedSentence($0)
+        let normalizedSegment = AIPromptCoordinator.normalizedSentence(segmentText)
+        let normalizedSentences = Set(AIPromptCoordinator.completeSentences(in: segmentText).map {
+            AIPromptCoordinator.normalizedSentence($0)
         })
 
         return jevResults.filter { item in
-            let normalizedItem = FactCheckCoordinator.normalizedSentence(item.sentence)
+            let normalizedItem = AIPromptCoordinator.normalizedSentence(item.sentence)
             return normalizedItem == normalizedSegment
                 || normalizedSentences.contains(normalizedItem)
                 || segmentText.localizedCaseInsensitiveContains(item.sentence)
@@ -1641,11 +1641,11 @@ private struct TranscriptFactCheckPanel: View {
         }
     }
 
-    private var factCheckStatusText: String {
-        if !isFactCheckEnabled {
+    private var aiPromptStatusText: String {
+        if !isAIPromptEnabled {
             return "Disabled"
         }
-        return isFactChecking ? "Processing" : "Ready"
+        return isAIPrompting ? "Processing" : "Ready"
     }
 
     private var currentSpeakerStatusText: String {
@@ -1699,14 +1699,14 @@ private struct TranscriptFactCheckPanel: View {
         return palette[checksum % palette.count]
     }
 
-    private var factCheckStatusColor: Color {
-        if !isFactCheckEnabled {
+    private var aiPromptStatusColor: Color {
+        if !isAIPromptEnabled {
             return .secondary
         }
-        return isFactChecking ? .orange : .green
+        return isAIPrompting ? .orange : .green
     }
 
-    private func color(for verdict: FactCheckVerdict) -> Color {
+    private func color(for verdict: AIPromptVerdict) -> Color {
         switch verdict {
         case .supported:
             return .green
@@ -2133,7 +2133,7 @@ struct SettingsView: View {
                         .buttonStyle(.bordered)
 
                         Button {
-                            appModel.testSelectedLLMFactCheck()
+                            appModel.testSelectedLLMAIPrompt()
                         } label: {
                             Label("Test AI Processing", systemImage: "network")
                         }

@@ -28,7 +28,7 @@ VoiceTranscribeApp
        ├─ DiarizationCoordinator — SpeechVAD Sortformer speaker timeline + transcript annotation
        │    └─ VoiceIdentityService — SpeechVAD WeSpeaker embeddings + session-local voice matching
        ├─ SummaryCoordinator — paragraph-form recording summaries
-       ├─ FactCheckCoordinator — AI processing queue, prompt templates, batching, prompt state
+       ├─ AIPromptCoordinator — AI processing queue, prompt templates, batching, prompt state
        ├─ JevCoordinator — Jev (TypeSafe System One) queue, batches all enabled queries per sentence into one call
        ├─ PermissionService — lazy mic/speech auth with caching
        └─ AppSettings — @AppStorage-backed preferences
@@ -58,7 +58,7 @@ VoiceTranscribe uses a split voice-processing pipeline: Apple provides speech-to
 
 6. **Voice display corrections — app layer.** Speaker slots, voice labels, and row-level corrections are managed in `AppModel`, `TranscriptionCoordinator`, and `DiarizationCoordinator`, not by the diarization library. The user-facing identity unit is the observed tuple `Speaker N / Voice M`, with `Speaker N / no voice` used for segments that do not have an embedding identity. Naming a tuple changes display/export labels for matching transcript and diarization rows. A transcript row's speaker label opens correction actions that assign the row to an observed tuple, cycle through tuples, or force a fresh `Voice N` under the row's current speaker slot when Sortformer under-counts speakers.
 
-7. **AI processing — configured LLM endpoints.** `FactCheckCoordinator` listens to finalized transcript sentences, applies enabled prompt templates, performs prompt substitutions such as `{{sentence}}`, `{{conversation}}`, and `{{prompt-state}}`, and queues model calls. Historical type/trace names still say `FactCheck`, but user-facing behavior is AI Processing.
+7. **AI processing — configured LLM endpoints.** `AIPromptCoordinator` listens to finalized transcript sentences, applies enabled prompt templates, performs prompt substitutions such as `{{sentence}}`, `{{conversation}}`, and `{{prompt-state}}`, and queues model calls.
 
 8. **Jev — structured decisions.** `JevCoordinator` listens to the same finalized transcript sentences and, for every enabled Jev query (Noul yes/no, Choice categorical, or Score rubric), batches them into a single `POST /v1/systemone` call per sentence against TypeSafe's Jev API, since Jev's wire format natively answers multiple typed questions in one request. Unlike AI Processing, Jev returns typed answers (a probability, a selected label, or a rubric score) with confidence, not prose.
 
@@ -86,9 +86,9 @@ Current limitation: SpeechVAD Sortformer provides session-local speaker slots, n
 
 9. **Diarization and identity are live and best-effort.** SpeechVAD Sortformer streaming diarization runs alongside Apple Speech transcription. WeSpeaker identity matching runs asynchronously over diarized audio ranges. Transcript rows get the latest finalized speaker/voice label when the ASR segment arrives, while Markdown export also includes the diarizer's separate speaker timeline for time-based review.
 
-10. **Jev batches per sentence, not per query.** `JevCoordinator` groups every enabled query for one finalized sentence under a shared `batchGroupID` and always sends them in one API call, unlike `FactCheckCoordinator` where batching across prompt templates is opt-in and requires a shared model. Jev has no free-text prompt-state chaining equivalent.
+10. **Jev batches per sentence, not per query.** `JevCoordinator` groups every enabled query for one finalized sentence under a shared `batchGroupID` and always sends them in one API call, unlike `AIPromptCoordinator` where batching across prompt templates is opt-in and requires a shared model. Jev has no free-text prompt-state chaining equivalent.
 
-11. **A per-sentence AI result feature has four touch points, not one.** AI Processing and Jev both prove this out: each needed (a) a Settings tab for configuration, (b) a sidebar section (`ContentView.sourceList`) so results can be toggled per item, (c) a transcript-row block in `TranscriptFactCheckPanel` so results are visible live, and (d) a column/section in `MarkdownExportService` so results survive into the exported record — these are the four technical pillars `AGENTS.md` asks every such feature to check. It is easy to build (a)–(c) by mirroring the UI and forget (d), since the export path is a separate call site (`AppModel.saveTranscriptMarkdownToFile`) not reachable by browsing the live view tree — this happened once already with the initial Jev integration (v2.4.39) and was fixed in the following release.
+11. **A per-sentence AI result feature has four touch points, not one.** AI Processing and Jev both prove this out: each needed (a) a Settings tab for configuration, (b) a sidebar section (`ContentView.sourceList`) so results can be toggled per item, (c) a transcript-row block in `TranscriptAIPromptPanel` so results are visible live, and (d) a column/section in `MarkdownExportService` so results survive into the exported record — these are the four technical pillars `AGENTS.md` asks every such feature to check. It is easy to build (a)–(c) by mirroring the UI and forget (d), since the export path is a separate call site (`AppModel.saveTranscriptMarkdownToFile`) not reachable by browsing the live view tree — this happened once already with the initial Jev integration (v2.4.39) and was fixed in the following release.
 
 ## Critical Gotchas
 
@@ -120,7 +120,7 @@ The analyzer stream must be started (`analyzer.start(inputSequence:)`) BEFORE an
 
 ### ⚠️ AI Processing Labels
 
-The Swift type names still include historical `FactCheck` names, but visible UI and documentation should say **AI Processing** unless specifically describing the old implementation. Avoid reintroducing user-facing "Fact Check" labels.
+Visible UI and documentation say **AI Processing**. The Swift types were renamed to match in v2.4.41 (`AIPromptService.swift`, `AIPromptCoordinator`, `AIPromptItem`, etc. — see Version History); avoid reintroducing `FactCheck`-prefixed names or user-facing "Fact Check" labels.
 
 ### ⚠️ Stateful Prompt Queueing
 
@@ -155,7 +155,8 @@ No CLI flag needed. The `Trace.swift` utility fires on every:
 - Capture lifecycle (`capture.starting`, `.started`, `.stopped`, `.error`)
 - Recording I/O (`recording.started`, `.finalized`, `transcript.saved`, `.metadata.saved`)
 - Transcription event (`transcription.starting`, `.started`, `.stopped`, `segmentFinal`)
-- AI processing event (`factCheck.*` historical trace names, including prompt/template/model queue activity)
+- AI processing event (`aiPrompt.*` trace names, including prompt/template/model queue activity)
+- Jev event (`jev.*` trace names, including query queue/batch activity)
 - Diarization event (`diarization.*`)
 - Voice identity event (`voiceIdentity.*`)
 - Device change (`devices.changed`)
@@ -194,7 +195,7 @@ swift test
 | `TranscriptionService.swift` | SpeechTranscriber pipeline, format conversion, coordinator |
 | `DiarizationService.swift` | SpeechVAD Sortformer speaker diarization, speaker timeline, transcript annotations |
 | `VoiceIdentityService.swift` | SpeechVAD WeSpeaker embedding extraction and session-local voice matching |
-| `FactCheckService.swift` | AI processing LLM clients, queueing, prompt substitutions, batching, prompt state |
+| `AIPromptService.swift` | AI processing LLM clients, queueing, prompt substitutions, batching, prompt state |
 | `JevService.swift` | Jev (TypeSafe System One) client, wire structs, `JevCoordinator` queueing/batching |
 | `PermissionService.swift` | Lazy mic/speech auth with caching and mock support |
 | `Trace.swift` | JSON-line event logger to `/tmp/VoiceTranscribe.log` |
@@ -211,6 +212,7 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.41 | 84 | Renamed the historical `FactCheck`-prefixed AI Processing code (file, types, coordinator, trace events, tests) to `AIPrompt`, matching the UI label; removed dead legacy `@AppStorage` settings/reset code uncovered along the way |
 | 2.4.40 | 83 | Fixed Markdown export missing AI Processing/Jev results (a pillar the v2.4.39 Jev integration forgot); added a "Feature Surface Checklist" to AGENTS.md so future per-sentence-result features cover all four touch points |
 | 2.4.39 | 82 | Added Jev (TypeSafe System One) as a new AI backend: Jev Configuration settings tab, one-or-many Jev Queries (Noul/Choice/Score primitives), a sidebar "Jev Queries" section, and per-sentence transcript results |
 | 2.4.38 | 81 | Hid the per-row "AI Processing: Disabled" block from the transcript when no AI Processing prompt templates are enabled |

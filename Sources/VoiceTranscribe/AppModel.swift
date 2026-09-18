@@ -38,7 +38,7 @@ final class AppModel: ObservableObject {
     @Published var recordingService = RecordingService()
     @Published var transcription: TranscriptionCoordinator
     @Published var diarization = DiarizationCoordinator()
-    @Published var factCheck = FactCheckCoordinator()
+    @Published var aiPrompt = AIPromptCoordinator()
     @Published var jev = JevCoordinator()
     @Published var summary = SummaryCoordinator()
     @Published private(set) var aiReachability = AIReachabilityStatus()
@@ -194,9 +194,9 @@ final class AppModel: ObservableObject {
         transcription.onFinalSegment = { [weak self] segment in
             guard let self else { return }
             let enabledPromptTemplates = self.settings.effectiveEnabledAIPromptTemplates
-            self.factCheck.enqueueTranscriptSegment(
+            self.aiPrompt.enqueueTranscriptSegment(
                 segment,
-                enabled: self.settings.isFactCheckActive,
+                enabled: self.settings.isAIPromptActive,
                 promptTemplates: enabledPromptTemplates,
                 llmEndpoints: self.settings.llmEndpoints,
                 fallbackLLM: self.settings.useGlobalPromptLLM
@@ -233,7 +233,7 @@ final class AppModel: ObservableObject {
         diarization.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
-        factCheck.objectWillChange.sink { [weak self] _ in
+        aiPrompt.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         jev.objectWillChange.sink { [weak self] _ in
@@ -246,7 +246,7 @@ final class AppModel: ObservableObject {
             self?.objectWillChange.send()
         }.store(in: &cancellables)
 
-        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
+        updateAIReachabilityStatus(state: settings.isAIPromptActive ? .untested : .disabled)
     }
 
     var activeSourceID: String? {
@@ -533,7 +533,7 @@ final class AppModel: ObservableObject {
     }
 
     func setAIEnabled(_ enabled: Bool) {
-        let wasActive = settings.isFactCheckActive
+        let wasActive = settings.isAIPromptActive
         objectWillChange.send()
         var promptTemplates = settings.aiPromptTemplates
         for index in promptTemplates.indices {
@@ -547,7 +547,7 @@ final class AppModel: ObservableObject {
     func updateLLMEndpoint(_ endpoint: LLMEndpointConfiguration) {
         objectWillChange.send()
         settings.updateLLMEndpoint(endpoint)
-        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
+        updateAIReachabilityStatus(state: settings.isAIPromptActive ? .untested : .disabled)
     }
 
     func addLLMEndpoint() {
@@ -559,7 +559,7 @@ final class AppModel: ObservableObject {
             "beforeCount": beforeCount,
             "afterCount": afterCount
         ])
-        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
+        updateAIReachabilityStatus(state: settings.isAIPromptActive ? .untested : .disabled)
     }
 
     func removeLLMEndpoint(id: String) {
@@ -567,7 +567,7 @@ final class AppModel: ObservableObject {
         objectWillChange.send()
         settings.removeLLMEndpoint(id: id)
         Trace.event("settings.llmRemoved", ["llm": llmName])
-        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
+        updateAIReachabilityStatus(state: settings.isAIPromptActive ? .untested : .disabled)
     }
 
     func setSelectedLLMEndpointID(_ id: String) {
@@ -575,7 +575,7 @@ final class AppModel: ObservableObject {
         settings.selectedLLMEndpointID = id
         let llmName = settings.llmEndpoint(id: id)?.displayName ?? "unknown"
         Trace.event("settings.selectedLLMChanged", ["llm": llmName])
-        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
+        updateAIReachabilityStatus(state: settings.isAIPromptActive ? .untested : .disabled)
     }
 
     func setUseGlobalPromptLLM(_ enabled: Bool) {
@@ -585,7 +585,7 @@ final class AppModel: ObservableObject {
             "enabled": enabled,
             "llm": settings.globalPromptLLMEndpoint.displayName
         ])
-        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
+        updateAIReachabilityStatus(state: settings.isAIPromptActive ? .untested : .disabled)
     }
 
     func setGlobalPromptLLMEndpointID(_ id: String) {
@@ -593,7 +593,7 @@ final class AppModel: ObservableObject {
         settings.globalPromptLLMEndpointID = id
         let llmName = settings.llmEndpoint(id: id)?.displayName ?? "unknown"
         Trace.event("settings.globalPromptLLMChanged", ["llm": llmName])
-        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
+        updateAIReachabilityStatus(state: settings.isAIPromptActive ? .untested : .disabled)
     }
 
     func setAIPromptEnabled(id: String, enabled: Bool) {
@@ -601,7 +601,7 @@ final class AppModel: ObservableObject {
             return
         }
 
-        let wasActive = settings.isFactCheckActive
+        let wasActive = settings.isAIPromptActive
         objectWillChange.send()
         promptTemplate.isEnabled = enabled
         settings.updateAIPromptTemplate(promptTemplate)
@@ -614,14 +614,14 @@ final class AppModel: ObservableObject {
     }
 
     func updateAIPromptTemplate(_ promptTemplate: AIPromptTemplateConfiguration) {
-        let wasActive = settings.isFactCheckActive
+        let wasActive = settings.isAIPromptActive
         objectWillChange.send()
         settings.updateAIPromptTemplate(promptTemplate)
         handleAIActivationChange(wasActive: wasActive, reason: "promptSettings")
     }
 
     func addAIPromptTemplate() {
-        let wasActive = settings.isFactCheckActive
+        let wasActive = settings.isAIPromptActive
         objectWillChange.send()
         let beforeCount = settings.aiPromptTemplates.count
         settings.addAIPromptTemplate()
@@ -638,10 +638,10 @@ final class AppModel: ObservableObject {
         objectWillChange.send()
         settings.removeAIPromptTemplate(id: id)
         Trace.event("settings.aiPromptRemoved", ["promptTemplate": promptName])
-        if !settings.isFactCheckActive {
-            factCheck.reset()
+        if !settings.isAIPromptActive {
+            aiPrompt.reset()
         }
-        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
+        updateAIReachabilityStatus(state: settings.isAIPromptActive ? .untested : .disabled)
     }
 
     func resetAIPromptTemplate(id: String) {
@@ -649,7 +649,7 @@ final class AppModel: ObservableObject {
         settings.resetAIPromptTemplate(id: id)
         let promptName = settings.aiPromptTemplates.first { $0.id == id }?.displayName ?? "unknown"
         Trace.event("settings.aiPromptReset", ["promptTemplate": promptName])
-        updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
+        updateAIReachabilityStatus(state: settings.isAIPromptActive ? .untested : .disabled)
     }
 
     func setJevQueryEnabled(id: String, enabled: Bool) {
@@ -689,10 +689,10 @@ final class AppModel: ObservableObject {
     }
 
     private func handleAIActivationChange(wasActive: Bool, reason: String) {
-        guard settings.isFactCheckActive else {
+        guard settings.isAIPromptActive else {
             aiReachabilityTask?.cancel()
             aiReachabilityTask = nil
-            factCheck.reset()
+            aiPrompt.reset()
             updateAIReachabilityStatus(state: .disabled, detail: "No AI prompts are enabled.")
             return
         }
@@ -704,7 +704,7 @@ final class AppModel: ObservableObject {
     }
 
     var activeAIOptionDescription: String {
-        guard settings.isFactCheckActive else {
+        guard settings.isAIPromptActive else {
             return "AI disabled"
         }
 
@@ -732,7 +732,7 @@ final class AppModel: ObservableObject {
     func testActiveAIReachability(reason: String = "manual") {
         aiReachabilityTask?.cancel()
 
-        guard settings.isFactCheckActive else {
+        guard settings.isAIPromptActive else {
             updateAIReachabilityStatus(state: .disabled, detail: "No AI prompts are enabled.")
             return
         }
@@ -747,7 +747,7 @@ final class AppModel: ObservableObject {
         aiReachabilityTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let response = try await OllamaFactCheckService(timeout: 15).generate(
+                let response = try await OllamaAIPromptService(timeout: 15).generate(
                     prompt: "Hello, what is 10 * 20?",
                     llm: endpoint,
                     traceEvent: "llm.health.request.started"
@@ -835,7 +835,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func testSelectedLLMFactCheck() {
+    func testSelectedLLMAIPrompt() {
         Task { [weak self] in
             guard let self else { return }
             let promptTemplate = self.settings.enabledAIPromptTemplates.first
@@ -843,11 +843,11 @@ final class AppModel: ObservableObject {
                 ?? AIPromptTemplateConfiguration.defaultConfiguration(llmEndpointID: self.settings.selectedLLMEndpointID)
             let llm = self.settings.effectiveLLMEndpoint(for: promptTemplate)
             do {
-                let result = try await OllamaFactCheckService(timeout: 15).factCheck(
+                let result = try await OllamaAIPromptService(timeout: 15).evaluate(
                     sentence: "The Earth orbits the Sun.",
                     llm: llm,
                     promptTemplate: promptTemplate.template,
-                    promptContext: FactCheckPromptContext(entries: [
+                    promptContext: AIPromptPromptContext(entries: [
                         .init(timestamp: Date(), text: "The Earth orbits the Sun.")
                     ])
                 )
@@ -864,7 +864,7 @@ final class AppModel: ObservableObject {
             let llm = self.settings.selectedLLMEndpoint
             let prompt = "Hello, what is 10 * 20?"
             do {
-                let response = try await OllamaFactCheckService(timeout: 15).generate(prompt: prompt, llm: llm)
+                let response = try await OllamaAIPromptService(timeout: 15).generate(prompt: prompt, llm: llm)
                 let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
                 self.userMessage = "\(llm.displayName) replied: \(trimmed.isEmpty ? "(empty response)" : trimmed)"
             } catch {
@@ -978,7 +978,7 @@ final class AppModel: ObservableObject {
                 Trace.event("transcribe.capture.ensuring", ["source": source.name])
                 try await self.ensureCapture(for: source)
                 self.transcriptSourceName = source.name
-                self.factCheck.reset()
+                self.aiPrompt.reset()
                 self.jev.reset()
                 self.summary.reset()
                 self.diarization.reset()
@@ -1234,7 +1234,7 @@ final class AppModel: ObservableObject {
             context: context,
             finalizedSegments: transcription.segments,
             speakerSegments: diarization.segments,
-            factChecks: factCheck.items,
+            aiPrompts: aiPrompt.items,
             jevResults: jev.items,
             summaryParagraphs: summary.paragraphs
         )
@@ -1280,7 +1280,7 @@ final class AppModel: ObservableObject {
         let promptStates = settings.effectiveAIPromptTemplates.map {
             MarkdownExportPromptState(
                 promptName: $0.displayName,
-                state: factCheck.promptState(for: $0.id)
+                state: aiPrompt.promptState(for: $0.id)
             )
         }
         let jevQueryDetails = settings.jevQueries
@@ -1296,14 +1296,13 @@ final class AppModel: ObservableObject {
             endDate: session?.endDate ?? fallbackEnd,
             exportedAt: Date(),
             transcriptionEngine: transcription.engineName,
-            aiEnabled: settings.isFactCheckActive,
-            factCheckEnabled: settings.isFactCheckActive,
+            aiPromptEnabled: settings.isAIPromptActive,
             llmName: selectedLLM.displayName,
             llmProvider: selectedLLM.provider.displayName,
             llmEndpoint: selectedLLM.endpoint,
             llmModel: selectedLLM.model,
             promptStates: promptStates,
-            factCheckPrompt: promptTemplateDetails,
+            aiPromptPrompt: promptTemplateDetails,
             summaryPrompt: settings.summaryPrompt,
             jevEnabled: settings.isJevActive,
             jevBaseURL: settings.jevBaseURL,
@@ -1441,7 +1440,7 @@ final class AppModel: ObservableObject {
             do {
                 try await self.transcription.start()
                 let diarizationReady = await self.startDiarization(sourceName: source.name, addLiveConsumer: false)
-                self.factCheck.reset()
+                self.aiPrompt.reset()
                 self.jev.reset()
                 self.summary.reset()
                 Trace.event("fileTranscribe.started", [

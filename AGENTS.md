@@ -28,7 +28,7 @@ Use this as the quick operating guide before making changes in this repo.
 - Preserve Apple Speech as the main transcription path unless the request is explicitly about changing transcription engines.
 - Keep diarization best-effort and nonblocking so transcript text appears as soon as Apple Speech produces it.
 - Copy audio buffers before handing them to async consumers.
-- Keep visible UI labels on "AI Processing"; only use historical `FactCheck` names when referring to existing type or trace names.
+- Keep visible UI labels on "AI Processing". The code was renamed off the historical `FactCheck` naming in v2.4.41 (`AIPromptService.swift`, `AIPromptCoordinator`, etc.) to match; do not reintroduce `FactCheck`-prefixed names.
 - Keep prompt-state processing serial per prompt template.
 - Use existing SwiftUI patterns in `Views.swift` and app orchestration patterns in `AppModel.swift`.
 
@@ -38,7 +38,7 @@ Any feature that produces a per-sentence or per-item result — AI Processing an
 
 1. **Settings tab** (`SettingsView` in `Views.swift`) — where the feature is configured.
 2. **Sidebar section** (`ContentView.sourceList` in `Views.swift`) — where each item is enabled/disabled.
-3. **Transcript-row rendering** (`TranscriptFactCheckPanel.transcriptRows` in `Views.swift`) — where live results are shown.
+3. **Transcript-row rendering** (`TranscriptAIPromptPanel.transcriptRows` in `Views.swift`) — where live results are shown.
 4. **Markdown export** (`MarkdownExportService.swift`, wired from `AppModel.saveTranscriptMarkdownToFile`) — where results are written to the exported record.
 
 Pillar 4 is the one most likely to be missed: it is a separate call site, invoked by a save-panel button handler, not part of the live SwiftUI view tree the other three pillars share — so implementing 1–3 by mirroring existing UI will not naturally lead you to it. This happened for real with the initial Jev integration (v2.4.39; fixed in the next release) — treat that as the standing example of what "forgot a pillar" looks like, not a hypothetical.
@@ -56,3 +56,16 @@ When planning a new per-sentence/per-item result feature, name all four pillars 
 - Check `git status -sb` before editing and before committing.
 - Do not revert unrelated changes.
 - Commit only once the build and relevant tests pass, or clearly note any verification that could not be run.
+- There is one shared working tree per checkout — uncommitted changes (staged or not) follow you across `git checkout`, they don't stay "on" the branch you made them on. Before switching away from a branch with uncommitted work you want to keep separate, `git stash push` it first (and `git stash pop` it back after returning), rather than assuming the other branch's working tree will be clean.
+
+## Close Out Task
+
+Run this only when the user explicitly asks to close out, finish, or ship the current task — never automatically at the end of a change, and never merge or push without being asked (see Branching).
+
+1. **Update docs.** Add a new numbered section to `IMPLEMENTATION.md` describing what changed. Add a row to `ARCHITECTURE.md`'s Version History table, and update any architecture prose the change affects (diagram, pipeline description, key design decisions, file table). Update `REQUIREMENTS.md` if product/UI behavior changed.
+2. **Bump the version.** `CFBundleShortVersionString` and `CFBundleVersion` in `Resources/Info.plist`, matching the version/build named in the `IMPLEMENTATION.md`/`ARCHITECTURE.md` entries from step 1.
+3. **Verify.** Run `swift test` (all tests pass) and `./build.sh` (clean build, no new warnings). Do not proceed to committing on a failing build or failing tests.
+4. **Check in changes.** Stage and commit. New files under `Sources/VoiceTranscribe/` need `git add -f <path>` — `.gitignore`'s `sources/` entry matches `Sources/` too on this case-insensitive filesystem, so `git status` won't even list a new file there as untracked. Write a commit message explaining why, not just what.
+5. **Merge to `main`.** `git checkout main`, `git fetch origin main` and confirm it still matches `origin/main` before merging (someone else, or you in an earlier session, may have moved it). `git merge --no-ff <branch> -m "Merge <description>"` — this repo's history uses explicit merge commits, not fast-forwards or squashes.
+6. **Tag the release.** `git tag -a v<version> -m "v<version> - <one-line summary>"`.
+7. **Push.** `git push origin main --follow-tags`.

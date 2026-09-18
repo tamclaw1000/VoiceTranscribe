@@ -2008,3 +2008,45 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`, no new warnings.
 - [x] Bump `CFBundleShortVersionString` to `2.4.40`.
 - [x] Bump `CFBundleVersion` to `83`.
+
+## 103. v2.4.41. Rename FactCheck Naming to AIPrompt
+
+### 103a. Motivation
+
+- `FactCheck`-prefixed names have been a known, deliberately-accepted piece of technical debt since early on (see `ARCHITECTURE.md`'s "AI Processing Labels" gotcha): the user-facing feature has always been called "AI Processing" in the UI, but the underlying Swift types, file, trace events, and test names still said `FactCheck` from when the feature started as a narrower fact-checking prompt. User requested paying this down, with naming options reviewed before implementing (chosen: the `AIPrompt` prefix, extending `AIPromptTemplateConfiguration`'s existing naming rather than introducing a new prefix).
+
+### 103b. Rename Scope
+
+- [x] `Sources/VoiceTranscribe/FactCheckService.swift` → `AIPromptService.swift` (`git mv`).
+- [x] Two-pass case-sensitive rename (`FactCheck`→`AIPrompt`, `factCheck`→`aiPrompt`) across `AIPromptService.swift`, `AppModel.swift`, `AppSettings.swift`, `Views.swift`, `MarkdownExportService.swift`, `JevService.swift`, `SummaryService.swift`, and `Tests/VoiceTranscribeTests/VoiceTranscribeTests.swift`. Covers every type (`FactCheckState`→`AIPromptState`, `FactCheckItem`→`AIPromptItem`, `FactCheckResult`→`AIPromptResult`, `FactCheckCoordinator`→`AIPromptCoordinator`, `FactCheckVerdict`/`FactCheckConfidence`, `FactCheckPrompt`→`AIPromptPrompt`, `FactCheckPromptContext`→`AIPromptPromptContext`, `BatchFactCheckPrompt`→`BatchAIPromptPrompt`, `FactCheckError`, `OllamaFactCheckService`→`OllamaAIPromptService`, `TranscriptFactCheckPanel`→`TranscriptAIPromptPanel`), every property/function name, every test name, and every `factCheck.*` trace event (now `aiPrompt.*`, matching Jev's `jev.*` convention).
+- [x] Protocol methods `factCheck(...)`/`factCheckBatch(...)` further renamed to `evaluate(...)`/`evaluateBatch(...)` (not just mechanically to `aiPrompt`/`aiPromptBatch`) to match `JevService`'s `evaluate(...)` naming and read correctly as verbs at call sites.
+- [x] Split the shared per-row detail renderer in `Views.swift`: the generic `label:badge:color:text:` renderer (used by both AI Processing and Jev rows) is now `resultDetail(...)`, distinct from the AI-Prompt-specific `aiPromptDetail(for: AIPromptItem)` overload — previously both were confusingly named `factCheckDetail`/`aiPromptDetail` even when rendering Jev output.
+- [x] `AIPromptTemplateConfiguration` (settings/config layer) was already correctly named and left untouched, along with its persisted `aiPromptTemplatesJSON` storage and `defaultID`/`defaultName` constant values (never compared against persisted data, safe to leave as literal strings).
+
+### 103c. Dead Legacy Settings Removed
+
+- Investigated whether `@AppStorage("factCheckEnabled")`, `@AppStorage("aiEnabled")`, `@AppStorage("ollamaFactCheckPrompt")` needed a migration to renamed keys. Found they're dead: read only inside `migratePromptTemplatesIfNeeded()` (already a no-op for any user whose `aiPromptTemplatesJSON` is populated — true for all real users at this point) and a defensive getter fallback, never bound to any UI control. No real user data depends on them.
+- [x] Removed `aiEnabled`, `factCheckEnabled` (→ `aiPromptEnabled` post-sed), `ollamaFactCheckPrompt` (→ `ollamaAIPromptPrompt` post-sed) `@AppStorage` properties/keys entirely, and dead code `resetFactCheckPrompt()` (→ `resetAIPromptPrompt()`, never called anywhere). The getter fallback and migration seed now use `AIPromptTemplateConfiguration.defaultConfiguration`'s own static defaults directly instead of reading from now-removed properties.
+- [x] Removed the redundant duplicate `MarkdownExportContext.aiEnabled`/`.factCheckEnabled` (→ `.aiPromptEnabled` post-sed) field pair — both were always populated with the identical `settings.isAIPromptActive` value, but only one was ever read in the rendered output. Kept the one that's actually used, `aiPromptEnabled`.
+- [x] `Sources/VoiceTranscribe/AppSettings.swift`'s `isFactCheckActive` → `isAIPromptActive` (mechanical, part of the same sed pass).
+
+### 103d. Documentation
+
+- [x] `AGENTS.md` (symlinked as `CLAUDE.md`): removed the "only use historical FactCheck names" carve-out (no longer applies), updated the Feature Surface Checklist's `TranscriptFactCheckPanel` reference to `TranscriptAIPromptPanel`.
+- [x] `ARCHITECTURE.md`: updated the architecture diagram, pipeline description, "AI Processing Labels" gotcha, trace event list (also documented Jev's `jev.*` events, which were missing), and file table.
+- [x] `REQUIREMENTS.md`, `CHECKPOINT.md`: updated file/type references. `APPLICATION-REVIEW.md` and past `IMPLEMENTATION.md` entries intentionally left untouched — they're dated historical records of what was named at the time, not living documentation.
+
+### 103e. Tests and Version
+
+- [x] Verify `swift test` passes (59 tests, all renamed, all passing after fixing two spots the mechanical sed pass missed: `JevService.swift`/`SummaryService.swift`'s `FactCheckCoordinator.completeSentences`/`.normalizedSentence` calls, and the test file's fake-service `evaluateBatch` conformance).
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`, no new warnings.
+- [x] Bump `CFBundleShortVersionString` to `2.4.41`.
+- [x] Bump `CFBundleVersion` to `84`.
+
+## 104. v2.4.41. Agent Process: Close Out Task, gitignore Cleanup
+
+Small additions folded into the same v2.4.41 branch/release rather than a separate version bump, since they're process/hygiene only and carry no app behavior change.
+
+- [x] `.gitignore`: added `VT-exports/` (the user's real recordings/transcripts output folder, which had been sitting untracked without an explicit ignore rule) and `sessions/` (this session's own log directory, see `sessions/claude-20260918--074005.md`).
+- [x] `AGENTS.md` (symlinked as `CLAUDE.md`): added a **Close Out Task** section codifying the update-docs → bump-version → verify → commit → merge → tag → push sequence this session had been running manually each release, explicitly scoped to only run when the user asks for it. Also added a Git Hygiene note about the single-shared-working-tree gotcha (uncommitted changes follow `git checkout` across branches; stash before switching away from work you want to keep separate) — hit more than once this session.
+- No test/build impact (documentation and `.gitignore` only).

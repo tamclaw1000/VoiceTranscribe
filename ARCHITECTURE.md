@@ -202,6 +202,7 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.38 | 81 | Hid the per-row "AI Processing: Disabled" block from the transcript when no AI Processing prompt templates are enabled |
 | 2.4.37 | 80 | Widened the transcribe restart cooldown from 0.3s to 2.0s after build 79's shorter cooldown failed to prevent a repeat of the same SIGSEGV crash; confirmed fixed against a live repro |
 | 2.4.36 | 79 | Added a 0.3s cooldown before a transcribe restart re-engages capture, to mitigate a SIGSEGV crash in AppKit hit-testing triggered by rapid stop→restart state churn (insufficient, see 2.4.37) |
 | 2.4.35 | 78 | Pinned the main NavigationSplitView to keep the left source sidebar visible alongside the right voice pane |

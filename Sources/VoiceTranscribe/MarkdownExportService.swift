@@ -16,6 +16,10 @@ struct MarkdownExportContext {
     var promptStates: [MarkdownExportPromptState] = []
     var factCheckPrompt: String
     var summaryPrompt: String
+    var jevEnabled: Bool = false
+    var jevBaseURL: String = ""
+    var jevModel: String = ""
+    var jevQueryDetails: String = ""
     var audioURL: URL?
     var transcriptURL: URL?
     var metadataURL: URL?
@@ -32,6 +36,7 @@ enum MarkdownExportService {
         finalizedSegments: [TranscriptSegment],
         speakerSegments: [SpeakerDiarizationSegment] = [],
         factChecks: [FactCheckItem],
+        jevResults: [JevResultItem] = [],
         summaryParagraphs: [String],
         calendar: Calendar = .current
     ) -> String {
@@ -49,16 +54,17 @@ enum MarkdownExportService {
 
         lines.append("# RECORDING")
         lines.append("")
-        lines.append("| date time | length | speaker | text | AI result |")
-        lines.append("| --- | ---: | --- | --- | --- |")
+        lines.append("| date time | length | speaker | text | AI result | Jev result |")
+        lines.append("| --- | ---: | --- | --- | --- | --- |")
         for (index, segment) in finalizedSegments.enumerated() {
             let end = nextTimestamp(after: index, in: finalizedSegments) ?? context.endDate
             let length = segmentLengthText(start: segment.timestamp, end: end)
             let aiResult = factCheckText(for: segment, factChecks: factChecks)
-            lines.append("| \(tableCell(dateTimeText(segment.timestamp, calendar: calendar))) | \(tableCell(length)) | \(tableCell(speakerText(segment))) | \(tableCell(segment.text)) | \(tableCell(aiResult)) |")
+            let jevResult = jevText(for: segment, jevResults: jevResults)
+            lines.append("| \(tableCell(dateTimeText(segment.timestamp, calendar: calendar))) | \(tableCell(length)) | \(tableCell(speakerText(segment))) | \(tableCell(segment.text)) | \(tableCell(aiResult)) | \(tableCell(jevResult)) |")
         }
         if finalizedSegments.isEmpty {
-            lines.append("| | | | No finalized transcript text. | |")
+            lines.append("| | | | No finalized transcript text. | | |")
         }
 
         appendSpeakerTimeline(
@@ -80,6 +86,11 @@ enum MarkdownExportService {
             to: &lines,
             context: context,
             summary: summary
+        )
+
+        appendJevResults(
+            to: &lines,
+            context: context
         )
 
         let fileLines = fileReferenceLines(context: context)
@@ -118,6 +129,20 @@ enum MarkdownExportService {
         appendPromptStates(context.promptStates, to: &lines)
         appendPromptSection(title: "AI Processing Prompts", prompt: context.factCheckPrompt, to: &lines)
         appendPromptSection(title: "Summary Prompt", prompt: context.summaryPrompt, to: &lines)
+    }
+
+    private static func appendJevResults(
+        to lines: inout [String],
+        context: MarkdownExportContext
+    ) {
+        lines.append("")
+        lines.append("# JEV RESULTS")
+        lines.append("")
+        lines.append("- Jev enabled: \(context.jevEnabled ? "Yes" : "No")")
+        lines.append("- Jev base URL: \(context.jevBaseURL)")
+        lines.append("- Jev model: \(context.jevModel)")
+
+        appendPromptSection(title: "Jev Queries", prompt: context.jevQueryDetails, to: &lines)
     }
 
     private static func appendSpeakerTimeline(
@@ -308,6 +333,45 @@ enum MarkdownExportService {
         })
 
         return factChecks.filter { item in
+            let normalizedItem = FactCheckCoordinator.normalizedSentence(item.sentence)
+            return normalizedItem == normalizedSegment
+                || normalizedSentences.contains(normalizedItem)
+                || segmentText.localizedCaseInsensitiveContains(item.sentence)
+        }
+    }
+
+    private static func jevText(for item: JevResultItem) -> String {
+        let prefix = item.queryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? ""
+            : "\(item.queryName): "
+        switch item.state {
+        case .queued:
+            return "\(prefix)Queued"
+        case .checking:
+            return "\(prefix)Checking"
+        case .failed(let message):
+            return "\(prefix)Failed: \(message)"
+        case .completed(let answer):
+            return "\(prefix)\(answer.displayText)"
+        }
+    }
+
+    private static func jevText(for segment: TranscriptSegment, jevResults: [JevResultItem]) -> String {
+        let matches = jevResultsForSegment(segment, jevResults: jevResults)
+        guard !matches.isEmpty else {
+            return ""
+        }
+        return matches.map { jevText(for: $0) }.joined(separator: "\n\n")
+    }
+
+    private static func jevResultsForSegment(_ segment: TranscriptSegment, jevResults: [JevResultItem]) -> [JevResultItem] {
+        let segmentText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSegment = FactCheckCoordinator.normalizedSentence(segmentText)
+        let normalizedSentences = Set(FactCheckCoordinator.completeSentences(in: segmentText).map {
+            FactCheckCoordinator.normalizedSentence($0)
+        })
+
+        return jevResults.filter { item in
             let normalizedItem = FactCheckCoordinator.normalizedSentence(item.sentence)
             return normalizedItem == normalizedSegment
                 || normalizedSentences.contains(normalizedItem)

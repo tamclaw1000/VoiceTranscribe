@@ -4,6 +4,28 @@ enum JevAnswer: Equatable {
     case noul(probability: Double)
     case choice(selected: String, confidence: Double, probabilities: [String: Double])
     case score(value: Double, confidence: Double, legend: [String: String], probabilities: [String: Double])
+
+    /// Human-readable summary shared by the transcript row UI and the Markdown export,
+    /// so the two never drift apart.
+    var displayText: String {
+        switch self {
+        case .noul(let probability):
+            let percent = Int((probability * 100).rounded())
+            let hint = probability >= 0.8 || probability <= 0.2 ? "confident" : "ambiguous"
+            return "P(yes): \(percent)% (\(hint))"
+        case .choice(let selected, let confidence, _):
+            let percent = Int((confidence * 100).rounded())
+            return "\(selected) (\(percent)% confidence)"
+        case .score(let value, let confidence, let legend, _):
+            let percent = Int((confidence * 100).rounded())
+            let nearestLevel = Int(value.rounded())
+            var text = String(format: "%.2f (%d%% confidence)", value, percent)
+            if let description = legend["\(nearestLevel)"], !description.isEmpty {
+                text += " — \(description)"
+            }
+            return text
+        }
+    }
 }
 
 enum JevQueryState: Equatable {

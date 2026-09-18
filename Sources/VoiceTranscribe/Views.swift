@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.openSettings) private var openSettings
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var selectedDetailTab: DetailTab = .transcript
 
     private enum DetailTab: Hashable {
@@ -14,12 +15,13 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             VStack(spacing: 0) {
                 sourceList
                 Divider()
                 AppVersionFooter()
             }
+                .navigationSplitViewColumnWidth(min: 250, ideal: 300, max: 360)
                 .navigationTitle("VoiceTranscribe")
                 .toolbar {
                     Button {
@@ -51,6 +53,9 @@ struct ContentView: View {
                 openSettings()
             }
             appModel.testAIReachabilityOnLaunch()
+        }
+        .onAppear {
+            columnVisibility = .all
         }
     }
 
@@ -174,8 +179,10 @@ struct ContentView: View {
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .isEmpty,
                     onCycleSpeaker: appModel.cycleTranscriptSegmentSpeaker,
-                    onSetSpeakerName: appModel.setSpeakerName,
-                    onResetSpeakerName: appModel.resetSpeakerName,
+                    onAssignObservedVoice: appModel.assignTranscriptSegmentIdentity,
+                    onForceNewVoice: appModel.forceNewVoiceForTranscriptSegment,
+                    onSetSpeakerName: appModel.setObservedVoiceName,
+                    onResetSpeakerName: appModel.resetObservedVoiceName,
                     onResetAllSpeakerNames: appModel.resetAllSpeakerNames,
                     onSaveToFile: appModel.saveTranscriptToFile,
                     onExportMarkdown: appModel.saveTranscriptMarkdownToFile,
@@ -850,14 +857,16 @@ private struct TranscriptFactCheckPanel: View {
     @Binding var autoScrollToBottom: Bool
     let hasTranscriptText: Bool
     let onCycleSpeaker: (UUID) -> Void
-    let onSetSpeakerName: (String, String) -> Void
-    let onResetSpeakerName: (String) -> Void
+    let onAssignObservedVoice: (UUID, String, String?) -> Void
+    let onForceNewVoice: (UUID) -> Void
+    let onSetSpeakerName: (String, String?, String) -> Void
+    let onResetSpeakerName: (String, String?) -> Void
     let onResetAllSpeakerNames: () -> Void
     let onSaveToFile: () -> Void
     let onExportMarkdown: () -> Void
     let onCopyText: () -> Void
 
-    @State private var isSpeakerConfigurationExpanded = false
+    @State private var isVoiceIdentificationPaneExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -928,80 +937,108 @@ private struct TranscriptFactCheckPanel: View {
             )
             .help(currentSpeakerHelpText)
 
-            if !speakerNameItems.isEmpty {
-                speakerNameEditor
-            }
+            HStack(spacing: 0) {
+                transcriptTable
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-                        GridRow {
-                            Text("Timestamp")
-                                .frame(width: 76, alignment: .leading)
-                            Text("Speaker")
-                                .frame(width: 150, alignment: .leading)
-                            Text("Text")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                        Divider()
-                            .gridCellColumns(3)
-
-                        if finalized.isEmpty && interim == nil {
-                            ContentUnavailableView(
-                                "No Transcript",
-                                systemImage: "text.bubble",
-                                description: Text("Start transcription to see speech as it is processed.")
-                            )
-                            .frame(maxWidth: .infinity, minHeight: 180)
-                            .gridCellColumns(3)
-                        } else {
-                            ForEach(finalized) { segment in
-                                transcriptRows(
-                                    segment: segment,
-                                    fallbackSpeakerID: currentSpeakerID,
-                                    fallbackSpeakerLabel: currentSpeakerLabel,
-                                    factChecks: factChecks(for: segment),
-                                    isInterim: false
-                                )
-                            }
-                            if let interim {
-                                transcriptRows(
-                                    segment: interim,
-                                    fallbackSpeakerID: currentSpeakerID,
-                                    fallbackSpeakerLabel: currentSpeakerLabel,
-                                    factChecks: [],
-                                    isInterim: true
-                                )
-                            }
-                        }
-
-                        Color.clear
-                            .frame(height: 1)
-                            .id(Self.bottomScrollID)
-                            .gridCellColumns(3)
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom)
-                }
-                .onChange(of: finalized.count) { _, _ in
-                    scrollToBottom(proxy)
-                }
-                .onChange(of: interim?.text ?? "") { _, _ in
-                    scrollToBottom(proxy)
+                if !speakerNameItems.isEmpty {
+                    Divider()
+                    voiceIdentificationSidePane
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding()
     }
 
-    private var speakerNameEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            DisclosureGroup(isExpanded: $isSpeakerConfigurationExpanded) {
-                VStack(alignment: .leading, spacing: 8) {
+    private var transcriptTable: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                    GridRow {
+                        Text("Timestamp")
+                            .frame(width: 76, alignment: .leading)
+                        Text("Speaker")
+                            .frame(width: 150, alignment: .leading)
+                        Text("Text")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                    Divider()
+                        .gridCellColumns(3)
+
+                    if finalized.isEmpty && interim == nil {
+                        ContentUnavailableView(
+                            "No Transcript",
+                            systemImage: "text.bubble",
+                            description: Text("Start transcription to see speech as it is processed.")
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 180)
+                        .gridCellColumns(3)
+                    } else {
+                        ForEach(finalized) { segment in
+                            transcriptRows(
+                                segment: segment,
+                                fallbackSpeakerID: currentSpeakerID,
+                                fallbackSpeakerLabel: currentSpeakerLabel,
+                                factChecks: factChecks(for: segment),
+                                isInterim: false
+                            )
+                        }
+                        if let interim {
+                            transcriptRows(
+                                segment: interim,
+                                fallbackSpeakerID: currentSpeakerID,
+                                fallbackSpeakerLabel: currentSpeakerLabel,
+                                factChecks: [],
+                                isInterim: true
+                            )
+                        }
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.bottomScrollID)
+                        .gridCellColumns(3)
+                }
+                .padding(.horizontal)
+                .padding(.bottom)
+            }
+            .onChange(of: finalized.count) { _, _ in
+                scrollToBottom(proxy)
+            }
+            .onChange(of: interim?.text ?? "") { _, _ in
+                scrollToBottom(proxy)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var voiceIdentificationSidePane: some View {
+        Group {
+            if isVoiceIdentificationPaneExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Label("Voice Identification", systemImage: "person.wave.2")
+                            .font(.caption.weight(.semibold))
+                        Text("\(speakerNameItems.count)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            isVoiceIdentificationPaneExpanded = false
+                        } label: {
+                            Image(systemName: "sidebar.right")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Collapse voice identification")
+                    }
+
                     HStack {
+                        Text(speakerNameItems.contains(where: \.hasCustomName) ? "Custom names" : "Generated labels")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Spacer()
                         Button {
                             onResetAllSpeakerNames()
@@ -1010,70 +1047,96 @@ private struct TranscriptFactCheckPanel: View {
                         }
                         .font(.caption)
                         .disabled(!speakerNameItems.contains(where: \.hasCustomName))
-                        .help("Reset all speaker names to their generated Speaker N labels")
+                        .help("Reset all voice names to their generated labels")
                     }
 
-                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
-                        ForEach(speakerNameItems) { item in
-                            GridRow {
-                                Text(item.speakerID)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(speakerColor(for: item.speakerID))
-                                    .lineLimit(1)
-                                    .frame(width: 88, alignment: .leading)
-
-                                TextField(
-                                    item.speakerID,
-                                    text: Binding(
-                                        get: { item.customName },
-                                        set: { onSetSpeakerName(item.speakerID, $0) }
-                                    )
-                                )
-                                .textFieldStyle(.roundedBorder)
-                                .frame(minWidth: 140, maxWidth: 260)
-                                .help("Enter a display name for \(item.speakerID)")
-
-                                Text(item.displayName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                                Button {
-                                    onResetSpeakerName(item.speakerID)
-                                } label: {
-                                    Image(systemName: "arrow.counterclockwise")
-                                }
-                                .buttonStyle(.borderless)
-                                .disabled(!item.hasCustomName)
-                                .help("Reset \(item.speakerID) to its generated name")
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 10) {
+                            ForEach(speakerNameItems) { item in
+                                voiceIdentificationRow(item)
                             }
                         }
+                        .padding(.vertical, 2)
                     }
                 }
-                .padding(.top, 8)
-            } label: {
-                HStack(spacing: 8) {
-                    Label("Speaker Configuration", systemImage: "person.2")
-                        .font(.caption.weight(.semibold))
-                    Text("\(speakerNameItems.count) detected")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if speakerNameItems.contains(where: \.hasCustomName) {
-                        Text("custom names")
-                            .font(.caption)
+                .padding(10)
+                .frame(width: 330)
+                .frame(maxHeight: .infinity, alignment: .topLeading)
+                .background(.quaternary.opacity(0.22))
+            } else {
+                Button {
+                    isVoiceIdentificationPaneExpanded = true
+                } label: {
+                    VStack(spacing: 8) {
+                        Image(systemName: "person.wave.2")
+                        Text("Voices")
+                            .font(.caption2.weight(.semibold))
+                            .rotationEffect(.degrees(-90))
+                            .fixedSize()
+                        Text("\(speakerNameItems.count)")
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+                    .frame(width: 34)
+                    .frame(maxHeight: .infinity)
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .background(.quaternary.opacity(0.22))
+                .help("Expand voice identification")
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.15))
-        )
+    }
+
+    private func voiceIdentificationRow(_ item: SpeakerNameEditorItem) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(item.observedLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(speakerColor(for: item.speakerID))
+                    .lineLimit(1)
+
+                Spacer()
+
+                Button {
+                    onResetSpeakerName(item.speakerID, item.voiceID)
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(!item.hasCustomName)
+                .help("Reset \(item.observedLabel) to its generated name")
+            }
+
+            TextField(
+                item.observedLabel,
+                text: Binding(
+                    get: { item.customName },
+                    set: { onSetSpeakerName(item.speakerID, item.voiceID, $0) }
+                )
+            )
+            .textFieldStyle(.roundedBorder)
+            .help("Enter a display name for \(item.observedLabel)")
+
+            Text(voiceStatsText(item))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    private func voiceStatsText(_ item: SpeakerNameEditorItem) -> String {
+        var parts: [String] = []
+        if item.hasCustomName {
+            parts.append(item.displayName)
+        }
+        if item.segmentCount > 0 {
+            parts.append("\(item.segmentCount) segment\(item.segmentCount == 1 ? "" : "s")")
+        }
+        if item.totalDuration > 0 {
+            parts.append(String(format: "%.1fs", item.totalDuration))
+        }
+        return parts.isEmpty ? item.displayName : parts.joined(separator: " - ")
     }
 
     @ViewBuilder
@@ -1092,8 +1155,32 @@ private struct TranscriptFactCheckPanel: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 76, alignment: .leading)
 
-            Button {
-                onCycleSpeaker(segment.id)
+            Menu {
+                ForEach(speakerNameItems) { item in
+                    Button {
+                        onAssignObservedVoice(segment.id, item.speakerID, item.voiceID)
+                    } label: {
+                        Text(item.displayName)
+                    }
+                    .help("Assign this row to \(item.observedLabel)")
+                }
+
+                if !speakerNameItems.isEmpty {
+                    Divider()
+                }
+
+                Button {
+                    onForceNewVoice(segment.id)
+                } label: {
+                    Label("Force New Voice", systemImage: "plus.circle")
+                }
+
+                Button {
+                    onCycleSpeaker(segment.id)
+                } label: {
+                    Label("Cycle Voice", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(speakerNameItems.isEmpty)
             } label: {
                 Text(speakerLabel ?? "Detecting")
                     .font(.caption.weight(.semibold))
@@ -1102,10 +1189,9 @@ private struct TranscriptFactCheckPanel: View {
             }
             .buttonStyle(SpeakerLabelButtonStyle(color: speakerColor(for: speakerID ?? speakerLabel)))
             .frame(width: 150, alignment: .leading)
-            .disabled(speakerNameItems.isEmpty)
-            .help(speakerNameItems.isEmpty ? "No detected speakers to cycle." : "Click to cycle this row through detected speakers.")
+            .help("Choose an observed voice for this row, or force a new voice.")
             .accessibilityLabel("Speaker \(speakerLabel ?? "Detecting")")
-            .accessibilityHint("Cycles this transcript row through detected speakers.")
+            .accessibilityHint("Opens voice correction options for this transcript row.")
 
             Text(segment.text)
                 .foregroundStyle(isInterim ? .secondary : .primary)

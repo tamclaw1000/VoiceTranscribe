@@ -55,7 +55,7 @@ enum MarkdownExportService {
             let end = nextTimestamp(after: index, in: finalizedSegments) ?? context.endDate
             let length = segmentLengthText(start: segment.timestamp, end: end)
             let aiResult = factCheckText(for: segment, factChecks: factChecks)
-            lines.append("| \(tableCell(dateTimeText(segment.timestamp, calendar: calendar))) | \(tableCell(length)) | \(tableCell(segment.speakerLabel ?? "")) | \(tableCell(segment.text)) | \(tableCell(aiResult)) |")
+            lines.append("| \(tableCell(dateTimeText(segment.timestamp, calendar: calendar))) | \(tableCell(length)) | \(tableCell(speakerText(segment))) | \(tableCell(segment.text)) | \(tableCell(aiResult)) |")
         }
         if finalizedSegments.isEmpty {
             lines.append("| | | | No finalized transcript text. | |")
@@ -134,8 +134,45 @@ enum MarkdownExportService {
         lines.append("| start | end | speaker | confidence |")
         lines.append("| ---: | ---: | --- | ---: |")
         for segment in speakerSegments.sorted(by: { $0.startTime < $1.startTime }) {
-            lines.append("| \(tableCell(timeOffsetText(segment.startTime))) | \(tableCell(timeOffsetText(segment.endTime))) | \(tableCell(segment.speakerLabel)) | \(tableCell(segment.confidence.map { String(format: "%.2f", $0) } ?? "")) |")
+            lines.append("| \(tableCell(timeOffsetText(segment.startTime))) | \(tableCell(timeOffsetText(segment.endTime))) | \(tableCell(speakerText(segment))) | \(tableCell(segment.confidence.map { String(format: "%.2f", $0) } ?? "")) |")
         }
+    }
+
+    private static func speakerText(_ segment: TranscriptSegment) -> String {
+        if let manualName = trimmedNonEmpty(segment.speakerName) {
+            return manualName
+        }
+        if let voiceName = trimmedNonEmpty(segment.voiceName) {
+            if let speakerID = trimmedNonEmpty(segment.speakerID), speakerID != voiceName {
+                return "\(voiceName) (\(speakerID))"
+            }
+            return voiceName
+        }
+        if let voiceID = trimmedNonEmpty(segment.voiceID) {
+            if let speakerID = trimmedNonEmpty(segment.speakerID), speakerID != voiceID {
+                return "\(voiceID) (\(speakerID))"
+            }
+            return voiceID
+        }
+        return trimmedNonEmpty(segment.speakerID) ?? ""
+    }
+
+    private static func speakerText(_ segment: SpeakerDiarizationSegment) -> String {
+        if let manualName = trimmedNonEmpty(segment.speakerName) {
+            return manualName
+        }
+        if let voiceName = trimmedNonEmpty(segment.voiceName), segment.speakerID != voiceName {
+            return "\(voiceName) (\(segment.speakerID))"
+        }
+        if let voiceID = trimmedNonEmpty(segment.voiceID), segment.speakerID != voiceID {
+            return "\(voiceID) (\(segment.speakerID))"
+        }
+        return segment.speakerLabel
+    }
+
+    private static func trimmedNonEmpty(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
     }
 
     private static func appendPromptStates(_ promptStates: [MarkdownExportPromptState], to lines: inout [String]) {

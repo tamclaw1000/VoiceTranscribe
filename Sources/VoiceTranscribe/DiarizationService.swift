@@ -11,10 +11,21 @@ final class DiarizationCoordinator: ObservableObject {
     @Published private(set) var lastError: String?
 
     private var engine: SpeechSwiftSortformerDiarizationEngine?
+    private let voiceIdentity = VoiceIdentityService()
     private var sessionID = UUID()
     private var lastSpeaker: SpeakerDiarizationSegment?
     private var tracedSegmentKeys = Set<String>()
+    private var voiceIdentitySegmentKeys = Set<String>()
+    private var voiceIdentitySkippedKeys = Set<String>()
+    private var voiceIdentities: [String: VoiceIdentityMatch] = [:]
+    private var sessionAudioSamples: [Float] = []
+    private let identitySampleRate = 16_000
+    private let identityLiveEdgeDelay: TimeInterval = 1.2
+    private var hasLoggedVoiceIdentityFailure = false
+    private var diarizationBufferCount = 0
+    private var ignoredDiarizationBufferCount = 0
     private var speakerNames: [String: String] = [:]
+    private var observedVoiceNames: [String: String] = [:]
 
     var currentSpeakerLabel: String? {
         lastSpeaker?.speakerLabel
@@ -51,10 +62,21 @@ final class DiarizationCoordinator: ObservableObject {
         sessionID = UUID()
         lastSpeaker = nil
         tracedSegmentKeys = []
+        voiceIdentitySegmentKeys = []
+        voiceIdentitySkippedKeys = []
+        voiceIdentities = [:]
+        sessionAudioSamples = []
+        hasLoggedVoiceIdentityFailure = false
+        diarizationBufferCount = 0
+        ignoredDiarizationBufferCount = 0
         speakerNames = [:]
+        observedVoiceNames = [:]
         isStarting = false
         isRunning = false
         lastError = nil
+        Task {
+            await voiceIdentity.reset()
+        }
     }
 
     func stop() {
@@ -70,6 +92,7 @@ final class DiarizationCoordinator: ObservableObject {
         isStarting = false
         Task { [weak self] in
             do {
+                await engine.stopAcceptingInput()
                 let finalized = try await engine.finalize()
                 await MainActor.run {
                     guard self?.sessionID == sessionID else {
@@ -94,6 +117,15 @@ final class DiarizationCoordinator: ObservableObject {
 
     func consume(buffer: AVAudioPCMBuffer, time _: AVAudioTime) {
         guard let engine, isRunning else {
+            ignoredDiarizationBufferCount += 1
+            if ignoredDiarizationBufferCount == 1 || ignoredDiarizationBufferCount % 50 == 0 {
+                Trace.event("diarization.bufferIgnored", [
+                    "buffer#": ignoredDiarizationBufferCount,
+                    "reason": engine == nil ? "noEngine" : "notRunning",
+                    "isRunning": isRunning ? "true" : "false",
+                    "isStarting": isStarting ? "true" : "false"
+                ])
+            }
             return
         }
 
@@ -102,6 +134,19 @@ final class DiarizationCoordinator: ObservableObject {
         let sessionID = self.sessionID
         guard !samples.isEmpty else {
             return
+        }
+        appendSessionAudio(samples: samples, sampleRate: sampleRate)
+        diarizationBufferCount += 1
+        if diarizationBufferCount == 1 || diarizationBufferCount % 50 == 0 {
+            let bufferedDuration = TimeInterval(sessionAudioSamples.count) / TimeInterval(identitySampleRate)
+            Trace.event("diarization.bufferConsumed", [
+                "buffer#": diarizationBufferCount,
+                "sampleRate": Int(sampleRate),
+                "channels": Int(buffer.format.channelCount),
+                "frames": Int(buffer.frameLength),
+                "samples": samples.count,
+                "identityBufferedSeconds": String(format: "%.2f", bufferedDuration)
+            ])
         }
 
         Task { [weak self] in
@@ -125,15 +170,25 @@ final class DiarizationCoordinator: ObservableObject {
         }
     }
 
-    func annotationForCurrentSpeaker() -> (id: String, name: String?)? {
+    func annotationForCurrentSpeaker() -> SpeakerAnnotation? {
         guard let lastSpeaker else {
             return nil
         }
-        return (lastSpeaker.speakerID, lastSpeaker.speakerName)
+        return SpeakerAnnotation(
+            speakerID: lastSpeaker.speakerID,
+            speakerName: lastSpeaker.speakerName,
+            voiceID: lastSpeaker.voiceID,
+            voiceName: lastSpeaker.voiceName,
+            voiceConfidence: lastSpeaker.voiceConfidence
+        )
     }
 
     func speakerName(for speakerID: String) -> String? {
         speakerNames[speakerID]
+    }
+
+    func observedVoiceName(speakerID: String, voiceID: String?) -> String? {
+        observedVoiceNames[observedVoiceKey(speakerID: speakerID, voiceID: voiceID)]
     }
 
     func setSpeakerName(speakerID: String, name: String?) {
@@ -151,15 +206,39 @@ final class DiarizationCoordinator: ObservableObject {
         ])
     }
 
+    func setObservedVoiceName(speakerID: String, voiceID: String?, name: String?) {
+        let key = observedVoiceKey(speakerID: speakerID, voiceID: voiceID)
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            observedVoiceNames.removeValue(forKey: key)
+        } else {
+            observedVoiceNames[key] = trimmed
+        }
+
+        applySpeakerNames()
+        Trace.event("diarization.observedVoiceName.updated", [
+            "speakerID": speakerID,
+            "voiceID": voiceID ?? "",
+            "speakerName": observedVoiceNames[key] ?? ""
+        ])
+    }
+
     private func replaceSegments(_ newSegments: [SpeakerDiarizationSegment]) {
         segments = newSegments
             .map { segment in
                 var copy = segment
-                copy.speakerName = speakerNames[segment.speakerID]
+                copy.speakerName = displayName(for: copy)
+                if let identity = voiceIdentities[voiceIdentityKey(segment)] {
+                    copy.voiceID = identity.voiceID
+                    copy.voiceName = identity.voiceName
+                    copy.voiceConfidence = identity.confidence
+                    copy.speakerName = displayName(for: copy)
+                }
                 return copy
             }
             .sorted { $0.startTime < $1.startTime }
         lastSpeaker = segments.max { $0.endTime < $1.endTime }
+        queueVoiceIdentityWork(for: segments)
 
         for segment in segments {
             let key = segmentKey(segment)
@@ -177,16 +256,152 @@ final class DiarizationCoordinator: ObservableObject {
         "\(segment.speakerID)|\(String(format: "%.2f", segment.startTime))|\(String(format: "%.2f", segment.endTime))"
     }
 
+    private func voiceIdentityKey(_ segment: SpeakerDiarizationSegment) -> String {
+        "\(segment.speakerID)|\(String(format: "%.2f", segment.startTime))"
+    }
+
     private func applySpeakerNames() {
         segments = segments.map { segment in
             var copy = segment
-            copy.speakerName = speakerNames[segment.speakerID]
+            copy.speakerName = displayName(for: segment)
             return copy
         }
         if var lastSpeaker {
-            lastSpeaker.speakerName = speakerNames[lastSpeaker.speakerID]
+            lastSpeaker.speakerName = displayName(for: lastSpeaker)
             self.lastSpeaker = lastSpeaker
         }
+    }
+
+    private func displayName(for segment: SpeakerDiarizationSegment) -> String? {
+        observedVoiceNames[observedVoiceKey(speakerID: segment.speakerID, voiceID: segment.voiceID)]
+            ?? speakerNames[segment.speakerID]
+    }
+
+    private func observedVoiceKey(speakerID: String, voiceID: String?) -> String {
+        VoiceIdentityKey.make(speakerID: speakerID, voiceID: voiceID)
+    }
+
+    private func appendSessionAudio(samples: [Float], sampleRate: Double) {
+        let inputRate = Int(sampleRate.rounded())
+        let prepared = inputRate == identitySampleRate
+            ? samples
+            : AudioFileLoader.resample(samples, from: inputRate, to: identitySampleRate)
+        sessionAudioSamples.append(contentsOf: prepared)
+    }
+
+    private func queueVoiceIdentityWork(for segments: [SpeakerDiarizationSegment]) {
+        let bufferedDuration = TimeInterval(sessionAudioSamples.count) / TimeInterval(identitySampleRate)
+        for segment in segments {
+            let key = voiceIdentityKey(segment)
+            guard !voiceIdentitySegmentKeys.contains(key),
+                  segment.endTime <= bufferedDuration - identityLiveEdgeDelay,
+                  segment.endTime > segment.startTime else {
+                continue
+            }
+            let duration = segment.endTime - segment.startTime
+            guard duration >= 2.0 else {
+                if voiceIdentitySkippedKeys.insert(key).inserted {
+                    Trace.event("voiceIdentity.skipped", [
+                        "reason": "tooShort",
+                        "speakerID": segment.speakerID,
+                        "start": String(format: "%.2f", segment.startTime),
+                        "end": String(format: "%.2f", segment.endTime),
+                        "duration": String(format: "%.2f", duration)
+                    ])
+                }
+                continue
+            }
+            guard let audio = audioSlice(start: segment.startTime, end: segment.endTime) else {
+                if voiceIdentitySkippedKeys.insert(key).inserted {
+                    Trace.event("voiceIdentity.skipped", [
+                        "reason": "missingAudio",
+                        "speakerID": segment.speakerID,
+                        "start": String(format: "%.2f", segment.startTime),
+                        "end": String(format: "%.2f", segment.endTime),
+                        "duration": String(format: "%.2f", duration)
+                    ])
+                }
+                continue
+            }
+
+            voiceIdentitySegmentKeys.insert(key)
+            let speakerID = segment.speakerID
+            let sessionID = self.sessionID
+            let sampleRate = identitySampleRate
+            let identityService = voiceIdentity
+            Trace.event("voiceIdentity.queued", [
+                "speakerID": speakerID,
+                "start": String(format: "%.2f", segment.startTime),
+                "end": String(format: "%.2f", segment.endTime),
+                "duration": String(format: "%.2f", duration),
+                "samples": audio.count
+            ])
+            Task { [weak self] in
+                do {
+                    guard let identity = try await identityService.identify(
+                        samples: audio,
+                        sampleRate: sampleRate,
+                        duration: duration
+                    ) else {
+                        return
+                    }
+                    await MainActor.run {
+                        guard self?.sessionID == sessionID else {
+                            return
+                        }
+                        self?.applyVoiceIdentity(identity, key: key, speakerID: speakerID)
+                    }
+                } catch {
+                    await MainActor.run {
+                        guard self?.sessionID == sessionID else {
+                            return
+                        }
+                        if self?.hasLoggedVoiceIdentityFailure == false {
+                            self?.hasLoggedVoiceIdentityFailure = true
+                            Trace.event("voiceIdentity.error", ["error": error.localizedDescription])
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func audioSlice(start: TimeInterval, end: TimeInterval) -> [Float]? {
+        let startIndex = max(0, Int((start * TimeInterval(identitySampleRate)).rounded(.down)))
+        let endIndex = min(sessionAudioSamples.count, Int((end * TimeInterval(identitySampleRate)).rounded(.up)))
+        guard endIndex > startIndex else {
+            return nil
+        }
+        return Array(sessionAudioSamples[startIndex..<endIndex])
+    }
+
+    private func applyVoiceIdentity(_ identity: VoiceIdentityMatch, key: String, speakerID: String) {
+        voiceIdentities[key] = identity
+        segments = segments.map { segment in
+            guard voiceIdentityKey(segment) == key else {
+                return segment
+            }
+            var copy = segment
+            copy.voiceID = identity.voiceID
+            copy.voiceName = identity.voiceName
+            copy.voiceConfidence = identity.confidence
+            copy.speakerName = displayName(for: copy)
+            return copy
+        }
+        if var lastSpeaker, voiceIdentityKey(lastSpeaker) == key {
+            lastSpeaker.voiceID = identity.voiceID
+            lastSpeaker.voiceName = identity.voiceName
+            lastSpeaker.voiceConfidence = identity.confidence
+            lastSpeaker.speakerName = displayName(for: lastSpeaker)
+            self.lastSpeaker = lastSpeaker
+        }
+        Trace.event("voiceIdentity.assigned", [
+            "speakerID": speakerID,
+            "voiceID": identity.voiceID,
+            "voiceName": identity.voiceName,
+            "matchType": identity.confidence == nil ? "new" : "matched",
+            "confidence": identity.confidence.map { String(format: "%.3f", $0) } ?? ""
+        ])
     }
 
     private static func monoFloatSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
@@ -238,6 +453,7 @@ final class DiarizationCoordinator: ObservableObject {
 private actor SpeechSwiftSortformerDiarizationEngine {
     private let targetSampleRate = 16_000
     private var session: SortformerStreamingSession?
+    private var isAcceptingInput = false
 
     func start() async throws {
         session = try await SortformerStreamingSession.fromPretrained(
@@ -250,10 +466,15 @@ private actor SpeechSwiftSortformerDiarizationEngine {
                 ])
             }
         )
+        isAcceptingInput = true
+    }
+
+    func stopAcceptingInput() {
+        isAcceptingInput = false
     }
 
     func process(samples: [Float], sampleRate: Double) throws -> [SpeakerDiarizationSegment] {
-        guard let session else {
+        guard isAcceptingInput, let session else {
             return []
         }
         let prepared = prepare(samples: samples, sampleRate: sampleRate)
@@ -265,10 +486,12 @@ private actor SpeechSwiftSortformerDiarizationEngine {
     }
 
     func finalize() throws -> [SpeakerDiarizationSegment] {
+        isAcceptingInput = false
         guard let session else {
             return []
         }
         let result = try session.finish()
+        self.session = nil
         return Self.map(result.segments)
     }
 

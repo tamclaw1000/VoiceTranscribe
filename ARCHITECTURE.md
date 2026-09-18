@@ -4,7 +4,7 @@ Project architecture notes and build history for future agents (and future-you).
 
 ## What This Is
 
-VoiceTranscribe is a native macOS SwiftUI app for enumerating audio input devices, monitoring their levels with a live graph, recording to disk, displaying live transcripts with live SpeechVAD Sortformer speaker diarization, summarizing recordings, and running configurable AI processing prompts over finalized transcript text.
+VoiceTranscribe is a native macOS SwiftUI app for enumerating audio input devices, monitoring their levels with a live graph, recording to disk, displaying live transcripts with live SpeechVAD Sortformer speaker diarization plus session-only WeSpeaker voice identity, summarizing recordings, and running configurable AI processing prompts over finalized transcript text.
 
 - **Repo:** https://github.com/tamclaw1000/VoiceTranscribe
 - **Local:** `~/projects/ai/VoiceTranscribe`
@@ -26,6 +26,7 @@ VoiceTranscribeApp
        ├─ TranscriptionCoordinator
        │    └─ AppleSpeechTranscriptionService — SpeechTranscriber + SpeechAnalyzer
        ├─ DiarizationCoordinator — SpeechVAD Sortformer speaker timeline + transcript annotation
+       │    └─ VoiceIdentityService — SpeechVAD WeSpeaker embeddings + session-local voice matching
        ├─ SummaryCoordinator — paragraph-form recording summaries
        ├─ FactCheckCoordinator — AI processing queue, prompt templates, batching, prompt state
        ├─ PermissionService — lazy mic/speech auth with caching
@@ -42,7 +43,7 @@ Mic → AVAudioEngine tap → copyBuffer() → Task { @MainActor }
 
 ### Voice Processing Pipeline
 
-VoiceTranscribe uses a split voice-processing pipeline: Apple provides speech-to-text and sentence timing, while SpeechVAD provides best-effort speaker diarization. These paths run from the same copied `AVAudioPCMBuffer` stream but are intentionally separate so diarization latency or failure does not block transcript text.
+VoiceTranscribe uses a split voice-processing pipeline: Apple provides speech-to-text and sentence timing, while SpeechVAD provides best-effort speaker diarization and session-local voice identity. These paths run from the same copied `AVAudioPCMBuffer` stream but are intentionally separate so diarization or voice-embedding latency/failure does not block transcript text.
 
 1. **Audio capture and fan-out — AVFoundation/CoreAudio.** `AudioCaptureService` owns one `AVAudioEngine` input tap for the selected source, including physical microphones and virtual devices such as BlackHole. It deep-copies every tap buffer, computes RMS/peak visualization metrics, and fans buffers out to registered consumers (`record`, `transcribe`, and `diarize`). Source switches must stop active consumers first because all modes share this capture service.
 
@@ -52,13 +53,15 @@ VoiceTranscribe uses a split voice-processing pipeline: Apple provides speech-to
 
 4. **Speaker diarization — SpeechVAD Sortformer.** `DiarizationCoordinator` uses `SpeechSwiftSortformerDiarizationEngine`, which wraps SpeechVAD's `SortformerStreamingSession`. Audio is downmixed to mono, resampled to 16 kHz, and pushed into Sortformer. Sortformer returns whole-stream speaker time ranges keyed by session-local speaker slots. The app maps those integer slots to `Speaker N`, maintains a separate speaker timeline, and annotates transcript rows with the latest finalized diarization label when Apple Speech produces a segment.
 
-5. **Speaker display corrections — app layer.** Speaker names and row-level speaker corrections are managed in `AppModel`, `TranscriptionCoordinator`, and `DiarizationCoordinator`, not by the diarization library. Renaming `Speaker 1` changes display/export labels for that generated slot. Clicking a transcript row's speaker label changes only that row's stored speaker assignment.
+5. **Voice identity — SpeechVAD WeSpeaker + app matcher.** `VoiceIdentityService` is always enabled during a transcription session. It buffers the same 16 kHz mono audio used for diarization, extracts WeSpeaker CoreML embeddings from sufficiently long finalized diarization ranges, and matches them against an in-memory `VoiceIdentityMatcher`. Matches produce session-only `Voice N` labels and confidence scores. Nothing is persisted across app runs or sessions.
 
-6. **AI processing — configured LLM endpoints.** `FactCheckCoordinator` listens to finalized transcript sentences, applies enabled prompt templates, performs prompt substitutions such as `{{sentence}}`, `{{conversation}}`, and `{{prompt-state}}`, and queues model calls. Historical type/trace names still say `FactCheck`, but user-facing behavior is AI Processing.
+6. **Voice display corrections — app layer.** Speaker slots, voice labels, and row-level corrections are managed in `AppModel`, `TranscriptionCoordinator`, and `DiarizationCoordinator`, not by the diarization library. The user-facing identity unit is the observed tuple `Speaker N / Voice M`, with `Speaker N / no voice` used for segments that do not have an embedding identity. Naming a tuple changes display/export labels for matching transcript and diarization rows. A transcript row's speaker label opens correction actions that assign the row to an observed tuple, cycle through tuples, or force a fresh `Voice N` under the row's current speaker slot when Sortformer under-counts speakers.
 
-7. **Summary and export — app layer.** `SummaryCoordinator`, `TranscriptDocument`, and `MarkdownExportService` consume finalized transcript segments, speaker labels, AI results, prompt state, and diarization timelines. Markdown exports include both the transcript table and a separate speaker timeline when diarization segments are available.
+7. **AI processing — configured LLM endpoints.** `FactCheckCoordinator` listens to finalized transcript sentences, applies enabled prompt templates, performs prompt substitutions such as `{{sentence}}`, `{{conversation}}`, and `{{prompt-state}}`, and queues model calls. Historical type/trace names still say `FactCheck`, but user-facing behavior is AI Processing.
 
-Current limitation: SpeechVAD Sortformer provides session-local speaker slots, not persistent voice identity. In SpeechVAD, `SortformerStreamingSession.currentResult()` returns an empty `speakerEmbeddings` array, and the app currently stores only `Speaker N` slot labels. SpeechVAD also includes WeSpeaker, ReDimNet2, CAM++, and pyannote-style pipelines that can produce voice embeddings or speaker centroids, but VoiceTranscribe does not currently run those models in the live pipeline.
+8. **Summary and export — app layer.** `SummaryCoordinator`, `TranscriptDocument`, and `MarkdownExportService` consume finalized transcript segments, speaker labels, voice identity labels, AI results, prompt state, and diarization timelines. Markdown exports include both the transcript table and a separate speaker timeline when diarization segments are available.
+
+Current limitation: SpeechVAD Sortformer provides session-local speaker slots, not persistent voice identity. WeSpeaker identity matching improves same-session distinction when Sortformer reuses a `Speaker N` slot, but it is best-effort, depends on usable diarized audio windows, and intentionally resets for each transcription session. Manual tuple names are display corrections, not biometric identity assertions; multiple generated tuples can share the same human name when the matcher over-splits a speaker.
 
 ### Key Design Decisions
 
@@ -78,7 +81,7 @@ Current limitation: SpeechVAD Sortformer provides session-local speaker slots, n
 
 8. **Prompt state is per template.** `{{prompt-state}}` accrues independently for each prompt template, updates from successful responses, resets with AI processing state, and forces that template's calls to run serially.
 
-9. **Diarization is live and best-effort.** SpeechVAD Sortformer streaming diarization runs alongside Apple Speech transcription. Transcript rows get the latest finalized speaker label when the ASR segment arrives, while Markdown export also includes the diarizer's separate speaker timeline for time-based review.
+9. **Diarization and identity are live and best-effort.** SpeechVAD Sortformer streaming diarization runs alongside Apple Speech transcription. WeSpeaker identity matching runs asynchronously over diarized audio ranges. Transcript rows get the latest finalized speaker/voice label when the ASR segment arrives, while Markdown export also includes the diarizer's separate speaker timeline for time-based review.
 
 ## Critical Gotchas
 
@@ -147,6 +150,7 @@ No CLI flag needed. The `Trace.swift` utility fires on every:
 - Transcription event (`transcription.starting`, `.started`, `.stopped`, `segmentFinal`)
 - AI processing event (`factCheck.*` historical trace names, including prompt/template/model queue activity)
 - Diarization event (`diarization.*`)
+- Voice identity event (`voiceIdentity.*`)
 - Device change (`devices.changed`)
 - Permission state (`permission.mic`)
 - Error (various `.error` events)
@@ -182,6 +186,7 @@ swift test
 | `RecordingService.swift` | Async file writing, basename generation, metadata JSON |
 | `TranscriptionService.swift` | SpeechTranscriber pipeline, format conversion, coordinator |
 | `DiarizationService.swift` | SpeechVAD Sortformer speaker diarization, speaker timeline, transcript annotations |
+| `VoiceIdentityService.swift` | SpeechVAD WeSpeaker embedding extraction and session-local voice matching |
 | `FactCheckService.swift` | AI processing LLM clients, queueing, prompt substitutions, batching, prompt state |
 | `PermissionService.swift` | Lazy mic/speech auth with caching and mock support |
 | `Trace.swift` | JSON-line event logger to `/tmp/VoiceTranscribe.log` |
@@ -197,6 +202,12 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.35 | 78 | Pinned the main NavigationSplitView to keep the left source sidebar visible alongside the right voice pane |
+| 2.4.34 | 77 | Moved Voice Identification from the transcript stack into a collapsible right-hand pane |
+| 2.4.33 | 76 | Treated observed `Speaker N / Voice M` tuples as editable voice candidates with row correction and forced-new-voice actions |
+| 2.4.32 | 75 | Added file-transcription diarization readiness ordering and expanded diarization/voice identity tracing |
+| 2.4.31 | 74 | Fixed stop-transcription crash by rejecting late Sortformer pushes after diarization shutdown starts |
+| 2.4.30 | 73 | Added always-on session-only WeSpeaker voice identity labels on top of SpeechVAD Sortformer speaker slots |
 | 2.4.29 | 72 | Hardened BlackHole/microphone capture switching to stop active modes cleanly and ignore stale tap buffers |
 | 2.4.28 | 71 | Added click-to-cycle speaker correction for individual Live Transcript rows |
 | 2.4.27 | 70 | Added Live Transcript speaker-name editing with per-speaker and reset-all controls |

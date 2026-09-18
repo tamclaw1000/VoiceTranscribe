@@ -22,6 +22,13 @@ struct AIReachabilityStatus: Equatable {
     var testedAt: Date?
 }
 
+private struct ObservedVoiceSummary: Equatable {
+    var speakerID: String
+    var voiceID: String?
+    var segmentCount: Int = 0
+    var totalDuration: TimeInterval = 0
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var deviceService = AudioDeviceService()
@@ -167,6 +174,7 @@ final class AppModel: ObservableObject {
     private var diarizationStartTask: Task<Void, Never>?
     private var aiReachabilityTask: Task<Void, Never>?
     private var hasRunLaunchAIReachabilityTest = false
+    private var nextForcedVoiceNumber = 1
 
     init() {
         transcription = TranscriptionCoordinator(service: AppModel.makeInitialService())
@@ -229,17 +237,21 @@ final class AppModel: ObservableObject {
     }
 
     var speakerNameEditorItems: [SpeakerNameEditorItem] {
-        let ids = knownSpeakerIDs()
-        return ids.map { speakerID in
-            let customName = diarization.speakerName(for: speakerID)
-                ?? transcription.segments.first { $0.speakerID == speakerID }?.speakerName
-                ?? (transcription.interimSegment?.speakerID == speakerID ? transcription.interimSegment?.speakerName : nil)
-                ?? ""
+        knownObservedVoices().map { identity in
+            let customName = observedVoiceName(speakerID: identity.speakerID, voiceID: identity.voiceID) ?? ""
             let trimmed = customName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let observedLabel = VoiceIdentityKey.observedLabel(
+                speakerID: identity.speakerID,
+                voiceID: identity.voiceID
+            )
             return SpeakerNameEditorItem(
-                speakerID: speakerID,
-                displayName: trimmed.isEmpty ? speakerID : trimmed,
-                customName: customName
+                speakerID: identity.speakerID,
+                voiceID: identity.voiceID,
+                observedLabel: observedLabel,
+                displayName: trimmed.isEmpty ? observedLabel : trimmed,
+                customName: customName,
+                segmentCount: identity.segmentCount,
+                totalDuration: identity.totalDuration
             )
         }
     }
@@ -260,70 +272,211 @@ final class AppModel: ObservableObject {
         ])
     }
 
+    func setObservedVoiceName(speakerID: String, voiceID: String?, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let speakerName = trimmed.isEmpty ? nil : trimmed
+        diarization.setObservedVoiceName(speakerID: speakerID, voiceID: voiceID, name: speakerName)
+        transcription.updateObservedVoiceName(
+            speakerID: speakerID,
+            voiceID: voiceID,
+            speakerName: speakerName
+        )
+        objectWillChange.send()
+        Trace.event("observedVoice.name.set", [
+            "speakerID": speakerID,
+            "voiceID": voiceID ?? "",
+            "speakerName": speakerName ?? ""
+        ])
+    }
+
     func resetSpeakerName(speakerID: String) {
         setSpeakerName(speakerID: speakerID, name: "")
     }
 
+    func resetObservedVoiceName(speakerID: String, voiceID: String?) {
+        setObservedVoiceName(speakerID: speakerID, voiceID: voiceID, name: "")
+    }
+
     func resetAllSpeakerNames() {
-        for speakerID in knownSpeakerIDs() {
-            resetSpeakerName(speakerID: speakerID)
+        for item in speakerNameEditorItems {
+            resetObservedVoiceName(speakerID: item.speakerID, voiceID: item.voiceID)
         }
         Trace.event("speaker.names.resetAll")
     }
 
     func cycleTranscriptSegmentSpeaker(segmentID: UUID) {
-        let speakerIDs = knownSpeakerIDs()
-        guard !speakerIDs.isEmpty else {
+        let identities = knownObservedVoices()
+        guard !identities.isEmpty else {
             return
         }
 
-        let currentSpeakerID = transcription.segments.first { $0.id == segmentID }?.speakerID
-            ?? (transcription.interimSegment?.id == segmentID ? transcription.interimSegment?.speakerID : nil)
-        let nextSpeakerID: String
-        if let currentSpeakerID, let index = speakerIDs.firstIndex(of: currentSpeakerID) {
-            nextSpeakerID = speakerIDs[(index + 1) % speakerIDs.count]
+        let currentIdentity = transcriptSegmentIdentity(segmentID: segmentID)
+        let nextIdentity: ObservedVoiceSummary
+        if let currentIdentity,
+           let index = identities.firstIndex(where: {
+               $0.speakerID == currentIdentity.speakerID
+                   && normalizedVoiceID($0.voiceID) == normalizedVoiceID(currentIdentity.voiceID)
+           }) {
+            nextIdentity = identities[(index + 1) % identities.count]
         } else {
-            nextSpeakerID = speakerIDs[0]
+            nextIdentity = identities[0]
         }
-        let speakerName = speakerName(for: nextSpeakerID)
 
-        transcription.updateSegmentSpeaker(
+        assignTranscriptSegmentIdentity(
             segmentID: segmentID,
-            speakerID: nextSpeakerID,
-            speakerName: speakerName
+            speakerID: nextIdentity.speakerID,
+            voiceID: nextIdentity.voiceID
+        )
+    }
+
+    func assignTranscriptSegmentIdentity(segmentID: UUID, speakerID: String, voiceID: String?) {
+        let speakerName = observedVoiceName(speakerID: speakerID, voiceID: voiceID)
+        let voiceName = voiceID
+
+        transcription.updateSegmentIdentity(
+            segmentID: segmentID,
+            speakerID: speakerID,
+            speakerName: speakerName,
+            voiceID: voiceID,
+            voiceName: voiceName,
+            voiceConfidence: nil
         )
         objectWillChange.send()
-        Trace.event("speaker.segment.cycled", [
+        Trace.event("speaker.segment.identityAssigned", [
             "segmentID": segmentID.uuidString,
-            "fromSpeakerID": currentSpeakerID ?? "",
-            "toSpeakerID": nextSpeakerID,
+            "speakerID": speakerID,
+            "voiceID": voiceID ?? "",
             "speakerName": speakerName ?? ""
         ])
     }
 
-    private func knownSpeakerIDs() -> [String] {
-        var ids = Set<String>()
-        for segment in diarization.segments {
-            ids.insert(segment.speakerID)
+    func forceNewVoiceForTranscriptSegment(segmentID: UUID) {
+        guard let currentIdentity = transcriptSegmentIdentity(segmentID: segmentID) else {
+            return
         }
-        for segment in transcription.segments {
-            if let speakerID = segment.speakerID {
-                ids.insert(speakerID)
-            }
-        }
-        if let speakerID = transcription.interimSegment?.speakerID {
-            ids.insert(speakerID)
-        }
-        if let speakerID = diarization.currentSpeakerID {
-            ids.insert(speakerID)
-        }
-        return ids.sorted(by: speakerSort)
+
+        let voiceID = nextAvailableVoiceID()
+        assignTranscriptSegmentIdentity(
+            segmentID: segmentID,
+            speakerID: currentIdentity.speakerID,
+            voiceID: voiceID
+        )
+        Trace.event("speaker.segment.voiceForced", [
+            "segmentID": segmentID.uuidString,
+            "speakerID": currentIdentity.speakerID,
+            "voiceID": voiceID
+        ])
     }
 
-    private func speakerName(for speakerID: String) -> String? {
-        diarization.speakerName(for: speakerID)
-            ?? transcription.segments.first { $0.speakerID == speakerID }?.speakerName
-            ?? (transcription.interimSegment?.speakerID == speakerID ? transcription.interimSegment?.speakerName : nil)
+    private func knownObservedVoices() -> [ObservedVoiceSummary] {
+        var summaries: [String: ObservedVoiceSummary] = [:]
+
+        for segment in diarization.segments {
+            let key = VoiceIdentityKey.make(speakerID: segment.speakerID, voiceID: segment.voiceID)
+            var summary = summaries[key] ?? ObservedVoiceSummary(
+                speakerID: segment.speakerID,
+                voiceID: normalizedVoiceID(segment.voiceID)
+            )
+            summary.segmentCount += 1
+            summary.totalDuration += max(0, segment.endTime - segment.startTime)
+            summaries[key] = summary
+        }
+
+        for segment in transcription.segments {
+            guard let speakerID = segment.speakerID else { continue }
+            let key = VoiceIdentityKey.make(speakerID: speakerID, voiceID: segment.voiceID)
+            var summary = summaries[key] ?? ObservedVoiceSummary(
+                speakerID: speakerID,
+                voiceID: normalizedVoiceID(segment.voiceID)
+            )
+            summary.segmentCount += 1
+            summaries[key] = summary
+        }
+
+        if let interim = transcription.interimSegment,
+           let speakerID = interim.speakerID {
+            let key = VoiceIdentityKey.make(speakerID: speakerID, voiceID: interim.voiceID)
+            var summary = summaries[key] ?? ObservedVoiceSummary(
+                speakerID: speakerID,
+                voiceID: normalizedVoiceID(interim.voiceID)
+            )
+            summary.segmentCount += 1
+            summaries[key] = summary
+        }
+
+        if let speakerID = diarization.currentSpeakerID {
+            let key = VoiceIdentityKey.make(speakerID: speakerID, voiceID: nil)
+            summaries[key] = summaries[key] ?? ObservedVoiceSummary(speakerID: speakerID, voiceID: nil)
+        }
+
+        return summaries.values.sorted(by: observedVoiceSort)
+    }
+
+    private func observedVoiceName(speakerID: String, voiceID: String?) -> String? {
+        diarization.observedVoiceName(speakerID: speakerID, voiceID: voiceID)
+            ?? transcription.segments.first {
+                $0.speakerID == speakerID && normalizedVoiceID($0.voiceID) == normalizedVoiceID(voiceID)
+            }?.speakerName
+            ?? (
+                transcription.interimSegment?.speakerID == speakerID
+                    && normalizedVoiceID(transcription.interimSegment?.voiceID) == normalizedVoiceID(voiceID)
+                ? transcription.interimSegment?.speakerName
+                : nil
+            )
+            ?? (voiceID == nil ? diarization.speakerName(for: speakerID) : nil)
+    }
+
+    private func transcriptSegmentIdentity(segmentID: UUID) -> ObservedVoiceSummary? {
+        if let segment = transcription.segments.first(where: { $0.id == segmentID }),
+           let speakerID = segment.speakerID {
+            return ObservedVoiceSummary(
+                speakerID: speakerID,
+                voiceID: normalizedVoiceID(segment.voiceID)
+            )
+        }
+        if let interim = transcription.interimSegment,
+           interim.id == segmentID,
+           let speakerID = interim.speakerID {
+            return ObservedVoiceSummary(
+                speakerID: speakerID,
+                voiceID: normalizedVoiceID(interim.voiceID)
+            )
+        }
+        if let speakerID = diarization.currentSpeakerID {
+            return ObservedVoiceSummary(speakerID: speakerID, voiceID: nil)
+        }
+        return nil
+    }
+
+    private func nextAvailableVoiceID() -> String {
+        let existingNumbers = knownObservedVoices().compactMap { identity -> Int? in
+            guard let voiceID = identity.voiceID else { return nil }
+            return speakerNumber(voiceID)
+        }
+        nextForcedVoiceNumber = max(nextForcedVoiceNumber, (existingNumbers.max() ?? 0) + 1)
+        defer { nextForcedVoiceNumber += 1 }
+        return "Voice \(nextForcedVoiceNumber)"
+    }
+
+    private func observedVoiceSort(_ lhs: ObservedVoiceSummary, _ rhs: ObservedVoiceSummary) -> Bool {
+        if lhs.speakerID != rhs.speakerID {
+            return speakerSort(lhs.speakerID, rhs.speakerID)
+        }
+        switch (speakerNumber(lhs.voiceID ?? ""), speakerNumber(rhs.voiceID ?? "")) {
+        case let (left?, right?):
+            return left == right ? (lhs.voiceID ?? "") < (rhs.voiceID ?? "") : left < right
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        case (nil, nil):
+            return (lhs.voiceID ?? "") < (rhs.voiceID ?? "")
+        }
+    }
+
+    private func normalizedVoiceID(_ voiceID: String?) -> String? {
+        let trimmed = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
     }
 
     private func speakerSort(_ lhs: String, _ rhs: String) -> Bool {
@@ -1209,12 +1362,13 @@ final class AppModel: ObservableObject {
 
             do {
                 try await self.transcription.start()
-                self.startDiarizationInBackground(sourceName: source.name, addLiveConsumer: false)
+                let diarizationReady = await self.startDiarization(sourceName: source.name, addLiveConsumer: false)
                 self.factCheck.reset()
                 self.summary.reset()
                 Trace.event("fileTranscribe.started", [
                     "file": source.name,
-                    "engine": self.transcription.engineName
+                    "engine": self.transcription.engineName,
+                    "diarizationReady": diarizationReady ? "true" : "false"
                 ])
 
                 try await self.feedFileToTranscription(url: source.url, duration: source.duration)
@@ -1295,8 +1449,18 @@ final class AppModel: ObservableObject {
             throw AppModelError.fileReadFailed
         }
 
+        Trace.event("fileTranscribe.feed.started", [
+            "method": "AVAudioFile",
+            "url": url.lastPathComponent,
+            "duration": String(format: "%.2f", duration),
+            "sampleRate": Int(format.sampleRate),
+            "channels": Int(format.channelCount),
+            "frames": totalFrames
+        ])
+
         file.framePosition = 0
         var framesRead: AVAudioFramePosition = 0
+        var bufferCount = 0
 
         while framesRead < totalFrames {
             try Task.checkCancellation()
@@ -1325,12 +1489,30 @@ final class AppModel: ObservableObject {
             }
 
             framesRead += AVAudioFramePosition(frames)
+            bufferCount += 1
             let progress = Double(framesRead) / Double(totalFrames)
+
+            if bufferCount == 1 || bufferCount % 50 == 0 || framesRead >= totalFrames {
+                Trace.event("fileTranscribe.feed.progress", [
+                    "method": "AVAudioFile",
+                    "buffer#": bufferCount,
+                    "framesRead": framesRead,
+                    "totalFrames": totalFrames,
+                    "progress": String(format: "%.3f", min(progress, 1.0))
+                ])
+            }
 
             await MainActor.run {
                 self.fileTranscriptionProgress = progress
             }
         }
+
+        Trace.event("fileTranscribe.feed.completed", [
+            "method": "AVAudioFile",
+            "buffers": bufferCount,
+            "framesRead": framesRead,
+            "totalFrames": totalFrames
+        ])
     }
 
     /// Fallback: use AVAssetReader for formats AVAudioFile can't open (e.g. FLAC).
@@ -1370,6 +1552,16 @@ final class AppModel: ObservableObject {
 
         var framesRead: AVAudioFramePosition = 0
         let totalFrames = AVAudioFramePosition(duration * 16000)
+        var bufferCount = 0
+
+        Trace.event("fileTranscribe.feed.started", [
+            "method": "AVAssetReader",
+            "url": url.lastPathComponent,
+            "duration": String(format: "%.2f", duration),
+            "sampleRate": 16000,
+            "channels": 1,
+            "frames": totalFrames
+        ])
 
         while reader.status == .reading {
             try Task.checkCancellation()
@@ -1394,9 +1586,20 @@ final class AppModel: ObservableObject {
             }
 
             framesRead += AVAudioFramePosition(pcm.frameLength)
+            bufferCount += 1
             let progress = totalFrames > 0
                 ? Double(framesRead) / Double(totalFrames)
                 : 0
+
+            if bufferCount == 1 || bufferCount % 50 == 0 {
+                Trace.event("fileTranscribe.feed.progress", [
+                    "method": "AVAssetReader",
+                    "buffer#": bufferCount,
+                    "framesRead": framesRead,
+                    "totalFrames": totalFrames,
+                    "progress": String(format: "%.3f", min(progress, 1.0))
+                ])
+            }
 
             await MainActor.run {
                 self.fileTranscriptionProgress = min(progress, 1.0)
@@ -1406,6 +1609,13 @@ final class AppModel: ObservableObject {
         if reader.status == .failed {
             throw reader.error ?? AppModelError.fileReadFailed
         }
+
+        Trace.event("fileTranscribe.feed.completed", [
+            "method": "AVAssetReader",
+            "buffers": bufferCount,
+            "framesRead": framesRead,
+            "totalFrames": totalFrames
+        ])
     }
 
     private func stopTranscription() {

@@ -53,11 +53,22 @@ struct TranscriptSegment: Identifiable, Equatable {
     var confidence: Float?
     var speakerID: String?
     var speakerName: String?
+    var voiceID: String?
+    var voiceName: String?
+    var voiceConfidence: Float?
 
     var speakerLabel: String? {
         let name = speakerName?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let name, !name.isEmpty {
             return name
+        }
+        let voiceName = voiceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let voiceName, !voiceName.isEmpty {
+            return voiceName
+        }
+        let voiceID = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let voiceID, !voiceID.isEmpty {
+            return voiceID
         }
         let id = speakerID?.trimmingCharacters(in: .whitespacesAndNewlines)
         return id?.isEmpty == false ? id : nil
@@ -77,7 +88,10 @@ struct TranscriptSegment: Identifiable, Equatable {
         isFinal: Bool,
         confidence: Float? = nil,
         speakerID: String? = nil,
-        speakerName: String? = nil
+        speakerName: String? = nil,
+        voiceID: String? = nil,
+        voiceName: String? = nil,
+        voiceConfidence: Float? = nil
     ) {
         self.id = id
         self.text = text
@@ -86,6 +100,9 @@ struct TranscriptSegment: Identifiable, Equatable {
         self.confidence = confidence
         self.speakerID = speakerID
         self.speakerName = speakerName
+        self.voiceID = voiceID
+        self.voiceName = voiceName
+        self.voiceConfidence = voiceConfidence
     }
 }
 
@@ -93,6 +110,9 @@ struct SpeakerDiarizationSegment: Identifiable, Equatable, Sendable {
     let id: UUID
     var speakerID: String
     var speakerName: String?
+    var voiceID: String?
+    var voiceName: String?
+    var voiceConfidence: Float?
     var startTime: TimeInterval
     var endTime: TimeInterval
     var confidence: Float?
@@ -102,6 +122,14 @@ struct SpeakerDiarizationSegment: Identifiable, Equatable, Sendable {
         if let name, !name.isEmpty {
             return name
         }
+        let voiceName = voiceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let voiceName, !voiceName.isEmpty {
+            return voiceName
+        }
+        let voiceID = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let voiceID, !voiceID.isEmpty {
+            return voiceID
+        }
         return speakerID
     }
 
@@ -109,6 +137,9 @@ struct SpeakerDiarizationSegment: Identifiable, Equatable, Sendable {
         id: UUID = UUID(),
         speakerID: String,
         speakerName: String? = nil,
+        voiceID: String? = nil,
+        voiceName: String? = nil,
+        voiceConfidence: Float? = nil,
         startTime: TimeInterval,
         endTime: TimeInterval,
         confidence: Float? = nil
@@ -116,20 +147,53 @@ struct SpeakerDiarizationSegment: Identifiable, Equatable, Sendable {
         self.id = id
         self.speakerID = speakerID
         self.speakerName = speakerName
+        self.voiceID = voiceID
+        self.voiceName = voiceName
+        self.voiceConfidence = voiceConfidence
         self.startTime = startTime
         self.endTime = endTime
         self.confidence = confidence
     }
 }
 
-struct SpeakerNameEditorItem: Identifiable, Equatable {
-    var id: String { speakerID }
+struct SpeakerAnnotation: Equatable {
     var speakerID: String
+    var speakerName: String?
+    var voiceID: String?
+    var voiceName: String?
+    var voiceConfidence: Float?
+}
+
+struct SpeakerNameEditorItem: Identifiable, Equatable {
+    var id: String { VoiceIdentityKey.make(speakerID: speakerID, voiceID: voiceID) }
+    var speakerID: String
+    var voiceID: String?
+    var observedLabel: String
     var displayName: String
     var customName: String
+    var segmentCount: Int = 0
+    var totalDuration: TimeInterval = 0
 
     var hasCustomName: Bool {
         !customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+enum VoiceIdentityKey {
+    static func make(speakerID: String, voiceID: String?) -> String {
+        if let voice = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !voice.isEmpty {
+            return "\(speakerID)|\(voice)"
+        }
+        return "\(speakerID)|_"
+    }
+
+    static func observedLabel(speakerID: String, voiceID: String?) -> String {
+        let voice = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let voice, !voice.isEmpty {
+            return "\(speakerID) / \(voice)"
+        }
+        return "\(speakerID) / no voice"
     }
 }
 

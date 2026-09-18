@@ -1801,3 +1801,103 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify `swift test` passes.
 - [x] Bump `CFBundleShortVersionString` to `2.4.29`.
 - [x] Bump `CFBundleVersion` to `72`.
+
+## 92. v2.4.30. Session Voice Identity
+
+### 92a. WeSpeaker Identity Layer
+
+- [x] Add an always-on, session-only `VoiceIdentityService` using SpeechVAD WeSpeaker CoreML embeddings.
+- [x] Buffer 16 kHz mono session audio alongside Sortformer diarization without blocking Apple Speech transcript output.
+- [x] Extract embeddings for sufficiently long finalized diarization ranges and assign in-memory `Voice N` identities.
+- [x] Keep Sortformer `Speaker N` slots as source diarization labels while adding `voiceID`, `voiceName`, and `voiceConfidence` fields to transcript and timeline segments.
+- [x] Prefer manual speaker names, then automatic voice labels, then raw speaker slots in transcript/export display.
+- [x] Clear automatic voice identity from an individual transcript row when the user manually cycles that row's speaker.
+- [x] Add tests for session voice matching and transcript display precedence.
+
+### 92b. Tests and Version
+
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.30`.
+- [x] Bump `CFBundleVersion` to `73`.
+
+## 93. v2.4.31. Stop Transcription Crash Fix
+
+### 93a. Diarization Shutdown Race
+
+- [x] Review `VoiceTranscribe-2026-09-17-202500.ips` and identify a `SortformerStreamingSession.push(audio:) after finish()` assertion during transcription stop.
+- [x] Make `SpeechSwiftSortformerDiarizationEngine` reject late `process` calls once shutdown begins.
+- [x] Clear the Sortformer session after finalization so no finished session can receive future audio.
+- [x] Add a transcription session token so late Apple Speech callbacks after stop are ignored instead of appending stale transcript rows.
+
+### 93b. Tests and Version
+
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.31`.
+- [x] Bump `CFBundleVersion` to `74`.
+
+## 94. v2.4.32. File Diarization Trace Coverage
+
+### 94a. File Processing Diagnostics
+
+- [x] Review the 120-second Star Trek sample processing trace and confirm file-mode diarization can be missed when file audio is fed before Sortformer startup completes.
+- [x] Start file-mode diarization synchronously before feeding audio buffers so short samples do not race model startup.
+- [x] Add file feed start/progress/completion trace events with method, sample format, buffer counts, frame counts, and progress.
+- [x] Add diarization buffer consumed/ignored trace events to show whether audio reached Sortformer.
+- [x] Add voice identity queued, skipped, embedding-created, and assignment match-type trace events.
+
+### 94b. Tests and Version
+
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Verify `swift test` passes.
+- [x] Bump `CFBundleShortVersionString` to `2.4.32`.
+- [x] Bump `CFBundleVersion` to `75`.
+
+## 95. v2.4.33. Observed Voice Tuple Corrections
+
+### 95a. Speaker/Voice Tuple UI
+
+- [x] Treat each observed `Speaker N / Voice M` pair as an editable voice candidate, with `Speaker N / no voice` for rows that do not have a voice embedding.
+- [x] Rename the collapsible speaker panel to Voice Identification and allow tuple-level naming/reset with segment counts and duration hints.
+- [x] Change transcript row speaker labels into correction menus that can assign any observed tuple, cycle tuples, or force a new `Voice N` under the row's current speaker.
+- [x] Preserve raw `Voice N` labels in transcript display and Markdown export when no manual human name has been assigned.
+- [x] Add trace events for observed voice naming, row tuple assignment, and forced voice creation.
+
+### 95b. Tests and Version
+
+- [x] Add coverage for tuple-level naming and row identity reassignment.
+- [x] Verify `swift test` passes.
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Bump `CFBundleShortVersionString` to `2.4.33`.
+- [x] Bump `CFBundleVersion` to `76`.
+
+## 96. v2.4.34. Voice Identification Side Pane
+
+### 96a. Live Transcript Layout
+
+- [x] Move Voice Identification out of the Live Transcript vertical content stack.
+- [x] Add a right-hand Voices rail that expands into a fixed-width Voice Identification pane.
+- [x] Keep tuple naming, reset, segment count, and duration controls available inside the right pane.
+- [x] Preserve the transcript table's vertical space when the voice pane is collapsed.
+
+### 96b. Tests and Version
+
+- [x] Verify `swift test` passes.
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Bump `CFBundleShortVersionString` to `2.4.34`.
+- [x] Bump `CFBundleVersion` to `77`.
+
+## 97. v2.4.35. Main Sidebar Visibility
+
+### 97a. Split View Layout
+
+- [x] Bind the main `NavigationSplitView` column visibility to prefer all columns.
+- [x] Give the left source sidebar an explicit min/ideal/max width so the right Voice Identification pane does not cause it to collapse unexpectedly.
+
+### 97b. Tests and Version
+
+- [x] Verify `swift test` passes.
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Bump `CFBundleShortVersionString` to `2.4.35`.
+- [x] Bump `CFBundleVersion` to `78`.

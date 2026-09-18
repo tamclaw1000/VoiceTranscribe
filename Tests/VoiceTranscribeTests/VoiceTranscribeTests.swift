@@ -1143,3 +1143,203 @@ private struct SlowFactCheckService: FactCheckService {
         )
     }
 }
+
+// MARK: - Jev
+
+@Test func jevQuerySanitizerFillsBlankNamesAndDedupesIDs() {
+    let queries = [
+        JevQueryConfiguration(id: "", name: "  ", primitiveType: .noul),
+        JevQueryConfiguration(id: "dup", name: "Second", primitiveType: .choice),
+        JevQueryConfiguration(id: "dup", name: "Third", primitiveType: .score)
+    ]
+
+    let sanitized = JevQueryConfiguration.sanitized(queries)
+
+    #expect(sanitized.count == 3)
+    #expect(sanitized[0].name == "Jev Query 1")
+    #expect(Set(sanitized.map(\.id)).count == 3)
+}
+
+@Test func jevQueryIsRunnableRequiresEnoughCriteria() {
+    let noul = JevQueryConfiguration(name: "Urgency", primitiveType: .noul)
+    #expect(noul.isRunnable)
+
+    var choice = JevQueryConfiguration(name: "Team", primitiveType: .choice)
+    #expect(!choice.isRunnable)
+    choice.choiceCriteria = [JevChoiceCriterion(label: "billing"), JevChoiceCriterion(label: "shipping")]
+    #expect(choice.isRunnable)
+
+    var score = JevQueryConfiguration(name: "Severity", primitiveType: .score)
+    #expect(!score.isRunnable)
+    score.scoreCriteria = ["Cosmetic", "Blocking"]
+    #expect(score.isRunnable)
+}
+
+@Test func jevQuestionWireEncodesCriteriaShapePerPrimitiveType() throws {
+    let noul = JevQueryConfiguration(
+        name: "Urgency",
+        primitiveType: .noul,
+        instructions: "Does this express urgency?",
+        noulTrueDescription: "Mentions a deadline",
+        noulFalseDescription: "No time pressure"
+    )
+    let choice = JevQueryConfiguration(
+        name: "Team",
+        primitiveType: .choice,
+        instructions: "Which team should handle this?",
+        choiceCriteria: [
+            JevChoiceCriterion(label: "billing", description: "Charges and invoices"),
+            JevChoiceCriterion(label: "shipping", description: "Delivery status")
+        ]
+    )
+    let score = JevQueryConfiguration(
+        name: "Severity",
+        primitiveType: .score,
+        instructions: "How severe is this?",
+        scoreCriteria: ["Cosmetic", "Degraded", "Blocking"]
+    )
+
+    let request = JevSystemOneRequest(
+        state: "The export button crashes.",
+        model: "jev-latest",
+        questions: [
+            "noul": JevQuestionWire(query: noul),
+            "choice": JevQuestionWire(query: choice),
+            "score": JevQuestionWire(query: score)
+        ]
+    )
+    let data = try JSONEncoder().encode(request)
+    let json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let questions = try #require(json["questions"] as? [String: Any])
+
+    let noulPayload = try #require(questions["noul"] as? [String: Any])
+    #expect(noulPayload["type"] as? String == "noul")
+    let noulCriteria = try #require(noulPayload["criteria"] as? [String: String])
+    #expect(noulCriteria["true"] == "Mentions a deadline")
+    #expect(noulCriteria["false"] == "No time pressure")
+
+    let choicePayload = try #require(questions["choice"] as? [String: Any])
+    let choiceCriteria = try #require(choicePayload["criteria"] as? [String: String])
+    #expect(choiceCriteria["billing"] == "Charges and invoices")
+    #expect(choiceCriteria["shipping"] == "Delivery status")
+
+    let scorePayload = try #require(questions["score"] as? [String: Any])
+    let scoreCriteria = try #require(scorePayload["criteria"] as? [String])
+    #expect(scoreCriteria == ["Cosmetic", "Degraded", "Blocking"])
+}
+
+@Test func jevAnswerWireDecodesEachPrimitiveType() throws {
+    let raw = """
+    {
+      "model": "jev-latest",
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "answers": {
+        "noul": {"type": "noul", "noul": 0.82},
+        "choice": {"type": "choice", "choice": "billing", "confidence": 0.74, "probabilities": {"billing": 0.74, "shipping": 0.26}},
+        "score": {"type": "score", "score": 1.6, "confidence": 0.68, "legend": {"0": "Cosmetic", "1": "Degraded", "2": "Blocking"}, "probabilities": {"0": 0.1, "1": 0.3, "2": 0.6}}
+      }
+    }
+    """
+    let decoded = try JSONDecoder().decode(JevSystemOneResponseWire.self, from: Data(raw.utf8))
+
+    let noulAnswer = try #require(decoded.answers["noul"]?.toAnswer())
+    #expect(noulAnswer == .noul(probability: 0.82))
+
+    let choiceAnswer = try #require(decoded.answers["choice"]?.toAnswer())
+    #expect(choiceAnswer == .choice(selected: "billing", confidence: 0.74, probabilities: ["billing": 0.74, "shipping": 0.26]))
+
+    let scoreAnswer = try #require(decoded.answers["score"]?.toAnswer())
+    #expect(scoreAnswer == .score(
+        value: 1.6,
+        confidence: 0.68,
+        legend: ["0": "Cosmetic", "1": "Degraded", "2": "Blocking"],
+        probabilities: ["0": 0.1, "1": 0.3, "2": 0.6]
+    ))
+}
+
+@MainActor
+@Test func jevCoordinatorBatchesAllEnabledQueriesForOneSentenceIntoOneCall() async {
+    let probe = JevBatchProbe()
+    let coordinator = JevCoordinator(service: BatchProbeJevService(probe: probe))
+    let queries = [
+        JevQueryConfiguration(name: "Urgency", primitiveType: .noul),
+        JevQueryConfiguration(
+            name: "Team",
+            primitiveType: .choice,
+            choiceCriteria: [JevChoiceCriterion(label: "billing"), JevChoiceCriterion(label: "shipping")]
+        )
+    ]
+
+    coordinator.enqueueTranscriptSegment(
+        TranscriptSegment(text: "The export button crashes.", isFinal: true),
+        enabled: true,
+        queries: queries,
+        apiKey: "test-key",
+        baseURL: "https://api.typesafe.ai",
+        model: "jev-latest"
+    )
+
+    try? await Task.sleep(nanoseconds: 80_000_000)
+
+    #expect(coordinator.items.count == 2)
+    #expect(await probe.callCount() == 1)
+    #expect(await probe.queryCountOfLastCall() == 2)
+}
+
+@MainActor
+@Test func jevCoordinatorDedupesResubmittedSentencePerQuery() async {
+    let probe = JevBatchProbe()
+    let coordinator = JevCoordinator(service: BatchProbeJevService(probe: probe))
+    let query = JevQueryConfiguration(name: "Urgency", primitiveType: .noul)
+
+    coordinator.enqueueTranscriptSegment(
+        TranscriptSegment(text: "The export button crashes.", isFinal: true),
+        enabled: true,
+        queries: [query],
+        apiKey: "test-key",
+        baseURL: "https://api.typesafe.ai",
+        model: "jev-latest"
+    )
+    coordinator.enqueueTranscriptSegment(
+        TranscriptSegment(text: "  The export button crashes.  ", isFinal: true),
+        enabled: true,
+        queries: [query],
+        apiKey: "test-key",
+        baseURL: "https://api.typesafe.ai",
+        model: "jev-latest"
+    )
+
+    try? await Task.sleep(nanoseconds: 80_000_000)
+
+    #expect(coordinator.items.count == 1)
+}
+
+private actor JevBatchProbe {
+    private var calls = 0
+    private var lastQueryCount = 0
+
+    func record(queryCount: Int) {
+        calls += 1
+        lastQueryCount = queryCount
+    }
+
+    func callCount() -> Int { calls }
+    func queryCountOfLastCall() -> Int { lastQueryCount }
+}
+
+private struct BatchProbeJevService: JevService {
+    let probe: JevBatchProbe
+
+    func evaluate(
+        sentence: String,
+        queries: [JevQueryConfiguration],
+        apiKey: String,
+        baseURL: String,
+        model: String
+    ) async throws -> [String: JevAnswer] {
+        await probe.record(queryCount: queries.count)
+        return Dictionary(uniqueKeysWithValues: queries.map { query in
+            (query.id, JevAnswer.noul(probability: 0.5))
+        })
+    }
+}

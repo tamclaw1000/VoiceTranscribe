@@ -304,6 +304,107 @@ struct AIPromptTemplateConfiguration: Identifiable, Codable, Equatable {
     }
 }
 
+enum JevPrimitiveType: String, Codable, CaseIterable, Identifiable {
+    case noul
+    case choice
+    case score
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .noul:
+            return "Noul (yes/no)"
+        case .choice:
+            return "Choice (categorical)"
+        case .score:
+            return "Score (scale)"
+        }
+    }
+}
+
+struct JevChoiceCriterion: Identifiable, Codable, Equatable {
+    var id: String
+    var label: String
+    var description: String
+
+    init(id: String = UUID().uuidString, label: String, description: String = "") {
+        self.id = id
+        self.label = label
+        self.description = description
+    }
+}
+
+struct JevQueryConfiguration: Identifiable, Codable, Equatable {
+    static let defaultModel = "jev-latest"
+
+    var id: String
+    var name: String
+    var isEnabled: Bool
+    var primitiveType: JevPrimitiveType
+    var instructions: String
+    var noulTrueDescription: String
+    var noulFalseDescription: String
+    var choiceCriteria: [JevChoiceCriterion]
+    var scoreCriteria: [String]
+
+    var displayName: String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Jev Query" : trimmed
+    }
+
+    /// Whether this query has enough configured criteria to actually be sent to Jev.
+    var isRunnable: Bool {
+        switch primitiveType {
+        case .noul:
+            return true
+        case .choice:
+            return choiceCriteria.filter { !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count >= 2
+        case .score:
+            return scoreCriteria.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count >= 2
+        }
+    }
+
+    init(
+        id: String = UUID().uuidString,
+        name: String,
+        isEnabled: Bool = true,
+        primitiveType: JevPrimitiveType = .noul,
+        instructions: String = "",
+        noulTrueDescription: String = "",
+        noulFalseDescription: String = "",
+        choiceCriteria: [JevChoiceCriterion] = [],
+        scoreCriteria: [String] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.isEnabled = isEnabled
+        self.primitiveType = primitiveType
+        self.instructions = instructions
+        self.noulTrueDescription = noulTrueDescription
+        self.noulFalseDescription = noulFalseDescription
+        self.choiceCriteria = choiceCriteria
+        self.scoreCriteria = scoreCriteria
+    }
+
+    static func sanitized(_ queries: [JevQueryConfiguration]) -> [JevQueryConfiguration] {
+        var seenIDs = Set<String>()
+        return queries.enumerated().map { index, query -> JevQueryConfiguration in
+            var copy = query
+            copy.id = copy.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            if copy.id.isEmpty || seenIDs.contains(copy.id) {
+                copy.id = UUID().uuidString
+            }
+            seenIDs.insert(copy.id)
+
+            if copy.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                copy.name = "Jev Query \(index + 1)"
+            }
+            return copy
+        }
+    }
+}
+
 @MainActor
 final class AppSettings: ObservableObject {
     static let defaultTranscriptionEngine: TranscriptionEngineKind = .appleSpeech
@@ -327,6 +428,10 @@ final class AppSettings: ObservableObject {
     @AppStorage("aiPromptTemplatesJSON") private var aiPromptTemplatesJSON: String = ""
     @AppStorage("ollamaFactCheckPrompt") var ollamaFactCheckPrompt: String = FactCheckPrompt.defaultTemplate
     @AppStorage("summaryPrompt") var summaryPrompt: String = SummaryPrompt.defaultTemplate
+    @AppStorage("jevAPIKey") var jevAPIKey: String = ""
+    @AppStorage("jevBaseURL") var jevBaseURL: String = "https://api.typesafe.ai"
+    @AppStorage("jevModel") var jevModel: String = JevQueryConfiguration.defaultModel
+    @AppStorage("jevQueriesJSON") private var jevQueriesJSON: String = ""
 
     init() {
         migrateLLMEndpointsIfNeeded()
@@ -535,6 +640,52 @@ final class AppSettings: ObservableObject {
 
     func resetSummaryPrompt() {
         summaryPrompt = SummaryPrompt.defaultTemplate
+    }
+
+    var jevQueries: [JevQueryConfiguration] {
+        get {
+            guard let data = jevQueriesJSON.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([JevQueryConfiguration].self, from: data) else {
+                return []
+            }
+            return JevQueryConfiguration.sanitized(decoded)
+        }
+        set {
+            let sanitized = JevQueryConfiguration.sanitized(newValue)
+            if let encoded = try? JSONEncoder().encode(sanitized),
+               let json = String(data: encoded, encoding: .utf8) {
+                jevQueriesJSON = json
+            }
+        }
+    }
+
+    var enabledJevQueries: [JevQueryConfiguration] {
+        jevQueries.filter { $0.isEnabled && $0.isRunnable }
+    }
+
+    var isJevActive: Bool {
+        !enabledJevQueries.isEmpty
+    }
+
+    func updateJevQuery(_ query: JevQueryConfiguration) {
+        var queries = jevQueries
+        if let index = queries.firstIndex(where: { $0.id == query.id }) {
+            queries[index] = query
+            jevQueries = queries
+        }
+    }
+
+    func addJevQuery() {
+        var queries = jevQueries
+        let nextNumber = queries.count + 1
+        queries.append(JevQueryConfiguration(name: "Jev Query \(nextNumber)"))
+        jevQueries = queries
+    }
+
+    func removeJevQuery(id: String) {
+        var queries = jevQueries
+        queries.removeAll { $0.id == id }
+        jevQueries = queries
     }
 
     private func migrateDefaultTranscriptionEngineIfNeeded() {

@@ -106,6 +106,16 @@ struct ContentView: View {
                         .padding(.vertical, 3)
                 }
             }
+
+            if !appModel.settings.jevQueries.isEmpty {
+                Section("Jev Queries") {
+                    ForEach(appModel.settings.jevQueries) { query in
+                        JevQuerySourceRow(query: query)
+                            .environmentObject(appModel)
+                            .padding(.vertical, 3)
+                    }
+                }
+            }
         }
     }
 
@@ -172,6 +182,8 @@ struct ContentView: View {
                     diarizationError: appModel.diarization.lastError,
                     isFactCheckEnabled: appModel.settings.isFactCheckActive,
                     isFactChecking: appModel.factCheck.isRunning,
+                    jevResults: appModel.jev.items,
+                    isJevEnabled: appModel.settings.isJevActive,
                     buffer: appModel.transcription.bufferSnapshot,
                     isTranscribing: appModel.transcription.isTranscribing,
                     autoScrollToBottom: $appModel.settings.autoScrollTranscript,
@@ -427,6 +439,40 @@ private struct AIPromptSourceRow: View {
     }
 }
 
+private struct JevQuerySourceRow: View {
+    @EnvironmentObject private var appModel: AppModel
+    let query: JevQueryConfiguration
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: {
+                appModel.settings.jevQueries
+                    .first(where: { $0.id == query.id })?
+                    .isEnabled ?? query.isEnabled
+            },
+            set: { enabled in
+                appModel.setJevQueryEnabled(id: query.id, enabled: enabled)
+            }
+        )) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: "questionmark.diamond")
+                        .foregroundStyle(query.isEnabled ? Color.accentColor : Color.secondary)
+                    Text(query.displayName)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                }
+                Text(query.primitiveType.displayName)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .toggleStyle(.checkbox)
+        .help(query.isEnabled ? "Disable this Jev query" : "Enable this Jev query")
+    }
+}
+
 private struct PermissionStatusView: View {
     let title: String
     let status: String
@@ -525,6 +571,7 @@ private enum SettingsSectionTab: Hashable {
     case general
     case llmModels
     case promptTemplates
+    case jevConfiguration
 }
 
 private struct LLMEndpointSettingsView: View {
@@ -774,6 +821,263 @@ private struct AIPromptTemplateSettingsView: View {
     }
 }
 
+private struct JevQuerySettingsView: View {
+    @EnvironmentObject private var appModel: AppModel
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 8 : 12) {
+            if appModel.settings.jevQueries.isEmpty {
+                Text("No Jev queries yet. Add one below.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(appModel.settings.jevQueries) { query in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Toggle("Enabled", isOn: boolBinding(for: query, keyPath: \.isEnabled))
+                            .toggleStyle(.checkbox)
+                        Spacer()
+                        Button {
+                            appModel.removeJevQuery(id: query.id)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .help("Remove this Jev query")
+                    }
+
+                    TextField("Name", text: stringBinding(for: query, keyPath: \.name))
+                        .textFieldStyle(.roundedBorder)
+
+                    Picker("Primitive", selection: primitiveTypeBinding(for: query)) {
+                        ForEach(JevPrimitiveType.allCases) { type in
+                            Text(type.displayName).tag(type)
+                        }
+                    }
+
+                    TextField("Instructions", text: stringBinding(for: query, keyPath: \.instructions))
+                        .textFieldStyle(.roundedBorder)
+                        .help("The question to ask about the sentence, e.g. \"Does this express urgency?\"")
+
+                    criteriaEditor(for: query)
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.18))
+                )
+            }
+
+            Button {
+                appModel.addJevQuery()
+            } label: {
+                Label("Add Jev Query", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
+    private func criteriaEditor(for query: JevQueryConfiguration) -> some View {
+        switch query.primitiveType {
+        case .noul:
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Optional descriptions of each outcome")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextField("What counts as true", text: stringBinding(for: query, keyPath: \.noulTrueDescription))
+                    .textFieldStyle(.roundedBorder)
+                TextField("What counts as false", text: stringBinding(for: query, keyPath: \.noulFalseDescription))
+                    .textFieldStyle(.roundedBorder)
+            }
+
+        case .choice:
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Options (need at least 2)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(query.choiceCriteria) { criterion in
+                    HStack {
+                        TextField("Option", text: choiceLabelBinding(for: query, criterionID: criterion.id))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 140)
+                        TextField("Description", text: choiceDescriptionBinding(for: query, criterionID: criterion.id))
+                            .textFieldStyle(.roundedBorder)
+                        Button {
+                            removeChoiceCriterion(query: query, criterionID: criterion.id)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                    }
+                }
+                Button {
+                    addChoiceCriterion(query: query)
+                } label: {
+                    Label("Add Option", systemImage: "plus")
+                }
+                .font(.caption)
+                .buttonStyle(.link)
+            }
+
+        case .score:
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Levels, ordered low to high (need at least 2)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(Array(query.scoreCriteria.enumerated()), id: \.offset) { index, _ in
+                    HStack {
+                        Text("\(index)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16, alignment: .trailing)
+                        TextField("Level description", text: scoreLevelBinding(for: query, index: index))
+                            .textFieldStyle(.roundedBorder)
+                        Button {
+                            removeScoreLevel(query: query, index: index)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                    }
+                }
+                Button {
+                    addScoreLevel(query: query)
+                } label: {
+                    Label("Add Level", systemImage: "plus")
+                }
+                .font(.caption)
+                .buttonStyle(.link)
+            }
+        }
+    }
+
+    private func stringBinding(
+        for query: JevQueryConfiguration,
+        keyPath: WritableKeyPath<JevQueryConfiguration, String>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                appModel.settings.jevQueries
+                    .first(where: { $0.id == query.id })?[keyPath: keyPath] ?? ""
+            },
+            set: { value in
+                var updated = appModel.settings.jevQueries
+                    .first(where: { $0.id == query.id }) ?? query
+                updated[keyPath: keyPath] = value
+                appModel.updateJevQuery(updated)
+            }
+        )
+    }
+
+    private func boolBinding(
+        for query: JevQueryConfiguration,
+        keyPath: WritableKeyPath<JevQueryConfiguration, Bool>
+    ) -> Binding<Bool> {
+        Binding(
+            get: {
+                appModel.settings.jevQueries
+                    .first(where: { $0.id == query.id })?[keyPath: keyPath] ?? false
+            },
+            set: { value in
+                var updated = appModel.settings.jevQueries
+                    .first(where: { $0.id == query.id }) ?? query
+                updated[keyPath: keyPath] = value
+                appModel.updateJevQuery(updated)
+            }
+        )
+    }
+
+    private func primitiveTypeBinding(for query: JevQueryConfiguration) -> Binding<JevPrimitiveType> {
+        Binding(
+            get: {
+                appModel.settings.jevQueries
+                    .first(where: { $0.id == query.id })?.primitiveType ?? query.primitiveType
+            },
+            set: { value in
+                var updated = appModel.settings.jevQueries
+                    .first(where: { $0.id == query.id }) ?? query
+                updated.primitiveType = value
+                appModel.updateJevQuery(updated)
+            }
+        )
+    }
+
+    private func choiceLabelBinding(for query: JevQueryConfiguration, criterionID: String) -> Binding<String> {
+        Binding(
+            get: {
+                currentQuery(query).choiceCriteria.first(where: { $0.id == criterionID })?.label ?? ""
+            },
+            set: { value in
+                var updated = currentQuery(query)
+                if let index = updated.choiceCriteria.firstIndex(where: { $0.id == criterionID }) {
+                    updated.choiceCriteria[index].label = value
+                    appModel.updateJevQuery(updated)
+                }
+            }
+        )
+    }
+
+    private func choiceDescriptionBinding(for query: JevQueryConfiguration, criterionID: String) -> Binding<String> {
+        Binding(
+            get: {
+                currentQuery(query).choiceCriteria.first(where: { $0.id == criterionID })?.description ?? ""
+            },
+            set: { value in
+                var updated = currentQuery(query)
+                if let index = updated.choiceCriteria.firstIndex(where: { $0.id == criterionID }) {
+                    updated.choiceCriteria[index].description = value
+                    appModel.updateJevQuery(updated)
+                }
+            }
+        )
+    }
+
+    private func addChoiceCriterion(query: JevQueryConfiguration) {
+        var updated = currentQuery(query)
+        updated.choiceCriteria.append(JevChoiceCriterion(label: "Option \(updated.choiceCriteria.count + 1)"))
+        appModel.updateJevQuery(updated)
+    }
+
+    private func removeChoiceCriterion(query: JevQueryConfiguration, criterionID: String) {
+        var updated = currentQuery(query)
+        updated.choiceCriteria.removeAll { $0.id == criterionID }
+        appModel.updateJevQuery(updated)
+    }
+
+    private func scoreLevelBinding(for query: JevQueryConfiguration, index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                let levels = currentQuery(query).scoreCriteria
+                return index < levels.count ? levels[index] : ""
+            },
+            set: { value in
+                var updated = currentQuery(query)
+                guard index < updated.scoreCriteria.count else { return }
+                updated.scoreCriteria[index] = value
+                appModel.updateJevQuery(updated)
+            }
+        )
+    }
+
+    private func addScoreLevel(query: JevQueryConfiguration) {
+        var updated = currentQuery(query)
+        updated.scoreCriteria.append("")
+        appModel.updateJevQuery(updated)
+    }
+
+    private func removeScoreLevel(query: JevQueryConfiguration, index: Int) {
+        var updated = currentQuery(query)
+        guard index < updated.scoreCriteria.count else { return }
+        updated.scoreCriteria.remove(at: index)
+        appModel.updateJevQuery(updated)
+    }
+
+    private func currentQuery(_ query: JevQueryConfiguration) -> JevQueryConfiguration {
+        appModel.settings.jevQueries.first(where: { $0.id == query.id }) ?? query
+    }
+}
+
 private struct GraphPanel: View {
     let snapshot: VisualizationSnapshot
 
@@ -852,6 +1156,8 @@ private struct TranscriptFactCheckPanel: View {
     let diarizationError: String?
     let isFactCheckEnabled: Bool
     let isFactChecking: Bool
+    let jevResults: [JevResultItem]
+    let isJevEnabled: Bool
     let buffer: TranscriptionBufferSnapshot
     let isTranscribing: Bool
     @Binding var autoScrollToBottom: Bool
@@ -983,6 +1289,7 @@ private struct TranscriptFactCheckPanel: View {
                                 fallbackSpeakerID: currentSpeakerID,
                                 fallbackSpeakerLabel: currentSpeakerLabel,
                                 factChecks: factChecks(for: segment),
+                                jevItems: jevResults(for: segment),
                                 isInterim: false
                             )
                         }
@@ -992,6 +1299,7 @@ private struct TranscriptFactCheckPanel: View {
                                 fallbackSpeakerID: currentSpeakerID,
                                 fallbackSpeakerLabel: currentSpeakerLabel,
                                 factChecks: [],
+                                jevItems: [],
                                 isInterim: true
                             )
                         }
@@ -1145,6 +1453,7 @@ private struct TranscriptFactCheckPanel: View {
         fallbackSpeakerID: String?,
         fallbackSpeakerLabel: String?,
         factChecks: [FactCheckItem],
+        jevItems: [JevResultItem],
         isInterim: Bool
     ) -> some View {
         let speakerID = segment.speakerID ?? fallbackSpeakerID
@@ -1218,6 +1527,26 @@ private struct TranscriptFactCheckPanel: View {
                 }
             }
         }
+
+        if isJevEnabled {
+            GridRow(alignment: .top) {
+                Color.clear
+                    .frame(width: 76, height: 1)
+                Color.clear
+                    .frame(width: 150, height: 1)
+                VStack(alignment: .leading, spacing: 6) {
+                    if isInterim {
+                        factCheckDetail(label: "Jev", badge: "Pending", color: .secondary, text: "Will run when the sentence is finalized.")
+                    } else if jevItems.isEmpty {
+                        factCheckDetail(label: "Jev", badge: "Queued", color: .secondary, text: "Waiting for a complete sentence match.")
+                    } else {
+                        ForEach(jevItems) { item in
+                            jevDetail(for: item)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func factCheckDetail(for item: FactCheckItem) -> some View {
@@ -1262,6 +1591,57 @@ private struct TranscriptFactCheckPanel: View {
         })
 
         return factChecks.filter { item in
+            let normalizedItem = FactCheckCoordinator.normalizedSentence(item.sentence)
+            return normalizedItem == normalizedSegment
+                || normalizedSentences.contains(normalizedItem)
+                || segmentText.localizedCaseInsensitiveContains(item.sentence)
+        }
+    }
+
+    private func jevDetail(for item: JevResultItem) -> some View {
+        let label = item.queryName
+        switch item.state {
+        case .queued:
+            return factCheckDetail(label: label, badge: "Queued", color: .secondary, text: "Waiting for Jev.")
+        case .checking:
+            return factCheckDetail(label: label, badge: "Checking", color: .orange, text: "Jev request in progress.")
+        case .failed(let message):
+            return factCheckDetail(label: label, badge: "Failed", color: .red, text: message)
+        case .completed(let answer):
+            return factCheckDetail(label: label, badge: "Result", color: .accentColor, text: jevAnswerText(answer))
+        }
+    }
+
+    private func jevAnswerText(_ answer: JevAnswer) -> String {
+        switch answer {
+        case .noul(let probability):
+            let percent = Int((probability * 100).rounded())
+            let hint = probability >= 0.8 || probability <= 0.2
+                ? "confident"
+                : "ambiguous"
+            return "P(yes): \(percent)% (\(hint))"
+        case .choice(let selected, let confidence, _):
+            let percent = Int((confidence * 100).rounded())
+            return "\(selected) (\(percent)% confidence)"
+        case .score(let value, let confidence, let legend, _):
+            let percent = Int((confidence * 100).rounded())
+            let nearestLevel = Int(value.rounded())
+            var text = String(format: "%.2f (%d%% confidence)", value, percent)
+            if let description = legend["\(nearestLevel)"], !description.isEmpty {
+                text += " — \(description)"
+            }
+            return text
+        }
+    }
+
+    private func jevResults(for segment: TranscriptSegment) -> [JevResultItem] {
+        let segmentText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSegment = FactCheckCoordinator.normalizedSentence(segmentText)
+        let normalizedSentences = Set(FactCheckCoordinator.completeSentences(in: segmentText).map {
+            FactCheckCoordinator.normalizedSentence($0)
+        })
+
+        return jevResults.filter { item in
             let normalizedItem = FactCheckCoordinator.normalizedSentence(item.sentence)
             return normalizedItem == normalizedSegment
                 || normalizedSentences.contains(normalizedItem)
@@ -1573,6 +1953,15 @@ struct SettingsView: View {
                 Label("Prompt Templates", systemImage: "text.badge.plus")
             }
             .tag(SettingsSectionTab.promptTemplates)
+
+            ScrollView {
+                settingsJevColumn
+                    .padding(.horizontal, 2)
+            }
+            .tabItem {
+                Label("Jev Configuration", systemImage: "questionmark.diamond")
+            }
+            .tag(SettingsSectionTab.jevConfiguration)
         }
         .padding()
         .frame(minWidth: 680, minHeight: 560)
@@ -1789,6 +2178,38 @@ struct SettingsView: View {
                         .font(.headline)
 
                     AIPromptTemplateSettingsView(compact: true)
+                        .environmentObject(appModel)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var settingsJevColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Jev Connection", systemImage: "questionmark.diamond")
+                        .font(.headline)
+                    Text("Jev (TypeSafe System One) answers narrow, typed questions about a transcript sentence and returns a probability, a choice, or a score, instead of generating text.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    TextField("Base URL", text: $appModel.settings.jevBaseURL)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Model", text: $appModel.settings.jevModel)
+                        .textFieldStyle(.roundedBorder)
+                    SecureField("API Key", text: $appModel.settings.jevAPIKey)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Jev Queries", systemImage: "list.bullet")
+                        .font(.headline)
+
+                    JevQuerySettingsView(compact: true)
                         .environmentObject(appModel)
                 }
             }

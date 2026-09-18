@@ -40,6 +40,26 @@ Mic → AVAudioEngine tap → copyBuffer() → Task { @MainActor }
   → fan out to registered consumers (listen/record/transcribe)
 ```
 
+### Voice Processing Pipeline
+
+VoiceTranscribe uses a split voice-processing pipeline: Apple provides speech-to-text and sentence timing, while SpeechVAD provides best-effort speaker diarization. These paths run from the same copied `AVAudioPCMBuffer` stream but are intentionally separate so diarization latency or failure does not block transcript text.
+
+1. **Audio capture and fan-out — AVFoundation/CoreAudio.** `AudioCaptureService` owns one `AVAudioEngine` input tap for the selected source, including physical microphones and virtual devices such as BlackHole. It deep-copies every tap buffer, computes RMS/peak visualization metrics, and fans buffers out to registered consumers (`record`, `transcribe`, and `diarize`). Source switches must stop active consumers first because all modes share this capture service.
+
+2. **Recording — AVFoundation.** `RecordingService` writes copied buffers through `AsyncAudioFileWriter` on a utility queue. Recording is independent of transcription and diarization; it can run at the same time because it is just another capture consumer.
+
+3. **Speech transcription — Apple Speech.** `TranscriptionCoordinator` uses `AppleSpeechTranscriptionService`, backed by Apple's `SpeechAnalyzer` and `SpeechTranscriber` APIs. Incoming buffers are normalized/resampled into the analyzer's preferred format, and Apple Speech produces partial and finalized transcript segments. This is the authoritative source for spoken text and sentence boundaries.
+
+4. **Speaker diarization — SpeechVAD Sortformer.** `DiarizationCoordinator` uses `SpeechSwiftSortformerDiarizationEngine`, which wraps SpeechVAD's `SortformerStreamingSession`. Audio is downmixed to mono, resampled to 16 kHz, and pushed into Sortformer. Sortformer returns whole-stream speaker time ranges keyed by session-local speaker slots. The app maps those integer slots to `Speaker N`, maintains a separate speaker timeline, and annotates transcript rows with the latest finalized diarization label when Apple Speech produces a segment.
+
+5. **Speaker display corrections — app layer.** Speaker names and row-level speaker corrections are managed in `AppModel`, `TranscriptionCoordinator`, and `DiarizationCoordinator`, not by the diarization library. Renaming `Speaker 1` changes display/export labels for that generated slot. Clicking a transcript row's speaker label changes only that row's stored speaker assignment.
+
+6. **AI processing — configured LLM endpoints.** `FactCheckCoordinator` listens to finalized transcript sentences, applies enabled prompt templates, performs prompt substitutions such as `{{sentence}}`, `{{conversation}}`, and `{{prompt-state}}`, and queues model calls. Historical type/trace names still say `FactCheck`, but user-facing behavior is AI Processing.
+
+7. **Summary and export — app layer.** `SummaryCoordinator`, `TranscriptDocument`, and `MarkdownExportService` consume finalized transcript segments, speaker labels, AI results, prompt state, and diarization timelines. Markdown exports include both the transcript table and a separate speaker timeline when diarization segments are available.
+
+Current limitation: SpeechVAD Sortformer provides session-local speaker slots, not persistent voice identity. In SpeechVAD, `SortformerStreamingSession.currentResult()` returns an empty `speakerEmbeddings` array, and the app currently stores only `Speaker N` slot labels. SpeechVAD also includes WeSpeaker, ReDimNet2, CAM++, and pyannote-style pipelines that can produce voice embeddings or speaker centroids, but VoiceTranscribe does not currently run those models in the live pipeline.
+
 ### Key Design Decisions
 
 1. **Single capture path, multiple consumers.** One `AVAudioEngine` tap feeds all active modes. `AudioCaptureService` fans out copied buffers. Capture stops when no consumers remain (`stopIfUnused()`).

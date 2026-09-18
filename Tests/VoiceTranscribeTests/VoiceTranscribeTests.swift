@@ -88,12 +88,12 @@ import Testing
             isEnabled: false
         )
     ]
-    #expect(settings.isFactCheckActive == false)
+    #expect(settings.isAIPromptActive == false)
 
     var promptTemplate = settings.aiPromptTemplates[0]
     promptTemplate.isEnabled = true
     settings.updateAIPromptTemplate(promptTemplate)
-    #expect(settings.isFactCheckActive == true)
+    #expect(settings.isAIPromptActive == true)
 }
 
 @Test func promptTemplateSanitizerPreservesEditableSpaces() {
@@ -418,18 +418,18 @@ import Testing
     #expect(matcher.profiles.count == 2)
 }
 
-@Test func markdownExportIncludesDetailsRecordingSummaryAndFactChecks() {
+@Test func markdownExportIncludesDetailsRecordingSummaryAndAIPrompts() {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
     let start = Date(timeIntervalSince1970: 1_779_971_597.0)
     let second = start.addingTimeInterval(3)
     let end = start.addingTimeInterval(7)
     let llm = LLMEndpointConfiguration.defaultConfiguration()
-    let factCheck = FactCheckItem(
+    let aiPrompt = AIPromptItem(
         sentence: "The Earth orbits the Sun.",
         llm: llm,
-        promptTemplate: FactCheckPrompt.defaultTemplate,
-        state: .completed(FactCheckResult(
+        promptTemplate: AIPromptPrompt.defaultTemplate,
+        state: .completed(AIPromptResult(
             sentence: "The Earth orbits the Sun.",
             verdict: .supported,
             confidence: .high,
@@ -446,8 +446,7 @@ import Testing
             endDate: end,
             exportedAt: end,
             transcriptionEngine: "FluidAudio",
-            aiEnabled: true,
-            factCheckEnabled: true,
+            aiPromptEnabled: true,
             llmName: "Local Ollama",
             llmProvider: "Ollama",
             llmEndpoint: "http://localhost:11434",
@@ -462,7 +461,7 @@ import Testing
                     state: "   "
                 )
             ],
-            factCheckPrompt: "Fact-check {{sentence}}",
+            aiPromptPrompt: "Fact-check {{sentence}}",
             summaryPrompt: "Summarize this recording.",
             audioURL: URL(fileURLWithPath: "/tmp/recording.m4a"),
             transcriptURL: URL(fileURLWithPath: "/tmp/recording.txt"),
@@ -485,7 +484,7 @@ import Testing
                 confidence: 0.82
             )
         ],
-        factChecks: [factCheck],
+        aiPrompts: [aiPrompt],
         summaryParagraphs: ["The recording discusses astronomy."],
         calendar: calendar
     )
@@ -541,13 +540,12 @@ import Testing
             endDate: end,
             exportedAt: end,
             transcriptionEngine: "FluidAudio",
-            aiEnabled: false,
-            factCheckEnabled: false,
+            aiPromptEnabled: false,
             llmName: "Local Ollama",
             llmProvider: "Ollama",
             llmEndpoint: "http://localhost:11434",
             llmModel: "igorls/gemma-4-12B-it-heretic-GGUF",
-            factCheckPrompt: "",
+            aiPromptPrompt: "",
             summaryPrompt: "Summarize this recording.",
             jevEnabled: true,
             jevBaseURL: "https://api.typesafe.ai",
@@ -562,7 +560,7 @@ import Testing
                 speakerID: "Speaker 1"
             )
         ],
-        factChecks: [],
+        aiPrompts: [],
         jevResults: [jevResult],
         summaryParagraphs: [],
         calendar: calendar
@@ -591,13 +589,12 @@ import Testing
             endDate: start.addingTimeInterval(4),
             exportedAt: start,
             transcriptionEngine: "Apple Speech",
-            aiEnabled: false,
-            factCheckEnabled: false,
+            aiPromptEnabled: false,
             llmName: "",
             llmProvider: "",
             llmEndpoint: "",
             llmModel: "",
-            factCheckPrompt: "",
+            aiPromptPrompt: "",
             summaryPrompt: ""
         ),
         finalizedSegments: [
@@ -617,7 +614,7 @@ import Testing
                 endTime: 4
             )
         ],
-        factChecks: [],
+        aiPrompts: [],
         summaryParagraphs: [],
         calendar: calendar
     )
@@ -626,24 +623,24 @@ import Testing
     #expect(markdown.contains("| 0:00 | 0:04 | Dana |  |"))
 }
 
-@Test func factCheckSentenceExtractionRequiresCompleteSentences() {
-    let sentences = FactCheckCoordinator.completeSentences(
+@Test func aiPromptSentenceExtractionRequiresCompleteSentences() {
+    let sentences = AIPromptCoordinator.completeSentences(
         in: "Mars is red. Is water wet? This is incomplete"
     )
 
     #expect(sentences == ["Mars is red.", "Is water wet?"])
 }
 
-@Test func factCheckPromptIncludesSchemaAndSentence() {
-    let prompt = OllamaFactCheckService.prompt(for: "The Earth orbits the Sun.")
+@Test func aiPromptPromptIncludesSchemaAndSentence() {
+    let prompt = OllamaAIPromptService.prompt(for: "The Earth orbits the Sun.")
 
     #expect(prompt.contains("\"verdict\""))
     #expect(prompt.contains("not_factual"))
     #expect(prompt.contains("The Earth orbits the Sun."))
 }
 
-@Test func factCheckPromptTemplateReplacesSentencePlaceholder() {
-    let prompt = FactCheckPrompt.render(
+@Test func aiPromptPromptTemplateReplacesSentencePlaceholder() {
+    let prompt = AIPromptPrompt.render(
         template: "Check this: {{sentence}}",
         sentence: "The Earth orbits the Sun."
     )
@@ -651,8 +648,8 @@ import Testing
     #expect(prompt == "Check this: The Earth orbits the Sun.")
 }
 
-@Test func factCheckPromptTemplateAppendsSentenceWhenPlaceholderIsMissing() {
-    let prompt = FactCheckPrompt.render(
+@Test func aiPromptPromptTemplateAppendsSentenceWhenPlaceholderIsMissing() {
+    let prompt = AIPromptPrompt.render(
         template: "Fact-check the following transcript sentence.",
         sentence: "The Earth orbits the Sun."
     )
@@ -661,14 +658,14 @@ import Testing
     #expect(prompt.contains("Sentence:\nThe Earth orbits the Sun."))
 }
 
-@Test func factCheckPromptTemplateReplacesConversationPlaceholderWithTimestampedTranscript() {
+@Test func aiPromptPromptTemplateReplacesConversationPlaceholderWithTimestampedTranscript() {
     let base = Calendar.current.startOfDay(for: Date())
-    let context = FactCheckPromptContext(entries: [
+    let context = AIPromptPromptContext(entries: [
         .init(timestamp: base, text: "First sentence."),
         .init(timestamp: base.addingTimeInterval(61), text: "Second sentence.")
     ])
 
-    let prompt = FactCheckPrompt.render(
+    let prompt = AIPromptPrompt.render(
         template: "Conversation:\n{{conversation}}\nCurrent:\n{{sentence}}",
         sentence: "Second sentence.",
         context: context
@@ -680,16 +677,16 @@ import Testing
     #expect(!prompt.contains("{{conversation}}"))
 }
 
-@Test func factCheckPromptTemplateReplacesLastNPlaceholdersWithRecentTimestampedTranscript() {
+@Test func aiPromptPromptTemplateReplacesLastNPlaceholdersWithRecentTimestampedTranscript() {
     let base = Calendar.current.startOfDay(for: Date())
-    let context = FactCheckPromptContext(entries: (1...12).map { index in
+    let context = AIPromptPromptContext(entries: (1...12).map { index in
         .init(
             timestamp: base.addingTimeInterval(TimeInterval(index)),
             text: "Sentence \(index)."
         )
     })
 
-    let prompt = FactCheckPrompt.render(
+    let prompt = AIPromptPrompt.render(
         template: "Last3:\n{{last-3}}\nLast5:\n{{last-5}}\nLast10:\n{{last-10}}",
         sentence: "Sentence 12.",
         context: context
@@ -706,15 +703,15 @@ import Testing
     #expect(!prompt.contains("{{last-10}}"))
 }
 
-@Test func factCheckPromptTemplateAcceptsMalformedLast3Placeholder() {
+@Test func aiPromptPromptTemplateAcceptsMalformedLast3Placeholder() {
     let base = Calendar.current.startOfDay(for: Date())
-    let context = FactCheckPromptContext(entries: [
+    let context = AIPromptPromptContext(entries: [
         .init(timestamp: base.addingTimeInterval(1), text: "One."),
         .init(timestamp: base.addingTimeInterval(2), text: "Two."),
         .init(timestamp: base.addingTimeInterval(3), text: "Three.")
     ])
 
-    let prompt = FactCheckPrompt.render(
+    let prompt = AIPromptPrompt.render(
         template: "{{last-3}",
         sentence: "Three.",
         context: context
@@ -725,22 +722,22 @@ import Testing
     #expect(!prompt.contains("{{last-3}"))
 }
 
-@Test func factCheckPromptContextSplitsSegmentsIntoTimestampedSentences() {
+@Test func aiPromptPromptContextSplitsSegmentsIntoTimestampedSentences() {
     let timestamp = Calendar.current.startOfDay(for: Date()).addingTimeInterval(42)
-    let context = FactCheckPromptContext(segments: [
+    let context = AIPromptPromptContext(segments: [
         TranscriptSegment(text: "One. Two.", timestamp: timestamp, isFinal: true)
     ])
 
     #expect(context.formattedConversation() == "[00:00:42] One.\n[00:00:42] Two.")
 }
 
-@Test func factCheckPromptTemplateReplacesPromptStatePlaceholder() {
-    let context = FactCheckPromptContext(
+@Test func aiPromptPromptTemplateReplacesPromptStatePlaceholder() {
+    let context = AIPromptPromptContext(
         entries: [.init(timestamp: Date(), text: "New item.")],
         promptState: "- Existing item"
     )
 
-    let prompt = FactCheckPrompt.render(
+    let prompt = AIPromptPrompt.render(
         template: "Update state:\n{{prompt-state}}\nFrom:\n{{sentence}}",
         sentence: "New item.",
         context: context
@@ -751,12 +748,12 @@ import Testing
     #expect(!prompt.contains("{{prompt-state}}"))
 }
 
-@Test func ollamaFactCheckParserAcceptsMissingNotes() {
+@Test func ollamaAIPromptParserAcceptsMissingNotes() {
     let raw = """
     {"sentence":"The Earth orbits the Sun.","verdict":"supported","confidence":"high","explanation":"This is a basic astronomical fact."}
     """
 
-    let result = OllamaFactCheckService.parseResult(raw, fallbackSentence: "fallback")
+    let result = OllamaAIPromptService.parseResult(raw, fallbackSentence: "fallback")
 
     #expect(result.sentence == "The Earth orbits the Sun.")
     #expect(result.verdict == .supported)
@@ -764,24 +761,24 @@ import Testing
     #expect(result.notes == [])
 }
 
-@Test func ollamaFactCheckParserAcceptsFencedJSON() {
+@Test func ollamaAIPromptParserAcceptsFencedJSON() {
     let raw = """
     ```json
     {"sentence":"The Earth orbits the Sun.","verdict":"supported","confidence":"high","explanation":"This is a basic astronomical fact."}
     ```
     """
 
-    let result = OllamaFactCheckService.parseResult(raw, fallbackSentence: "fallback")
+    let result = OllamaAIPromptService.parseResult(raw, fallbackSentence: "fallback")
 
     #expect(result.sentence == "The Earth orbits the Sun.")
     #expect(result.verdict == .supported)
     #expect(result.rawResponse == nil)
 }
 
-@Test func ollamaFactCheckParserDisplaysPlainTextResponse() {
+@Test func ollamaAIPromptParserDisplaysPlainTextResponse() {
     let raw = "This statement is broadly accurate: the Earth orbits the Sun."
 
-    let result = OllamaFactCheckService.parseResult(raw, fallbackSentence: "The Earth orbits the Sun.")
+    let result = OllamaAIPromptService.parseResult(raw, fallbackSentence: "The Earth orbits the Sun.")
 
     #expect(result.sentence == "The Earth orbits the Sun.")
     #expect(result.rawResponse == raw)
@@ -789,9 +786,9 @@ import Testing
 }
 
 @MainActor
-@Test func factCheckCoordinatorSuppressesDuplicateSentences() async {
-    let service = FakeFactCheckService()
-    let coordinator = FactCheckCoordinator(service: service)
+@Test func aiPromptCoordinatorSuppressesDuplicateSentences() async {
+    let service = FakeAIPromptService()
+    let coordinator = AIPromptCoordinator(service: service)
     let llm = LLMEndpointConfiguration.defaultConfiguration(
         endpoint: "http://localhost:11434",
         model: "test-model"
@@ -819,9 +816,9 @@ import Testing
 }
 
 @MainActor
-@Test func factCheckCoordinatorDoesNotQueueWhenDisabled() async {
-    let service = FakeFactCheckService()
-    let coordinator = FactCheckCoordinator(service: service)
+@Test func aiPromptCoordinatorDoesNotQueueWhenDisabled() async {
+    let service = FakeAIPromptService()
+    let coordinator = AIPromptCoordinator(service: service)
     let llm = LLMEndpointConfiguration.defaultConfiguration(
         endpoint: "http://localhost:11434",
         model: "test-model"
@@ -840,9 +837,9 @@ import Testing
 }
 
 @MainActor
-@Test func factCheckCoordinatorQueuesOneItemPerEnabledPrompt() async {
-    let service = FakeFactCheckService()
-    let coordinator = FactCheckCoordinator(service: service)
+@Test func aiPromptCoordinatorQueuesOneItemPerEnabledPrompt() async {
+    let service = FakeAIPromptService()
+    let coordinator = AIPromptCoordinator(service: service)
     let llm = LLMEndpointConfiguration.defaultConfiguration(
         endpoint: "http://localhost:11434",
         model: "test-model"
@@ -877,10 +874,10 @@ import Testing
 }
 
 @MainActor
-@Test func factCheckCoordinatorBatchesPromptQuestionsWhenEnabled() async {
-    let probe = BatchFactCheckProbe()
-    let service = BatchProbeFactCheckService(probe: probe)
-    let coordinator = FactCheckCoordinator(service: service)
+@Test func aiPromptCoordinatorBatchesPromptQuestionsWhenEnabled() async {
+    let probe = BatchAIPromptProbe()
+    let service = BatchProbeAIPromptService(probe: probe)
+    let coordinator = AIPromptCoordinator(service: service)
     let llm = LLMEndpointConfiguration.defaultConfiguration(
         endpoint: "http://localhost:11434",
         model: "test-model"
@@ -920,10 +917,10 @@ import Testing
 }
 
 @MainActor
-@Test func factCheckCoordinatorAccruesPromptStateBetweenPromptCalls() async {
+@Test func aiPromptCoordinatorAccruesPromptStateBetweenPromptCalls() async {
     let probe = PromptStateProbe()
-    let service = PromptStateFactCheckService(probe: probe)
-    let coordinator = FactCheckCoordinator(service: service)
+    let service = PromptStateAIPromptService(probe: probe)
+    let coordinator = AIPromptCoordinator(service: service)
     let llm = LLMEndpointConfiguration.defaultConfiguration(
         endpoint: "http://localhost:11434",
         model: "test-model"
@@ -953,10 +950,10 @@ import Testing
 }
 
 @MainActor
-@Test func factCheckCoordinatorLimitsConcurrentRequestsToThree() async {
-    let probe = ConcurrentFactCheckProbe()
-    let service = SlowFactCheckService(probe: probe)
-    let coordinator = FactCheckCoordinator(service: service)
+@Test func aiPromptCoordinatorLimitsConcurrentRequestsToThree() async {
+    let probe = ConcurrentAIPromptProbe()
+    let service = SlowAIPromptService(probe: probe)
+    let coordinator = AIPromptCoordinator(service: service)
     let llm = LLMEndpointConfiguration.defaultConfiguration(
         endpoint: "http://localhost:11434",
         model: "test-model"
@@ -1061,14 +1058,14 @@ private final class FakeTranscriptionService: TranscriptionService {
     }
 }
 
-private struct FakeFactCheckService: FactCheckService {
-    func factCheck(
+private struct FakeAIPromptService: AIPromptService {
+    func evaluate(
         sentence: String,
         llm: LLMEndpointConfiguration,
         promptTemplate: String,
-        promptContext: FactCheckPromptContext
-    ) async throws -> FactCheckResult {
-        FactCheckResult(
+        promptContext: AIPromptPromptContext
+    ) async throws -> AIPromptResult {
+        AIPromptResult(
             sentence: sentence,
             verdict: .supported,
             confidence: .high,
@@ -1077,7 +1074,7 @@ private struct FakeFactCheckService: FactCheckService {
     }
 }
 
-private actor ConcurrentFactCheckProbe {
+private actor ConcurrentAIPromptProbe {
     private var current = 0
     private var maximum = 0
 
@@ -1095,7 +1092,7 @@ private actor ConcurrentFactCheckProbe {
     }
 }
 
-private actor BatchFactCheckProbe {
+private actor BatchAIPromptProbe {
     private var singleCalls = 0
     private var batchCalls = 0
     private var batchSizes: [Int] = []
@@ -1114,17 +1111,17 @@ private actor BatchFactCheckProbe {
     }
 }
 
-private struct BatchProbeFactCheckService: FactCheckService {
-    let probe: BatchFactCheckProbe
+private struct BatchProbeAIPromptService: AIPromptService {
+    let probe: BatchAIPromptProbe
 
-    func factCheck(
+    func evaluate(
         sentence: String,
         llm: LLMEndpointConfiguration,
         promptTemplate: String,
-        promptContext: FactCheckPromptContext
-    ) async throws -> FactCheckResult {
+        promptContext: AIPromptPromptContext
+    ) async throws -> AIPromptResult {
         await probe.recordSingleCall()
-        return FactCheckResult(
+        return AIPromptResult(
             sentence: sentence,
             verdict: .supported,
             confidence: .high,
@@ -1132,12 +1129,12 @@ private struct BatchProbeFactCheckService: FactCheckService {
         )
     }
 
-    func factCheckBatch(items: [FactCheckItem]) async throws -> [UUID: FactCheckResult] {
+    func evaluateBatch(items: [AIPromptItem]) async throws -> [UUID: AIPromptResult] {
         await probe.recordBatchCall(size: items.count)
         return Dictionary(uniqueKeysWithValues: items.map { item in
             (
                 item.id,
-                FactCheckResult(
+                AIPromptResult(
                     sentence: item.sentence,
                     verdict: .supported,
                     confidence: .high,
@@ -1161,18 +1158,18 @@ private actor PromptStateProbe {
     }
 }
 
-private struct PromptStateFactCheckService: FactCheckService {
+private struct PromptStateAIPromptService: AIPromptService {
     let probe: PromptStateProbe
 
-    func factCheck(
+    func evaluate(
         sentence: String,
         llm: LLMEndpointConfiguration,
         promptTemplate: String,
-        promptContext: FactCheckPromptContext
-    ) async throws -> FactCheckResult {
+        promptContext: AIPromptPromptContext
+    ) async throws -> AIPromptResult {
         let index = await probe.record(promptContext.promptState)
         try? await Task.sleep(nanoseconds: 20_000_000)
-        return FactCheckResult(
+        return AIPromptResult(
             sentence: sentence,
             verdict: .unverifiable,
             confidence: .low,
@@ -1182,19 +1179,19 @@ private struct PromptStateFactCheckService: FactCheckService {
     }
 }
 
-private struct SlowFactCheckService: FactCheckService {
-    let probe: ConcurrentFactCheckProbe
+private struct SlowAIPromptService: AIPromptService {
+    let probe: ConcurrentAIPromptProbe
 
-    func factCheck(
+    func evaluate(
         sentence: String,
         llm: LLMEndpointConfiguration,
         promptTemplate: String,
-        promptContext: FactCheckPromptContext
-    ) async throws -> FactCheckResult {
+        promptContext: AIPromptPromptContext
+    ) async throws -> AIPromptResult {
         await probe.started()
         try? await Task.sleep(nanoseconds: 80_000_000)
         await probe.finished()
-        return FactCheckResult(
+        return AIPromptResult(
             sentence: sentence,
             verdict: .supported,
             confidence: .high,

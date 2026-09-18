@@ -289,7 +289,7 @@ final class JevCoordinator: ObservableObject {
             return
         }
 
-        for sentence in FactCheckCoordinator.completeSentences(in: segment.text) {
+        for sentence in AIPromptCoordinator.completeSentences(in: segment.text) {
             enqueue(sentence: sentence, queries: queries, apiKey: apiKey, baseURL: baseURL, model: model)
         }
     }
@@ -301,7 +301,7 @@ final class JevCoordinator: ObservableObject {
         baseURL: String,
         model: String
     ) {
-        let normalized = FactCheckCoordinator.normalizedSentence(sentence)
+        let normalized = AIPromptCoordinator.normalizedSentence(sentence)
         guard !normalized.isEmpty else {
             return
         }

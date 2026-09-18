@@ -4,13 +4,14 @@ Last updated: 2026-09-18
 
 ## Repository State
 
-- Current branch: `feature/jev-integration` (uncommitted work in progress)
-- `main` state: synchronized with `origin/main` at `59edef9 Merge hide-empty-ai-processing`
-- Latest tag: `v2.4.38`
-- App version on `main`: `2.4.38`, bundle build `81`
-- App version in the current working tree (uncommitted, on `feature/jev-integration`): `2.4.39`, bundle build `82`
-- Merged-and-cleaned-up branches still present locally/remotely: `fix/transcribe-restart-crash-debounce`, `chore/agents-md-cross-tool-support`, `feature/hide-empty-ai-processing` (all merged into `main`, not deleted)
+- Current branch: `refactor/rename-factcheck-to-ai-prompt` (uncommitted work in progress)
+- `main` state: synchronized with `origin/main` at `bd0ea5a Merge Jev markdown export fix and process guardrail`
+- Latest tag: `v2.4.40`
+- App version on `main`: `2.4.40`, bundle build `83`
+- App version in the current working tree (uncommitted, on `refactor/rename-factcheck-to-ai-prompt`): `2.4.41`, bundle build `84`
+- Merged-and-cleaned-up branches still present locally/remotely: `fix/transcribe-restart-crash-debounce`, `chore/agents-md-cross-tool-support`, `feature/hide-empty-ai-processing`, `feature/jev-integration`, `fix/jev-markdown-export-and-guardrails` (all merged into `main`, not deleted)
 - Repo-root operating guide is now `AGENTS.md` (cross-tool standard, read natively by Codex/opencode/etc.), with `CLAUDE.md` as a symlink to it so Claude Code also auto-loads it. The old `AGENT.md` (singular, no tool read it automatically) is gone.
+- The historical `FactCheck`-prefixed naming (file, types, coordinator, trace events) is gone as of the current working-tree changes — renamed to `AIPrompt` throughout. See `IMPLEMENTATION.md` #103 for the full scope. `Sources/VoiceTranscribe/FactCheckService.swift` is now `AIPromptService.swift`.
 
 Local working tree notes:
 
@@ -34,7 +35,7 @@ The diarization and voice identity path is intentionally best-effort and does no
 
 Two parallel AI backends now run per finalized transcript sentence:
 
-- **AI Prompts / FactCheckCoordinator** — free-text LLM prompts (Ollama/OpenAI-compatible/OpenRouter/Anthropic/Gemini), one HTTP call per enabled prompt template (with opt-in cross-template batching when they share a model).
+- **AI Prompts / AIPromptCoordinator** — free-text LLM prompts (Ollama/OpenAI-compatible/OpenRouter/Anthropic/Gemini), one HTTP call per enabled prompt template (with opt-in cross-template batching when they share a model).
 - **Jev Queries / JevCoordinator** (in progress, uncommitted) — structured typed questions against TypeSafe's Jev API, always batching every enabled query for a sentence into a single `POST /v1/systemone` call.
 
 ## Implemented Capabilities
@@ -70,7 +71,7 @@ Two parallel AI backends now run per finalized transcript sentence:
 - `Sources/VoiceTranscribe/TranscriptionService.swift` - Apple Speech pipeline.
 - `Sources/VoiceTranscribe/DiarizationService.swift` - SpeechVAD Sortformer integration.
 - `Sources/VoiceTranscribe/VoiceIdentityService.swift` - SpeechVAD WeSpeaker matching.
-- `Sources/VoiceTranscribe/FactCheckService.swift` - AI Prompts (free-text LLM) implementation; historical type names still use `FactCheck`.
+- `Sources/VoiceTranscribe/AIPromptService.swift` - AI Prompts (free-text LLM) implementation.
 - `Sources/VoiceTranscribe/JevService.swift` - Jev (TypeSafe System One) implementation: wire structs, `TypeSafeJevService`, `JevCoordinator`. New this session, uncommitted.
 - `Sources/VoiceTranscribe/Views.swift` - SwiftUI UI.
 - `scripts/extract-star-trek-sample.sh` - helper to extract a sample audio file from local media.
@@ -107,8 +108,7 @@ Last known verification (on `feature/jev-integration`, uncommitted):
 - WeSpeaker matching is session-only and best-effort; it can over-split or under-split speakers depending on audio quality and diarization windows.
 - User naming/correction changes display/export labels only; it is not biometric identification.
 - File and live transcription rely on Apple Speech for sentence boundaries because FluidAudio-style diarization was not reliable for segmentation.
-- Prompt/AI type names still include historical `FactCheck` identifiers in code and traces, while UI/docs should say `AI Processing`.
-- `/tmp/VoiceTranscribe.log` is the primary trace log and should include transcription, diarization, voice identity, AI Processing, and (new) Jev events (`jev.request.started`, `jev.response.received`, `jev.queued`, `jev.completed`, `jev.failed`).
+- `/tmp/VoiceTranscribe.log` is the primary trace log and should include transcription, diarization, voice identity, AI Processing (`aiPrompt.*`), and Jev (`jev.*`) events.
 - All LLM/Jev API keys are stored in plaintext in `UserDefaults` (no Keychain anywhere in this app) — a known, accepted, pre-existing risk, not something introduced this session.
 - The `.gitignore` `sources/`-vs-`Sources/` case-collision bug (see Local working tree notes above) is unresolved; new files under `Sources/` need `git add -f`.
 

@@ -26,13 +26,13 @@ final class SummaryCoordinator: ObservableObject {
             return
         }
 
-        let completeSentences = FactCheckCoordinator.completeSentences(in: segment.text)
+        let completeSentences = AIPromptCoordinator.completeSentences(in: segment.text)
         let candidates = completeSentences.isEmpty ? [segment.text] : completeSentences
         var didChange = false
 
         for sentence in candidates {
             let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
-            let normalized = FactCheckCoordinator.normalizedSentence(trimmed)
+            let normalized = AIPromptCoordinator.normalizedSentence(trimmed)
             guard !trimmed.isEmpty, !normalized.isEmpty, !seenSentences.contains(normalized) else {
                 continue
             }

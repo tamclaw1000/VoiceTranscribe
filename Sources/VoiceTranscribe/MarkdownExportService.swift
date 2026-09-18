@@ -7,14 +7,13 @@ struct MarkdownExportContext {
     var endDate: Date?
     var exportedAt: Date
     var transcriptionEngine: String
-    var aiEnabled: Bool
-    var factCheckEnabled: Bool
+    var aiPromptEnabled: Bool
     var llmName: String
     var llmProvider: String
     var llmEndpoint: String
     var llmModel: String
     var promptStates: [MarkdownExportPromptState] = []
-    var factCheckPrompt: String
+    var aiPromptPrompt: String
     var summaryPrompt: String
     var jevEnabled: Bool = false
     var jevBaseURL: String = ""
@@ -35,7 +34,7 @@ enum MarkdownExportService {
         context: MarkdownExportContext,
         finalizedSegments: [TranscriptSegment],
         speakerSegments: [SpeakerDiarizationSegment] = [],
-        factChecks: [FactCheckItem],
+        aiPrompts: [AIPromptItem],
         jevResults: [JevResultItem] = [],
         summaryParagraphs: [String],
         calendar: Calendar = .current
@@ -59,7 +58,7 @@ enum MarkdownExportService {
         for (index, segment) in finalizedSegments.enumerated() {
             let end = nextTimestamp(after: index, in: finalizedSegments) ?? context.endDate
             let length = segmentLengthText(start: segment.timestamp, end: end)
-            let aiResult = factCheckText(for: segment, factChecks: factChecks)
+            let aiResult = aiPromptText(for: segment, aiPrompts: aiPrompts)
             let jevResult = jevText(for: segment, jevResults: jevResults)
             lines.append("| \(tableCell(dateTimeText(segment.timestamp, calendar: calendar))) | \(tableCell(length)) | \(tableCell(speakerText(segment))) | \(tableCell(segment.text)) | \(tableCell(aiResult)) | \(tableCell(jevResult)) |")
         }
@@ -113,7 +112,7 @@ enum MarkdownExportService {
         lines.append("")
         lines.append("# AI RESULTS")
         lines.append("")
-        lines.append("- AI processing enabled: \(context.aiEnabled ? "Yes" : "No")")
+        lines.append("- AI processing enabled: \(context.aiPromptEnabled ? "Yes" : "No")")
         lines.append("- LLM endpoint: \(context.llmName)")
         lines.append("- LLM provider: \(context.llmProvider)")
         lines.append("- LLM base URL: \(context.llmEndpoint)")
@@ -127,7 +126,7 @@ enum MarkdownExportService {
         }
 
         appendPromptStates(context.promptStates, to: &lines)
-        appendPromptSection(title: "AI Processing Prompts", prompt: context.factCheckPrompt, to: &lines)
+        appendPromptSection(title: "AI Processing Prompts", prompt: context.aiPromptPrompt, to: &lines)
         appendPromptSection(title: "Summary Prompt", prompt: context.summaryPrompt, to: &lines)
     }
 
@@ -301,7 +300,7 @@ enum MarkdownExportService {
         return formatter.string(from: date)
     }
 
-    private static func factCheckText(for item: FactCheckItem) -> String {
+    private static func aiPromptText(for item: AIPromptItem) -> String {
         let prefix = item.promptTemplateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? ""
             : "\(item.promptTemplateName): "
@@ -317,23 +316,23 @@ enum MarkdownExportService {
         }
     }
 
-    private static func factCheckText(for segment: TranscriptSegment, factChecks: [FactCheckItem]) -> String {
-        let matches = factChecksForSegment(segment, factChecks: factChecks)
+    private static func aiPromptText(for segment: TranscriptSegment, aiPrompts: [AIPromptItem]) -> String {
+        let matches = aiPromptsForSegment(segment, aiPrompts: aiPrompts)
         guard !matches.isEmpty else {
             return ""
         }
-        return matches.map { factCheckText(for: $0) }.joined(separator: "\n\n")
+        return matches.map { aiPromptText(for: $0) }.joined(separator: "\n\n")
     }
 
-    private static func factChecksForSegment(_ segment: TranscriptSegment, factChecks: [FactCheckItem]) -> [FactCheckItem] {
+    private static func aiPromptsForSegment(_ segment: TranscriptSegment, aiPrompts: [AIPromptItem]) -> [AIPromptItem] {
         let segmentText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedSegment = FactCheckCoordinator.normalizedSentence(segmentText)
-        let normalizedSentences = Set(FactCheckCoordinator.completeSentences(in: segmentText).map {
-            FactCheckCoordinator.normalizedSentence($0)
+        let normalizedSegment = AIPromptCoordinator.normalizedSentence(segmentText)
+        let normalizedSentences = Set(AIPromptCoordinator.completeSentences(in: segmentText).map {
+            AIPromptCoordinator.normalizedSentence($0)
         })
 
-        return factChecks.filter { item in
-            let normalizedItem = FactCheckCoordinator.normalizedSentence(item.sentence)
+        return aiPrompts.filter { item in
+            let normalizedItem = AIPromptCoordinator.normalizedSentence(item.sentence)
             return normalizedItem == normalizedSegment
                 || normalizedSentences.contains(normalizedItem)
                 || segmentText.localizedCaseInsensitiveContains(item.sentence)
@@ -366,13 +365,13 @@ enum MarkdownExportService {
 
     private static func jevResultsForSegment(_ segment: TranscriptSegment, jevResults: [JevResultItem]) -> [JevResultItem] {
         let segmentText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedSegment = FactCheckCoordinator.normalizedSentence(segmentText)
-        let normalizedSentences = Set(FactCheckCoordinator.completeSentences(in: segmentText).map {
-            FactCheckCoordinator.normalizedSentence($0)
+        let normalizedSegment = AIPromptCoordinator.normalizedSentence(segmentText)
+        let normalizedSentences = Set(AIPromptCoordinator.completeSentences(in: segmentText).map {
+            AIPromptCoordinator.normalizedSentence($0)
         })
 
         return jevResults.filter { item in
-            let normalizedItem = FactCheckCoordinator.normalizedSentence(item.sentence)
+            let normalizedItem = AIPromptCoordinator.normalizedSentence(item.sentence)
             return normalizedItem == normalizedSegment
                 || normalizedSentences.contains(normalizedItem)
                 || segmentText.localizedCaseInsensitiveContains(item.sentence)

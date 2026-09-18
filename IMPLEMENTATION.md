@@ -1931,3 +1931,19 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
 - [x] Bump `CFBundleShortVersionString` to `2.4.37`.
 - [x] Bump `CFBundleVersion` to `80`.
+
+## 100. v2.4.38. Hide Empty AI Processing Rows
+
+### 100a. Transcript Display
+
+- [x] Stop showing an "AI Processing … Disabled … No AI prompts are enabled." block under every transcript row when there are zero enabled AI Processing prompt templates (`settings.isFactCheckActive == false`).
+- [x] In `TranscriptFactCheckPanel.transcriptRows` (`Views.swift`), wrap the per-row AI Processing `GridRow` in `if isFactCheckEnabled { ... }` so the whole row (not just its text) is omitted, instead of replacing its content with a "Disabled" state.
+- [x] Leave the compact "AI Disabled" status indicator in the Live Transcript panel header as-is; it is a single indicator, not repeated clutter, and still communicates the global state.
+
+### 100b. Tests and Version
+
+- [x] Verify `swift test` passes (52 tests).
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Verify visually: launched the app with `aiEnabled=false`, transcribed live audio, confirmed transcript rows render with no AI Processing block beneath them.
+- [x] Bump `CFBundleShortVersionString` to `2.4.38`.
+- [x] Bump `CFBundleVersion` to `81`.

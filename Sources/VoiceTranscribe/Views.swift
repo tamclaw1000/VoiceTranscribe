@@ -1199,21 +1199,21 @@ private struct TranscriptFactCheckPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
 
-        GridRow(alignment: .top) {
-            Color.clear
-                .frame(width: 76, height: 1)
-            Color.clear
-                .frame(width: 150, height: 1)
-            VStack(alignment: .leading, spacing: 6) {
-                if isInterim {
-                    factCheckDetail(label: "AI Processing", badge: "Pending", color: .secondary, text: "Will run when the sentence is finalized.")
-                } else if !isFactCheckEnabled {
-                    factCheckDetail(label: "AI Processing", badge: "Disabled", color: .secondary, text: "No AI prompts are enabled.")
-                } else if factChecks.isEmpty {
-                    factCheckDetail(label: "AI Processing", badge: "Queued", color: .secondary, text: "Waiting for a complete sentence match.")
-                } else {
-                    ForEach(factChecks) { item in
-                        factCheckDetail(for: item)
+        if isFactCheckEnabled {
+            GridRow(alignment: .top) {
+                Color.clear
+                    .frame(width: 76, height: 1)
+                Color.clear
+                    .frame(width: 150, height: 1)
+                VStack(alignment: .leading, spacing: 6) {
+                    if isInterim {
+                        factCheckDetail(label: "AI Processing", badge: "Pending", color: .secondary, text: "Will run when the sentence is finalized.")
+                    } else if factChecks.isEmpty {
+                        factCheckDetail(label: "AI Processing", badge: "Queued", color: .secondary, text: "Waiting for a complete sentence match.")
+                    } else {
+                        ForEach(factChecks) { item in
+                            factCheckDetail(for: item)
+                        }
                     }
                 }
             }

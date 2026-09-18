@@ -519,6 +519,65 @@ import Testing
     #expect(markdown.contains("`/tmp/recording.m4a`"))
 }
 
+@Test func markdownExportIncludesJevResults() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+    let end = start.addingTimeInterval(7)
+    let jevResult = JevResultItem(
+        sentence: "The export button crashes.",
+        queryID: "urgency",
+        queryName: "Urgency",
+        batchGroupID: "batch-1",
+        state: .completed(.noul(probability: 0.82)),
+        createdAt: start
+    )
+
+    let markdown = MarkdownExportService.makeDocument(
+        context: MarkdownExportContext(
+            sourceName: "BlackHole 2ch",
+            location: "",
+            startDate: start,
+            endDate: end,
+            exportedAt: end,
+            transcriptionEngine: "FluidAudio",
+            aiEnabled: false,
+            factCheckEnabled: false,
+            llmName: "Local Ollama",
+            llmProvider: "Ollama",
+            llmEndpoint: "http://localhost:11434",
+            llmModel: "igorls/gemma-4-12B-it-heretic-GGUF",
+            factCheckPrompt: "",
+            summaryPrompt: "Summarize this recording.",
+            jevEnabled: true,
+            jevBaseURL: "https://api.typesafe.ai",
+            jevModel: "jev-latest",
+            jevQueryDetails: "Urgency [enabled] (Noul (yes/no)):\nDoes this express urgency?"
+        ),
+        finalizedSegments: [
+            TranscriptSegment(
+                text: "The export button crashes.",
+                timestamp: start,
+                isFinal: true,
+                speakerID: "Speaker 1"
+            )
+        ],
+        factChecks: [],
+        jevResults: [jevResult],
+        summaryParagraphs: [],
+        calendar: calendar
+    )
+
+    #expect(markdown.contains("| date time | length | speaker | text | AI result | Jev result |"))
+    #expect(markdown.contains("Urgency: P(yes): 82% (confident)"))
+    #expect(markdown.contains("# JEV RESULTS"))
+    #expect(markdown.contains("- Jev enabled: Yes"))
+    #expect(markdown.contains("- Jev base URL: https://api.typesafe.ai"))
+    #expect(markdown.contains("- Jev model: jev-latest"))
+    #expect(markdown.contains("## Jev Queries"))
+    #expect(markdown.contains("Urgency [enabled] (Noul (yes/no)):\nDoes this express urgency?"))
+}
+
 @Test func markdownExportUsesCustomSpeakerNames() {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!

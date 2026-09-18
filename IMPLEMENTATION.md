@@ -1982,3 +1982,29 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Confirmed the sidebar "Jev Queries" section is absent with zero queries and appears correctly (checkbox, name, primitive-type subtitle) once queries exist, right below "AI Prompts" — both enabled queries showed up correctly.
 - [ ] **Not confirmed**: the Score query criteria editor (same code path as Choice, not independently exercised), and the actual per-row transcript result block with a real Jev API response. Live transcription in this session was blocked by audio-routing issues in the test environment (BlackHole needed routed system audio; the fallback of playing a sample video through physical speakers for mic pickup wasn't completed before the session moved on) — no finalized transcript sentence was produced, so the `jevDetail`/`factCheckDetail` rendering path for a real `.completed`/`.failed` Jev answer was never visually exercised, only code-reviewed and unit-tested (request/response shape tests in `VoiceTranscribeTests.swift`).
 - Follow-up: re-run the live-transcription pass (BlackHole with routed audio, or a loaded sample file) to see an actual Jev result render under a transcript row before considering this feature fully UI-verified end-to-end.
+
+## 102. v2.4.40. Fix Markdown Export Missing AI Prompt/Jev Results
+
+### 102a. Root Cause
+
+- The Jev integration (v2.4.39) covered the Settings tab, sidebar section, and transcript-row rendering, but never touched `MarkdownExportService.swift` — a separate call site (`AppModel.saveTranscriptMarkdownToFile`) not reachable by browsing the live SwiftUI view tree the other three pillars share. See `ARCHITECTURE.md` Key Design Decision 11 and the new `AGENTS.md` "Feature Surface Checklist" section for the fix to the underlying process gap.
+
+### 102b. Code
+
+- [x] Extracted `JevAnswer.displayText` (`JevService.swift`) out of a private `Views.swift` function, so the transcript-row UI and the Markdown export render identical result text from one source instead of two copies that could drift.
+- [x] `MarkdownExportService.makeDocument` now takes `jevResults: [JevResultItem]`, adds a "Jev result" column to the `# RECORDING` table (mirroring the existing "AI result" column via a parallel `jevText`/`jevResultsForSegment` pair), and appends a new `# JEV RESULTS` section (enabled/base URL/model plus per-query details) mirroring the existing `# AI RESULTS` section.
+- [x] `MarkdownExportContext` gained `jevEnabled`/`jevBaseURL`/`jevModel`/`jevQueryDetails` fields (all defaulted, so the existing test's context literal didn't need updating).
+- [x] `AppModel.saveTranscriptMarkdownToFile`/`markdownExportContext()` now pass `jev.items` and populate the new context fields from `settings`.
+
+### 102c. Documentation
+
+- [x] `ARCHITECTURE.md`: added `JevService.swift` and `MarkdownExportService.swift` to the file table (both were missing — `JevService.swift` was itself an oversight from v2.4.39), updated Key Design Decision 9 to mention Jev results/the JEV RESULTS section, and added Key Design Decision 11 naming the four technical pillars (Settings tab, sidebar section, transcript-row rendering, Markdown export) any per-sentence-result feature must cover.
+- [x] `AGENTS.md` (symlinked as `CLAUDE.md`): added a "Feature Surface Checklist" section instructing future features to name and verify all four pillars up front, specifically flagging Markdown export as the one most likely to be missed and citing this exact incident as the standing example.
+
+### 102d. Tests and Version
+
+- [x] Added `markdownExportIncludesJevResults` test covering the new table column and `# JEV RESULTS` section.
+- [x] Verify `swift test` passes (59 tests: 58 existing + 1 new).
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`, no new warnings.
+- [x] Bump `CFBundleShortVersionString` to `2.4.40`.
+- [x] Bump `CFBundleVersion` to `83`.

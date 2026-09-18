@@ -1,4 +1,4 @@
-# AGENT.md - VoiceTranscribe Best Practices
+# AGENTS.md - VoiceTranscribe Best Practices
 
 Use this as the quick operating guide before making changes in this repo.
 
@@ -31,6 +31,19 @@ Use this as the quick operating guide before making changes in this repo.
 - Keep visible UI labels on "AI Processing"; only use historical `FactCheck` names when referring to existing type or trace names.
 - Keep prompt-state processing serial per prompt template.
 - Use existing SwiftUI patterns in `Views.swift` and app orchestration patterns in `AppModel.swift`.
+
+## Feature Surface Checklist
+
+Any feature that produces a per-sentence or per-item result — AI Processing and Jev are the two existing examples — touches four separate technical pillars, not one. Before calling such a feature done, explicitly check all four, because each lives in a different file and none of them are reachable by browsing from the others:
+
+1. **Settings tab** (`SettingsView` in `Views.swift`) — where the feature is configured.
+2. **Sidebar section** (`ContentView.sourceList` in `Views.swift`) — where each item is enabled/disabled.
+3. **Transcript-row rendering** (`TranscriptFactCheckPanel.transcriptRows` in `Views.swift`) — where live results are shown.
+4. **Markdown export** (`MarkdownExportService.swift`, wired from `AppModel.saveTranscriptMarkdownToFile`) — where results are written to the exported record.
+
+Pillar 4 is the one most likely to be missed: it is a separate call site, invoked by a save-panel button handler, not part of the live SwiftUI view tree the other three pillars share — so implementing 1–3 by mirroring existing UI will not naturally lead you to it. This happened for real with the initial Jev integration (v2.4.39; fixed in the next release) — treat that as the standing example of what "forgot a pillar" looks like, not a hypothetical.
+
+When planning a new per-sentence/per-item result feature, name all four pillars in the plan up front, and verify each one — including a manual check that the exported Markdown actually contains the new feature's results — before considering the feature complete.
 
 ## Documentation
 

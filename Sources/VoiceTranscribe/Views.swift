@@ -1608,29 +1608,7 @@ private struct TranscriptFactCheckPanel: View {
         case .failed(let message):
             return factCheckDetail(label: label, badge: "Failed", color: .red, text: message)
         case .completed(let answer):
-            return factCheckDetail(label: label, badge: "Result", color: .accentColor, text: jevAnswerText(answer))
-        }
-    }
-
-    private func jevAnswerText(_ answer: JevAnswer) -> String {
-        switch answer {
-        case .noul(let probability):
-            let percent = Int((probability * 100).rounded())
-            let hint = probability >= 0.8 || probability <= 0.2
-                ? "confident"
-                : "ambiguous"
-            return "P(yes): \(percent)% (\(hint))"
-        case .choice(let selected, let confidence, _):
-            let percent = Int((confidence * 100).rounded())
-            return "\(selected) (\(percent)% confidence)"
-        case .score(let value, let confidence, let legend, _):
-            let percent = Int((confidence * 100).rounded())
-            let nearestLevel = Int(value.rounded())
-            var text = String(format: "%.2f (%d%% confidence)", value, percent)
-            if let description = legend["\(nearestLevel)"], !description.isEmpty {
-                text += " — \(description)"
-            }
-            return text
+            return factCheckDetail(label: label, badge: "Result", color: .accentColor, text: answer.displayText)
         }
     }
 

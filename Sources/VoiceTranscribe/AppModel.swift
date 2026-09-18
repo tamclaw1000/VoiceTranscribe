@@ -1235,6 +1235,7 @@ final class AppModel: ObservableObject {
             finalizedSegments: transcription.segments,
             speakerSegments: diarization.segments,
             factChecks: factCheck.items,
+            jevResults: jev.items,
             summaryParagraphs: summary.paragraphs
         )
 
@@ -1282,6 +1283,11 @@ final class AppModel: ObservableObject {
                 state: factCheck.promptState(for: $0.id)
             )
         }
+        let jevQueryDetails = settings.jevQueries
+            .map { query -> String in
+                "\(query.displayName) [\(query.isEnabled ? "enabled" : "disabled")] (\(query.primitiveType.displayName)):\n\(query.instructions)"
+            }
+            .joined(separator: "\n\n")
 
         return MarkdownExportContext(
             sourceName: transcriptSourceName,
@@ -1299,6 +1305,10 @@ final class AppModel: ObservableObject {
             promptStates: promptStates,
             factCheckPrompt: promptTemplateDetails,
             summaryPrompt: settings.summaryPrompt,
+            jevEnabled: settings.isJevActive,
+            jevBaseURL: settings.jevBaseURL,
+            jevModel: settings.jevModel,
+            jevQueryDetails: jevQueryDetails,
             audioURL: session?.audioURL,
             transcriptURL: session?.transcriptURL,
             metadataURL: session?.metadataURL

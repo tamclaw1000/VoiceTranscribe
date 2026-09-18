@@ -62,7 +62,7 @@ VoiceTranscribe uses a split voice-processing pipeline: Apple provides speech-to
 
 8. **Jev — structured decisions.** `JevCoordinator` listens to the same finalized transcript sentences and, for every enabled Jev query (Noul yes/no, Choice categorical, or Score rubric), batches them into a single `POST /v1/systemone` call per sentence against TypeSafe's Jev API, since Jev's wire format natively answers multiple typed questions in one request. Unlike AI Processing, Jev returns typed answers (a probability, a selected label, or a rubric score) with confidence, not prose.
 
-9. **Summary and export — app layer.** `SummaryCoordinator`, `TranscriptDocument`, and `MarkdownExportService` consume finalized transcript segments, speaker labels, voice identity labels, AI results, prompt state, and diarization timelines. Markdown exports include both the transcript table and a separate speaker timeline when diarization segments are available.
+9. **Summary and export — app layer.** `SummaryCoordinator`, `TranscriptDocument`, and `MarkdownExportService` consume finalized transcript segments, speaker labels, voice identity labels, AI Processing results, Jev results, prompt state, and diarization timelines. Markdown exports include the transcript table (with an AI Processing column and a Jev column), a separate speaker timeline when diarization segments are available, an "AI RESULTS" section, and a "JEV RESULTS" section.
 
 Current limitation: SpeechVAD Sortformer provides session-local speaker slots, not persistent voice identity. WeSpeaker identity matching improves same-session distinction when Sortformer reuses a `Speaker N` slot, but it is best-effort, depends on usable diarized audio windows, and intentionally resets for each transcription session. Manual tuple names are display corrections, not biometric identity assertions; multiple generated tuples can share the same human name when the matcher over-splits a speaker.
 
@@ -87,6 +87,8 @@ Current limitation: SpeechVAD Sortformer provides session-local speaker slots, n
 9. **Diarization and identity are live and best-effort.** SpeechVAD Sortformer streaming diarization runs alongside Apple Speech transcription. WeSpeaker identity matching runs asynchronously over diarized audio ranges. Transcript rows get the latest finalized speaker/voice label when the ASR segment arrives, while Markdown export also includes the diarizer's separate speaker timeline for time-based review.
 
 10. **Jev batches per sentence, not per query.** `JevCoordinator` groups every enabled query for one finalized sentence under a shared `batchGroupID` and always sends them in one API call, unlike `FactCheckCoordinator` where batching across prompt templates is opt-in and requires a shared model. Jev has no free-text prompt-state chaining equivalent.
+
+11. **A per-sentence AI result feature has four touch points, not one.** AI Processing and Jev both prove this out: each needed (a) a Settings tab for configuration, (b) a sidebar section (`ContentView.sourceList`) so results can be toggled per item, (c) a transcript-row block in `TranscriptFactCheckPanel` so results are visible live, and (d) a column/section in `MarkdownExportService` so results survive into the exported record — these are the four technical pillars `AGENTS.md` asks every such feature to check. It is easy to build (a)–(c) by mirroring the UI and forget (d), since the export path is a separate call site (`AppModel.saveTranscriptMarkdownToFile`) not reachable by browsing the live view tree — this happened once already with the initial Jev integration (v2.4.39) and was fixed in the following release.
 
 ## Critical Gotchas
 
@@ -193,11 +195,13 @@ swift test
 | `DiarizationService.swift` | SpeechVAD Sortformer speaker diarization, speaker timeline, transcript annotations |
 | `VoiceIdentityService.swift` | SpeechVAD WeSpeaker embedding extraction and session-local voice matching |
 | `FactCheckService.swift` | AI processing LLM clients, queueing, prompt substitutions, batching, prompt state |
+| `JevService.swift` | Jev (TypeSafe System One) client, wire structs, `JevCoordinator` queueing/batching |
 | `PermissionService.swift` | Lazy mic/speech auth with caching and mock support |
 | `Trace.swift` | JSON-line event logger to `/tmp/VoiceTranscribe.log` |
 | `Models.swift` | Data types: SoundInputSource, RecordingSession, TranscriptSegment, etc. |
 | `Utilities.swift` | FileNamer, BoundedBuffer, TranscriptDocument |
 | `AppSettings.swift` | @AppStorage preferences, output folder, format |
+| `MarkdownExportService.swift` | Builds the Markdown export document — transcript table, speaker timeline, summary, AI Processing results, Jev results, file references. Any feature that produces a per-sentence result (like AI Processing or Jev) must add a column/section here, not just a transcript-row UI — see Key Design Decision below. |
 | `Views.swift` | All SwiftUI views: ContentView, SourceRow, GraphPanel, Transcript/AI processing panels, SettingsView |
 | `Resources/Info.plist` | Bundle metadata, permissions strings, version numbers |
 | `REQUIREMENTS.md` | Full product requirements |
@@ -207,6 +211,7 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.40 | 83 | Fixed Markdown export missing AI Processing/Jev results (a pillar the v2.4.39 Jev integration forgot); added a "Feature Surface Checklist" to AGENTS.md so future per-sentence-result features cover all four touch points |
 | 2.4.39 | 82 | Added Jev (TypeSafe System One) as a new AI backend: Jev Configuration settings tab, one-or-many Jev Queries (Noul/Choice/Score primitives), a sidebar "Jev Queries" section, and per-sentence transcript results |
 | 2.4.38 | 81 | Hid the per-row "AI Processing: Disabled" block from the transcript when no AI Processing prompt templates are enabled |
 | 2.4.37 | 80 | Widened the transcribe restart cooldown from 0.3s to 2.0s after build 79's shorter cooldown failed to prevent a repeat of the same SIGSEGV crash; confirmed fixed against a live repro |

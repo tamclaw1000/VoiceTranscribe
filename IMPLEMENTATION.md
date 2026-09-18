@@ -1901,3 +1901,33 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
 - [x] Bump `CFBundleShortVersionString` to `2.4.35`.
 - [x] Bump `CFBundleVersion` to `78`.
+
+## 98. v2.4.36. Transcribe Restart Debounce
+
+### 98a. Crash Fix
+
+- [x] Diagnose repeated `SIGSEGV` crashes (fault address `0x141300b9`, same across multiple launches) traced to AppKit hit-testing/cursor tracking walking a view during `MainActor.assumeIsolated` shortly after rapid transcribe stop→restart on the same source.
+- [x] Add a cooldown in `AppModel.toggleTranscribe(for:)` so a restart waits out a minimum gap (0.3s) after the prior stop before re-engaging capture/transcription/diarization, reducing the state-churn window that appears to trigger the crash.
+- [ ] Superseded: build 79 crashed again with the identical fault address. Telemetry showed the stop/start clicks were already >0.3s apart, so the cooldown never engaged; see 99a.
+
+### 98b. Tests and Version
+
+- [x] Verify `swift test` passes (52 tests).
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Bump `CFBundleShortVersionString` to `2.4.36`.
+- [x] Bump `CFBundleVersion` to `79`.
+
+## 99. v2.4.37. Widen Transcribe Restart Cooldown
+
+### 99a. Crash Fix Revision
+
+- [x] Build 79's 0.3s click-to-click cooldown did not prevent a repeat crash with the identical fault address (`0x141300b9`); the `transcribe.restart.cooldown` trace event was absent from telemetry, confirming the cooldown never engaged because the actual stop/start clicks were already spaced more than 0.3s apart.
+- [x] Widen `AppModel.transcriptionRestartCooldown` from 0.3s to 2.0s, matching the observed gap between a transcribe restart and the crash in telemetry, rather than sizing the window to click-to-click latency.
+- [x] Confirmed fixed against a live repro (stop→immediate restart→mouse move on BlackHole 2ch, previously reliable). The underlying crash is inside Apple's SwiftUI/AppKit hit-testing code (`NSViewResponder.platformCurrentEvent.getter` / `MainActor.assumeIsolated`); this remains a mitigation of the trigger window, not a fix of the root cause, so watch for recurrence under different timing.
+
+### 99b. Tests and Version
+
+- [x] Verify `swift test` passes.
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Bump `CFBundleShortVersionString` to `2.4.37`.
+- [x] Bump `CFBundleVersion` to `80`.

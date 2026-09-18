@@ -193,7 +193,7 @@ final class TranscriptionCoordinator: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var bufferSnapshot = TranscriptionBufferSnapshot()
     var onFinalSegment: ((TranscriptSegment) -> Void)?
-    var speakerProvider: (() -> (id: String, name: String?)?)?
+    var speakerProvider: (() -> SpeakerAnnotation?)?
 
     private var transcript = TranscriptDocument()
     private var service: TranscriptionService
@@ -201,6 +201,7 @@ final class TranscriptionCoordinator: ObservableObject {
     private var startTask: Task<Void, Error>?
     private var lastFinalizedNormalizedText = ""
     private var consumedBufferCount = 0
+    private var sessionID = UUID()
 
     init(service: TranscriptionService = AppleSpeechTranscriptionService()) {
         self.service = service
@@ -248,6 +249,8 @@ final class TranscriptionCoordinator: ObservableObject {
     }
 
     func start() async throws {
+        let sessionID = UUID()
+        self.sessionID = sessionID
         transcript = TranscriptDocument()
         segments = []
         interimSegment = nil
@@ -260,7 +263,14 @@ final class TranscriptionCoordinator: ObservableObject {
             Trace.event("transcription.starting", ["engine": service.engineName])
             try await service.start { [weak self] segment in
                 Task { @MainActor in
-                    self?.apply(segment)
+                    guard let self, self.sessionID == sessionID, self.isStarting || self.isTranscribing else {
+                        Trace.event("transcription.segment.staleIgnored", [
+                            "text": segment.text.prefix(80),
+                            "final": segment.isFinal ? "true" : "false"
+                        ])
+                        return
+                    }
+                    self.apply(segment)
                 }
             }
 
@@ -290,6 +300,9 @@ final class TranscriptionCoordinator: ObservableObject {
     }
 
     func consume(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
+        guard isTranscribing else {
+            return
+        }
         let duration = TimeInterval(buffer.frameLength) / max(buffer.format.sampleRate, 1)
         bufferSnapshot.queuedDuration = min(
             bufferSnapshot.queuedDuration + duration,
@@ -311,6 +324,7 @@ final class TranscriptionCoordinator: ObservableObject {
     }
 
     func stop() {
+        sessionID = UUID()
         startTask?.cancel()
         startTask = nil
         isStarting = false
@@ -346,7 +360,93 @@ final class TranscriptionCoordinator: ObservableObject {
         ])
     }
 
+    func updateObservedVoiceName(speakerID: String, voiceID: String?, speakerName: String?) {
+        segments = segments.map { segment in
+            guard segment.speakerID == speakerID,
+                  Self.normalizedVoiceID(segment.voiceID) == Self.normalizedVoiceID(voiceID) else {
+                return segment
+            }
+            var copy = segment
+            copy.speakerName = speakerName
+            return copy
+        }
+
+        if var interimSegment,
+           interimSegment.speakerID == speakerID,
+           Self.normalizedVoiceID(interimSegment.voiceID) == Self.normalizedVoiceID(voiceID) {
+            interimSegment.speakerName = speakerName
+            self.interimSegment = interimSegment
+        }
+
+        transcript.updateObservedVoiceName(
+            speakerID: speakerID,
+            voiceID: voiceID,
+            speakerName: speakerName
+        )
+        Trace.event("transcription.observedVoiceName.updated", [
+            "speakerID": speakerID,
+            "voiceID": voiceID ?? "",
+            "speakerName": speakerName ?? ""
+        ])
+    }
+
+    func updateVoiceIdentity(
+        speakerID: String,
+        voiceID: String?,
+        voiceName: String?,
+        voiceConfidence: Float?
+    ) {
+        segments = segments.map { segment in
+            guard segment.speakerID == speakerID else {
+                return segment
+            }
+            var copy = segment
+            copy.voiceID = voiceID
+            copy.voiceName = voiceName
+            copy.voiceConfidence = voiceConfidence
+            return copy
+        }
+
+        if var interimSegment, interimSegment.speakerID == speakerID {
+            interimSegment.voiceID = voiceID
+            interimSegment.voiceName = voiceName
+            interimSegment.voiceConfidence = voiceConfidence
+            self.interimSegment = interimSegment
+        }
+
+        transcript.updateVoiceIdentity(
+            speakerID: speakerID,
+            voiceID: voiceID,
+            voiceName: voiceName,
+            voiceConfidence: voiceConfidence
+        )
+        Trace.event("transcription.voiceIdentity.updated", [
+            "speakerID": speakerID,
+            "voiceID": voiceID ?? "",
+            "voiceName": voiceName ?? "",
+            "confidence": voiceConfidence.map { String(format: "%.3f", $0) } ?? ""
+        ])
+    }
+
     func updateSegmentSpeaker(segmentID: UUID, speakerID: String?, speakerName: String?) {
+        updateSegmentIdentity(
+            segmentID: segmentID,
+            speakerID: speakerID,
+            speakerName: speakerName,
+            voiceID: nil,
+            voiceName: nil,
+            voiceConfidence: nil
+        )
+    }
+
+    func updateSegmentIdentity(
+        segmentID: UUID,
+        speakerID: String?,
+        speakerName: String?,
+        voiceID: String?,
+        voiceName: String?,
+        voiceConfidence: Float?
+    ) {
         segments = segments.map { segment in
             guard segment.id == segmentID else {
                 return segment
@@ -354,32 +454,47 @@ final class TranscriptionCoordinator: ObservableObject {
             var copy = segment
             copy.speakerID = speakerID
             copy.speakerName = speakerName
+            copy.voiceID = voiceID
+            copy.voiceName = voiceName
+            copy.voiceConfidence = voiceConfidence
             return copy
         }
 
         if var interimSegment, interimSegment.id == segmentID {
             interimSegment.speakerID = speakerID
             interimSegment.speakerName = speakerName
+            interimSegment.voiceID = voiceID
+            interimSegment.voiceName = voiceName
+            interimSegment.voiceConfidence = voiceConfidence
             self.interimSegment = interimSegment
         }
 
-        transcript.updateSegmentSpeaker(
+        transcript.updateSegmentIdentity(
             segmentID: segmentID,
             speakerID: speakerID,
-            speakerName: speakerName
+            speakerName: speakerName,
+            voiceID: voiceID,
+            voiceName: voiceName,
+            voiceConfidence: voiceConfidence
         )
-        Trace.event("transcription.segmentSpeaker.updated", [
+        Trace.event("transcription.segmentIdentity.updated", [
             "segmentID": segmentID.uuidString,
             "speakerID": speakerID ?? "",
-            "speakerName": speakerName ?? ""
+            "speakerName": speakerName ?? "",
+            "voiceID": voiceID ?? "",
+            "voiceName": voiceName ?? "",
+            "confidence": voiceConfidence.map { String(format: "%.3f", $0) } ?? ""
         ])
     }
 
     private func apply(_ segment: TranscriptSegment) {
         var segment = segment
         if let speaker = speakerProvider?() {
-            segment.speakerID = speaker.id
-            segment.speakerName = speaker.name
+            segment.speakerID = speaker.speakerID
+            segment.speakerName = speaker.speakerName
+            segment.voiceID = speaker.voiceID
+            segment.voiceName = speaker.voiceName
+            segment.voiceConfidence = speaker.voiceConfidence
         }
         bufferSnapshot.lastResultAt = Date()
         bufferSnapshot.queuedDuration = segment.isFinal ? 0 : min(bufferSnapshot.queuedDuration, 0.75)
@@ -455,6 +570,11 @@ final class TranscriptionCoordinator: ObservableObject {
         } else {
             bufferSnapshot.isReceivingAudio = false
         }
+    }
+
+    private static func normalizedVoiceID(_ voiceID: String?) -> String? {
+        let trimmed = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
     }
 }
 

@@ -304,7 +304,7 @@ import Testing
     let coordinator = TranscriptionCoordinator(service: service)
     var currentSpeaker = "Speaker 1"
     coordinator.speakerProvider = {
-        (currentSpeaker, nil)
+        SpeakerAnnotation(speakerID: currentSpeaker, speakerName: nil)
     }
 
     try await coordinator.start()
@@ -323,7 +323,7 @@ import Testing
     let service = FakeTranscriptionService(engineName: "Speaker Cycle Test")
     let coordinator = TranscriptionCoordinator(service: service)
     coordinator.speakerProvider = {
-        ("Speaker 1", nil)
+        SpeakerAnnotation(speakerID: "Speaker 1", speakerName: nil)
     }
 
     try await coordinator.start()
@@ -339,6 +339,83 @@ import Testing
 
     #expect(coordinator.segments.map(\.speakerLabel) == ["Dana"])
     #expect(coordinator.transcriptText == "[Dana] This speaker is wrong.")
+}
+
+@Test func transcriptDocumentUsesVoiceIdentityWhenSpeakerIsUnnamed() {
+    var document = TranscriptDocument()
+    document.apply(TranscriptSegment(
+        text: "hello",
+        isFinal: true,
+        speakerID: "Speaker 1",
+        voiceID: "Voice 1",
+        voiceName: "Voice 1",
+        voiceConfidence: 0.91
+    ))
+
+    #expect(document.plainText == "[Voice 1] hello")
+
+    document.updateSpeakerName(speakerID: "Speaker 1", speakerName: "Dana")
+    #expect(document.plainText == "[Dana] hello")
+}
+
+@Test func transcriptDocumentNamesObservedVoiceTupleOnly() {
+    var document = TranscriptDocument()
+    document.apply(TranscriptSegment(
+        text: "picard",
+        isFinal: true,
+        speakerID: "Speaker 1",
+        voiceID: "Voice 1",
+        voiceName: "Voice 1"
+    ))
+    document.apply(TranscriptSegment(
+        text: "okona",
+        isFinal: true,
+        speakerID: "Speaker 1",
+        voiceID: "Voice 7",
+        voiceName: "Voice 7"
+    ))
+
+    document.updateObservedVoiceName(
+        speakerID: "Speaker 1",
+        voiceID: "Voice 7",
+        speakerName: "Okona"
+    )
+
+    #expect(document.plainText == "[Voice 1] picard\n[Okona] okona")
+}
+
+@Test func transcriptDocumentUpdatesSegmentIdentityWithVoice() {
+    let segment = TranscriptSegment(text: "wrong speaker", isFinal: true, speakerID: "Speaker 1")
+    var document = TranscriptDocument()
+    document.apply(segment)
+
+    document.updateSegmentIdentity(
+        segmentID: segment.id,
+        speakerID: "Speaker 3",
+        speakerName: "Okona",
+        voiceID: "Voice 5",
+        voiceName: "Voice 5",
+        voiceConfidence: nil
+    )
+
+    #expect(document.finalized[0].speakerID == "Speaker 3")
+    #expect(document.finalized[0].voiceID == "Voice 5")
+    #expect(document.plainText == "[Okona] wrong speaker")
+}
+
+@Test func voiceIdentityMatcherCreatesAndMatchesSessionVoices() {
+    var matcher = VoiceIdentityMatcher(matchThreshold: 0.70, updateThreshold: 0.82)
+
+    let first = matcher.identify(embedding: [1, 0, 0], duration: 2.5)
+    let second = matcher.identify(embedding: [0.96, 0.1, 0], duration: 3.0)
+    let third = matcher.identify(embedding: [0, 1, 0], duration: 2.5)
+
+    #expect(first.voiceID == "Voice 1")
+    #expect(first.confidence == nil)
+    #expect(second.voiceID == "Voice 1")
+    #expect((second.confidence ?? 0) > 0.9)
+    #expect(third.voiceID == "Voice 2")
+    #expect(matcher.profiles.count == 2)
 }
 
 @Test func markdownExportIncludesDetailsRecordingSummaryAndFactChecks() {

@@ -142,7 +142,69 @@ struct TranscriptDocument {
         }
     }
 
+    mutating func updateObservedVoiceName(speakerID: String, voiceID: String?, speakerName: String?) {
+        finalized = finalized.map { segment in
+            guard segment.speakerID == speakerID,
+                  normalizedVoiceID(segment.voiceID) == normalizedVoiceID(voiceID) else {
+                return segment
+            }
+            var copy = segment
+            copy.speakerName = speakerName
+            return copy
+        }
+
+        if var interim,
+           interim.speakerID == speakerID,
+           normalizedVoiceID(interim.voiceID) == normalizedVoiceID(voiceID) {
+            interim.speakerName = speakerName
+            self.interim = interim
+        }
+    }
+
+    mutating func updateVoiceIdentity(
+        speakerID: String,
+        voiceID: String?,
+        voiceName: String?,
+        voiceConfidence: Float?
+    ) {
+        finalized = finalized.map { segment in
+            guard segment.speakerID == speakerID else {
+                return segment
+            }
+            var copy = segment
+            copy.voiceID = voiceID
+            copy.voiceName = voiceName
+            copy.voiceConfidence = voiceConfidence
+            return copy
+        }
+
+        if var interim, interim.speakerID == speakerID {
+            interim.voiceID = voiceID
+            interim.voiceName = voiceName
+            interim.voiceConfidence = voiceConfidence
+            self.interim = interim
+        }
+    }
+
     mutating func updateSegmentSpeaker(segmentID: UUID, speakerID: String?, speakerName: String?) {
+        updateSegmentIdentity(
+            segmentID: segmentID,
+            speakerID: speakerID,
+            speakerName: speakerName,
+            voiceID: nil,
+            voiceName: nil,
+            voiceConfidence: nil
+        )
+    }
+
+    mutating func updateSegmentIdentity(
+        segmentID: UUID,
+        speakerID: String?,
+        speakerName: String?,
+        voiceID: String?,
+        voiceName: String?,
+        voiceConfidence: Float?
+    ) {
         finalized = finalized.map { segment in
             guard segment.id == segmentID else {
                 return segment
@@ -150,12 +212,18 @@ struct TranscriptDocument {
             var copy = segment
             copy.speakerID = speakerID
             copy.speakerName = speakerName
+            copy.voiceID = voiceID
+            copy.voiceName = voiceName
+            copy.voiceConfidence = voiceConfidence
             return copy
         }
 
         if var interim, interim.id == segmentID {
             interim.speakerID = speakerID
             interim.speakerName = speakerName
+            interim.voiceID = voiceID
+            interim.voiceName = voiceName
+            interim.voiceConfidence = voiceConfidence
             self.interim = interim
         }
     }
@@ -166,5 +234,10 @@ struct TranscriptDocument {
             return finalText
         }
         return finalText.isEmpty ? interim.textWithSpeaker : "\(finalText)\n\(interim.textWithSpeaker)"
+    }
+
+    private func normalizedVoiceID(_ voiceID: String?) -> String? {
+        let trimmed = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
     }
 }

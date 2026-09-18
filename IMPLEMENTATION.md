@@ -1947,3 +1947,38 @@ Items identified in `APPLICATION-REVIEW.md` (2026-05-31). (tambookpro4/OpenClaw/
 - [x] Verify visually: launched the app with `aiEnabled=false`, transcribed live audio, confirmed transcript rows render with no AI Processing block beneath them.
 - [x] Bump `CFBundleShortVersionString` to `2.4.38`.
 - [x] Bump `CFBundleVersion` to `81`.
+
+## 101. v2.4.39. Jev (TypeSafe System One) Integration
+
+### 101a. Jev Backend
+
+- [x] Add `JevQueryConfiguration`/`JevPrimitiveType`/`JevChoiceCriterion` data model (`AppSettings.swift`), JSON-persisted in `UserDefaults` via `@AppStorage("jevQueriesJSON")`, matching the `AIPromptTemplateConfiguration` pattern. Starts empty (no seeded default query), unlike AI Prompts, since Jev has no zero-config provider.
+- [x] Add `jevAPIKey`/`jevBaseURL`/`jevModel` `@AppStorage` fields (plaintext, matching every other LLM endpoint's key storage in this app).
+- [x] Add `Sources/VoiceTranscribe/JevService.swift`: `TypeSafeJevService` (`POST {baseURL}/v1/systemone`, `Authorization: Bearer`), request/response wire structs for the Noul/Choice/Score primitive shapes, and `JevCoordinator` — a worker-pool coordinator that batches every enabled query for one finalized sentence into a single Jev API call (Jev's `questions` dict is natively multi-question, so this is more efficient than the AI Prompts system's one-call-per-template approach).
+- [x] Wire `JevCoordinator` into `AppModel` alongside `FactCheckCoordinator`: enqueue on `transcription.onFinalSegment`, reset on every transcribe-restart/file-transcription-start site.
+
+### 101b. Settings and Sidebar
+
+- [x] Add a "Jev Configuration" settings tab: connection fields (Base URL, Model, API Key) plus a `JevQuerySettingsView` CRUD list, one card per query with a primitive-type picker and a type-conditional criteria editor (Noul: true/false descriptions; Choice: dynamic option/description rows; Score: dynamic ordered level rows).
+- [x] Add a "Jev Queries" section to the left-hand sidebar, below "AI Prompts", with an enable/disable checkbox per query (only shown once at least one query exists).
+
+### 101c. Transcript Rendering
+
+- [x] Append a second, Jev-specific result block under each finalized transcript row (below the existing AI Processing block), reusing the existing `factCheckDetail(label:badge:color:text:)` row renderer. Only rendered when at least one Jev query is enabled.
+- [x] Type-specific summary text: Noul shows P(yes) with a confident/ambiguous hint; Choice shows the selected label and confidence; Score shows the value, confidence, and the nearest rubric level's description.
+
+### 101d. Tests and Version
+
+- [x] Verify `swift test` passes (58 tests: 52 existing + 6 new — sanitizer, `isRunnable`, request-encoding-per-primitive-type, response-decoding-per-answer-type, and two `JevCoordinator` batching/dedup tests).
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`, no new warnings.
+- [x] Bump `CFBundleShortVersionString` to `2.4.39`.
+- [x] Bump `CFBundleVersion` to `82`.
+
+### 101e. Manual Verification (partial — see gaps below)
+
+- [x] Launched `dist/VoiceTranscribe.app`, opened Settings → Jev Configuration with a real API key from `~/projects/ai/jev/play1/.env`. Connection fields (Base URL, Model, API Key) render and persist correctly.
+- [x] Added a Noul query ("Urgency") and confirmed its true/false-description editor renders and edits correctly.
+- [x] Added a Choice query ("Team"), confirmed switching the primitive-type picker swaps in the Choice editor (dynamic option/description rows, "Add Option", trash-to-remove), filled in two options, confirmed the "need at least 2" hint clears once valid.
+- [x] Confirmed the sidebar "Jev Queries" section is absent with zero queries and appears correctly (checkbox, name, primitive-type subtitle) once queries exist, right below "AI Prompts" — both enabled queries showed up correctly.
+- [ ] **Not confirmed**: the Score query criteria editor (same code path as Choice, not independently exercised), and the actual per-row transcript result block with a real Jev API response. Live transcription in this session was blocked by audio-routing issues in the test environment (BlackHole needed routed system audio; the fallback of playing a sample video through physical speakers for mic pickup wasn't completed before the session moved on) — no finalized transcript sentence was produced, so the `jevDetail`/`factCheckDetail` rendering path for a real `.completed`/`.failed` Jev answer was never visually exercised, only code-reviewed and unit-tested (request/response shape tests in `VoiceTranscribeTests.swift`).
+- Follow-up: re-run the live-transcription pass (BlackHole with routed audio, or a loaded sample file) to see an actual Jev result render under a transcript row before considering this feature fully UI-verified end-to-end.

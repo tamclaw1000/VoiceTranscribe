@@ -39,6 +39,7 @@ final class AppModel: ObservableObject {
     @Published var transcription: TranscriptionCoordinator
     @Published var diarization = DiarizationCoordinator()
     @Published var factCheck = FactCheckCoordinator()
+    @Published var jev = JevCoordinator()
     @Published var summary = SummaryCoordinator()
     @Published private(set) var aiReachability = AIReachabilityStatus()
 
@@ -204,6 +205,14 @@ final class AppModel: ObservableObject {
                 conversation: self.transcription.segments,
                 batchPrompts: self.settings.useGlobalPromptLLM
             )
+            self.jev.enqueueTranscriptSegment(
+                segment,
+                enabled: self.settings.isJevActive,
+                queries: self.settings.enabledJevQueries,
+                apiKey: self.settings.jevAPIKey,
+                baseURL: self.settings.jevBaseURL,
+                model: self.settings.jevModel
+            )
             self.summary.enqueueTranscriptSegment(segment, prompt: self.settings.summaryPrompt)
         }
 
@@ -225,6 +234,9 @@ final class AppModel: ObservableObject {
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         factCheck.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        jev.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         summary.objectWillChange.sink { [weak self] _ in
@@ -640,6 +652,42 @@ final class AppModel: ObservableObject {
         updateAIReachabilityStatus(state: settings.isFactCheckActive ? .untested : .disabled)
     }
 
+    func setJevQueryEnabled(id: String, enabled: Bool) {
+        guard var query = settings.jevQueries.first(where: { $0.id == id }) else {
+            return
+        }
+        objectWillChange.send()
+        query.isEnabled = enabled
+        settings.updateJevQuery(query)
+        Trace.event("settings.jevQueryToggled", [
+            "query": query.displayName,
+            "enabled": enabled
+        ])
+    }
+
+    func updateJevQuery(_ query: JevQueryConfiguration) {
+        objectWillChange.send()
+        settings.updateJevQuery(query)
+    }
+
+    func addJevQuery() {
+        objectWillChange.send()
+        let beforeCount = settings.jevQueries.count
+        settings.addJevQuery()
+        let afterCount = settings.jevQueries.count
+        Trace.event("settings.jevQueryAdded", [
+            "beforeCount": beforeCount,
+            "afterCount": afterCount
+        ])
+    }
+
+    func removeJevQuery(id: String) {
+        let queryName = settings.jevQueries.first { $0.id == id }?.displayName ?? "unknown"
+        objectWillChange.send()
+        settings.removeJevQuery(id: id)
+        Trace.event("settings.jevQueryRemoved", ["query": queryName])
+    }
+
     private func handleAIActivationChange(wasActive: Bool, reason: String) {
         guard settings.isFactCheckActive else {
             aiReachabilityTask?.cancel()
@@ -931,6 +979,7 @@ final class AppModel: ObservableObject {
                 try await self.ensureCapture(for: source)
                 self.transcriptSourceName = source.name
                 self.factCheck.reset()
+                self.jev.reset()
                 self.summary.reset()
                 self.diarization.reset()
                 Trace.event("transcribe.service.starting", [
@@ -1383,6 +1432,7 @@ final class AppModel: ObservableObject {
                 try await self.transcription.start()
                 let diarizationReady = await self.startDiarization(sourceName: source.name, addLiveConsumer: false)
                 self.factCheck.reset()
+                self.jev.reset()
                 self.summary.reset()
                 Trace.event("fileTranscribe.started", [
                     "file": source.name,

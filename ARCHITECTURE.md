@@ -29,6 +29,7 @@ VoiceTranscribeApp
        │    └─ VoiceIdentityService — SpeechVAD WeSpeaker embeddings + session-local voice matching
        ├─ SummaryCoordinator — paragraph-form recording summaries
        ├─ FactCheckCoordinator — AI processing queue, prompt templates, batching, prompt state
+       ├─ JevCoordinator — Jev (TypeSafe System One) queue, batches all enabled queries per sentence into one call
        ├─ PermissionService — lazy mic/speech auth with caching
        └─ AppSettings — @AppStorage-backed preferences
 ```
@@ -59,7 +60,9 @@ VoiceTranscribe uses a split voice-processing pipeline: Apple provides speech-to
 
 7. **AI processing — configured LLM endpoints.** `FactCheckCoordinator` listens to finalized transcript sentences, applies enabled prompt templates, performs prompt substitutions such as `{{sentence}}`, `{{conversation}}`, and `{{prompt-state}}`, and queues model calls. Historical type/trace names still say `FactCheck`, but user-facing behavior is AI Processing.
 
-8. **Summary and export — app layer.** `SummaryCoordinator`, `TranscriptDocument`, and `MarkdownExportService` consume finalized transcript segments, speaker labels, voice identity labels, AI results, prompt state, and diarization timelines. Markdown exports include both the transcript table and a separate speaker timeline when diarization segments are available.
+8. **Jev — structured decisions.** `JevCoordinator` listens to the same finalized transcript sentences and, for every enabled Jev query (Noul yes/no, Choice categorical, or Score rubric), batches them into a single `POST /v1/systemone` call per sentence against TypeSafe's Jev API, since Jev's wire format natively answers multiple typed questions in one request. Unlike AI Processing, Jev returns typed answers (a probability, a selected label, or a rubric score) with confidence, not prose.
+
+9. **Summary and export — app layer.** `SummaryCoordinator`, `TranscriptDocument`, and `MarkdownExportService` consume finalized transcript segments, speaker labels, voice identity labels, AI results, prompt state, and diarization timelines. Markdown exports include both the transcript table and a separate speaker timeline when diarization segments are available.
 
 Current limitation: SpeechVAD Sortformer provides session-local speaker slots, not persistent voice identity. WeSpeaker identity matching improves same-session distinction when Sortformer reuses a `Speaker N` slot, but it is best-effort, depends on usable diarized audio windows, and intentionally resets for each transcription session. Manual tuple names are display corrections, not biometric identity assertions; multiple generated tuples can share the same human name when the matcher over-splits a speaker.
 
@@ -82,6 +85,8 @@ Current limitation: SpeechVAD Sortformer provides session-local speaker slots, n
 8. **Prompt state is per template.** `{{prompt-state}}` accrues independently for each prompt template, updates from successful responses, resets with AI processing state, and forces that template's calls to run serially.
 
 9. **Diarization and identity are live and best-effort.** SpeechVAD Sortformer streaming diarization runs alongside Apple Speech transcription. WeSpeaker identity matching runs asynchronously over diarized audio ranges. Transcript rows get the latest finalized speaker/voice label when the ASR segment arrives, while Markdown export also includes the diarizer's separate speaker timeline for time-based review.
+
+10. **Jev batches per sentence, not per query.** `JevCoordinator` groups every enabled query for one finalized sentence under a shared `batchGroupID` and always sends them in one API call, unlike `FactCheckCoordinator` where batching across prompt templates is opt-in and requires a shared model. Jev has no free-text prompt-state chaining equivalent.
 
 ## Critical Gotchas
 
@@ -202,6 +207,7 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.39 | 82 | Added Jev (TypeSafe System One) as a new AI backend: Jev Configuration settings tab, one-or-many Jev Queries (Noul/Choice/Score primitives), a sidebar "Jev Queries" section, and per-sentence transcript results |
 | 2.4.38 | 81 | Hid the per-row "AI Processing: Disabled" block from the transcript when no AI Processing prompt templates are enabled |
 | 2.4.37 | 80 | Widened the transcribe restart cooldown from 0.3s to 2.0s after build 79's shorter cooldown failed to prevent a repeat of the same SIGSEGV crash; confirmed fixed against a live repro |
 | 2.4.36 | 79 | Added a 0.3s cooldown before a transcribe restart re-engages capture, to mitigate a SIGSEGV crash in AppKit hit-testing triggered by rapid stop→restart state churn (insufficient, see 2.4.37) |

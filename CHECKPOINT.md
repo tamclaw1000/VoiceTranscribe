@@ -4,14 +4,18 @@ Last updated: 2026-09-20
 
 ## Repository State
 
-- Current branch: `feature/voice-identity-names` in the `../voice-identity-names` worktree — existing-name selection with field locking, plus canonical same-name speaker merging, `IMPLEMENTATION.md` #109, `Info.plist` bumped to `2.4.45`/`88`. Uncommitted; cut from `main` at `1a48dad`.
-- Last shipped: `main` — sidebar tab split shipped as `v2.4.44` (`IMPLEMENTATION.md` #108)
+- Current branch: `main` — existing-name selection and canonical speaker merging shipped as `v2.4.45` (`IMPLEMENTATION.md` #109)
+- `main` state: fast-forward-free merge of `feature/voice-identity-names` (`b6589dd`), tagged and pushed to `origin/main`
+- Latest tag: `v2.4.45`
+- App version on `main`: `2.4.45`, bundle build `88`
+- `feature/voice-identity-names` was merged and its local branch deleted; its worktree `../voice-identity-names` is kept on a detached HEAD
+- Previous release: `v2.4.44` (`IMPLEMENTATION.md` #108) — split the sidebar into Microphones and AI Selection tabs (worktree `../sidebar-tabs`, kept detached)
 - `main` state: fast-forward-free merge of `feature/sidebar-tabs` (`5d1aaa6`), tagged and pushed to `origin/main`
 - Latest tag: `v2.4.44`
 - App version on `main`: `2.4.44`, bundle build `87`
 - `feature/sidebar-tabs` was merged and its local branch deleted; its worktree `../sidebar-tabs` is kept on a detached HEAD
 - Previous release: `v2.4.43` (`IMPLEMENTATION.md` #107) — pause/resume for live transcription. It also carried the repaired `scripts/build.sh` and `scripts/run.sh` (broken since the `scripts/` move) plus the doc path updates that go with them, and merged `feature/pause-transcription` (worktree `../pause-transcription`, kept detached)
-- Merged branches were pruned back to in-use refs; the remaining worktrees (`explore-versions`, `python-version`, `fix-sentence-occurrence-results`, `pause-transcription`, `sidebar-tabs`) are intentionally kept
+- Merged branches were pruned back to in-use refs; the remaining worktrees (`explore-versions`, `python-version`, `fix-sentence-occurrence-results`, `pause-transcription`, `sidebar-tabs`, `voice-identity-names`) are intentionally kept
 - Merged-and-cleaned-up branches still present locally/remotely: `fix/transcribe-restart-crash-debounce`, `chore/agents-md-cross-tool-support`, `feature/hide-empty-ai-processing`, `feature/jev-integration`, `fix/jev-markdown-export-and-guardrails` (all merged into `main`, not deleted)
 - Repo-root operating guide is now `AGENTS.md` (cross-tool standard, read natively by Codex/opencode/etc.), with `CLAUDE.md` as a symlink to it so Claude Code also auto-loads it. The old `AGENT.md` (singular, no tool read it automatically) is gone.
 - The historical `FactCheck`-prefixed naming (file, types, coordinator, trace events) is gone as of the current working-tree changes — renamed to `AIPrompt` throughout. See `IMPLEMENTATION.md` #103 for the full scope. `Sources/VoiceTranscribe/FactCheckService.swift` is now `AIPromptService.swift`.

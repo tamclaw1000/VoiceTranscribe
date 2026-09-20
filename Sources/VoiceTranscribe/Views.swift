@@ -7,6 +7,7 @@ struct ContentView: View {
     @Environment(\.openSettings) private var openSettings
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var selectedDetailTab: DetailTab = .transcript
+    @State private var selectedSidebarTab: SidebarTab = .microphones
 
     private enum DetailTab: Hashable {
         case transcript
@@ -14,9 +15,32 @@ struct ContentView: View {
         case recordings
     }
 
+    /// The sidebar's two top-level groups: audio inputs, and AI configuration.
+    private enum SidebarTab: String, CaseIterable, Identifiable {
+        case microphones
+        case aiSelection
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .microphones: return "Microphones"
+            case .aiSelection: return "AI Selection"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .microphones: return "mic"
+            case .aiSelection: return "sparkles"
+            }
+        }
+    }
+
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             VStack(spacing: 0) {
+                sidebarTabPicker
                 sourceList
                 Divider()
                 AppVersionFooter()
@@ -59,61 +83,89 @@ struct ContentView: View {
         }
     }
 
+    private var sidebarTabPicker: some View {
+        Picker("Sidebar section", selection: $selectedSidebarTab) {
+            ForEach(SidebarTab.allCases) { tab in
+                Label(tab.title, systemImage: tab.systemImage)
+                    .tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+        .help("Switch between audio sources and AI selection")
+        .accessibilityLabel("Sidebar section")
+    }
+
     private var sourceList: some View {
         List {
-            // Device sources
-            Section("Microphones") {
-                if appModel.deviceService.sources.isEmpty {
-                    Text("No microphones available")
+            if selectedSidebarTab == .microphones {
+                microphoneSections
+            } else {
+                aiSelectionSections
+            }
+        }
+    }
+
+    /// Microphones, and any audio files loaded for transcription.
+    @ViewBuilder
+    private var microphoneSections: some View {
+        Section("Microphones") {
+            if appModel.deviceService.sources.isEmpty {
+                Text("No microphones available")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(appModel.deviceService.sources) { source in
+                    SourceRow(source: source)
+                        .environmentObject(appModel)
+                        .padding(.vertical, 4)
+                }
+            }
+        }
+
+        Section("File Sources") {
+            if appModel.fileSources.isEmpty {
+                HStack {
+                    Text("No files loaded")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                } else {
-                    ForEach(appModel.deviceService.sources) { source in
-                        SourceRow(source: source)
-                            .environmentObject(appModel)
-                            .padding(.vertical, 4)
+                    Spacer()
+                    Button("Load File…") {
+                        appModel.loadAudioFiles()
                     }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
+            } else {
+                ForEach(appModel.fileSources) { source in
+                    FileSourceRow(source: source)
+                        .environmentObject(appModel)
+                        .padding(.vertical, 4)
                 }
             }
+        }
+    }
 
-            // File sources
-            Section("File Sources") {
-                if appModel.fileSources.isEmpty {
-                    HStack {
-                        Text("No files loaded")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Load File…") {
-                            appModel.loadAudioFiles()
-                        }
-                        .buttonStyle(.link)
-                        .font(.caption)
-                    }
-                } else {
-                    ForEach(appModel.fileSources) { source in
-                        FileSourceRow(source: source)
-                            .environmentObject(appModel)
-                            .padding(.vertical, 4)
-                    }
-                }
+    /// AI prompts and Jev queries.
+    @ViewBuilder
+    private var aiSelectionSections: some View {
+        Section("AI Prompts") {
+            ForEach(appModel.settings.aiPromptTemplates) { promptTemplate in
+                AIPromptSourceRow(promptTemplate: promptTemplate)
+                    .environmentObject(appModel)
+                    .padding(.vertical, 3)
             }
+        }
 
-            Section("AI Prompts") {
-                ForEach(appModel.settings.aiPromptTemplates) { promptTemplate in
-                    AIPromptSourceRow(promptTemplate: promptTemplate)
+        if !appModel.settings.jevQueries.isEmpty {
+            Section("Jev Queries") {
+                ForEach(appModel.settings.jevQueries) { query in
+                    JevQuerySourceRow(query: query)
                         .environmentObject(appModel)
                         .padding(.vertical, 3)
-                }
-            }
-
-            if !appModel.settings.jevQueries.isEmpty {
-                Section("Jev Queries") {
-                    ForEach(appModel.settings.jevQueries) { query in
-                        JevQuerySourceRow(query: query)
-                            .environmentObject(appModel)
-                            .padding(.vertical, 3)
-                    }
                 }
             }
         }

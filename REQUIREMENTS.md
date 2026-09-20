@@ -37,7 +37,7 @@ Internal architecture, programming languages, frameworks, processing algorithms,
 
 - Separate source and prompt controls from the content workspace. A wide display should support viewing both together; narrower displays may use equivalent navigation that keeps all actions reachable.
 - The default main-window size should be wide enough to show source controls, live levels, and the selected content tab without immediate horizontal crowding.
-- Group live devices under Microphones, loaded audio under File Sources, and prompt toggles under AI Prompts. Include a manual device refresh and an always-available Load File action.
+- Split the sidebar into two top-level sections: Microphones (live devices, plus loaded audio under File Sources) and AI Selection (prompt toggles under AI Prompts and Jev query toggles). Either section must be reachable without scrolling past the other. Include a manual device refresh and an always-available Load File action.
 - Provide distinct Live Transcript, Transcript Paragraphs, AI Summary, and Recent Recordings views. Tabs are suitable, but a particular widget or window arrangement is not required.
 - Keep source identity, capture/recording status, live input levels, and access to Settings discoverable while navigating content views. Show application version and build when available, or explain when version information is unavailable.
 - Use clear text for states and errors; icons and colors may supplement the text. Native icon names, fixed dimensions, control order, and platform-specific dialog types are not requirements.

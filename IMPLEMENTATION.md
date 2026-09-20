@@ -2101,3 +2101,21 @@ Small additions folded into the same v2.4.41 branch/release rather than a separa
 - [x] Verify `./scripts/build.sh` succeeds end to end (clean build, packaged and ad-hoc signed `dist/VoiceTranscribe.app`, exit 0). `scripts/build.sh` and `scripts/run.sh` are broken on `main` since `e582f3c` ("Move all scripts into scripts/") because they still resolve `ROOT_DIR` as their own directory, so this branch carries the repaired versions of both as an interim measure. The same repair, plus the documentation explaining the `ROOT_DIR` and clean-before-validate hazards, is carried separately by the `fix/script-root-paths` branch; the two are byte-identical for these files, so whichever lands second is a no-op for them.
 - [x] Bump `CFBundleShortVersionString` to `2.4.43`.
 - [x] Bump `CFBundleVersion` to `86`.
+
+## 108. v2.4.44. Sidebar Tabs
+
+### 108a. Sidebar Tab Split
+
+- [x] Added a `SidebarTab` enum (`microphones`, `aiSelection`) in `Views.swift`, driven by `@State selectedSidebarTab`, rendered as a segmented `Picker` above the sidebar list.
+- [x] Split `ContentView.sourceList` into two `@ViewBuilder` groups: `microphoneSections` (Microphones, File Sources) and `aiSelectionSections` (AI Prompts, Jev Queries, Current Recording). Exactly one renders at a time.
+- [x] Kept every existing section's contents byte-for-byte identical, so no enable/disable behavior changed — the split is presentational only. `AGENTS.md`'s sidebar touch point (`ContentView.sourceList`) is still the entry point, now dispatching by tab.
+- [x] Verified non-list items (the version footer, the refresh toolbar button, the pinned column width) remain outside the tab switch.
+
+### 108b. Tests and Version
+
+- [x] Verify `swift build` succeeds with no new warnings (only the pre-existing `external/speech-swift-worktree` Sendable warnings remain).
+- [x] Verify `swift test` passes (67 tests — this change is presentational and adds no new logic to test).
+- [x] Bump `CFBundleShortVersionString` to `2.4.44`.
+- [x] Bump `CFBundleVersion` to `87`.
+- [x] Scoped to the tab split alone: a `Current Recording` section (and the `CurrentRecordingSummary` model behind it) was built in this worktree and then removed on request, so the AI Selection tab carries AI configuration only. No trace of it remains in the source.
+- [ ] Not visually confirmed: the tab picker and the contents of both tabs have not been seen in a running app.

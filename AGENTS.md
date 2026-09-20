@@ -4,7 +4,7 @@ Use this as the quick operating guide before making changes in this repo.
 
 ## Branching
 
-- Develop every new user request on a new feature branch.
+- Develop every new user main request on a new feature branch and worktree. 
 - Start from an up-to-date `main` unless the user explicitly asks to continue another branch.
 - Use descriptive branch names, for example `feature/nonblocking-diarization` or `fix/prompt-template-editing`.
 - Do not merge or push unless the user asks for it.
@@ -50,8 +50,9 @@ When planning a new per-sentence/per-item result feature, name all four pillars 
 - Update `REQUIREMENTS.md` for product or UI behavior changes.
 - Update `ARCHITECTURE.md` for technical workflow, data flow, dependency, or service changes.
 - Update `ARCHITECTURE.md` whenever build scripts, launch flow, packaging behavior, dependencies, or version/build history change.
+- Update `CHECKPOINT.md` to allow other agents/sessions to be able to quickly pick up the current state of the project.
 
-## Git Hygiene
+## Git
 
 - Check `git status -sb` before editing and before committing.
 - Do not revert unrelated changes.

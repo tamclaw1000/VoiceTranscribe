@@ -416,6 +416,23 @@ final class AppSettings: ObservableObject {
     @AppStorage("migratedTranscriptionPipelineToAppleSpeech") private var migratedTranscriptionPipelineToAppleSpeech: Bool = false
     @AppStorage("saveTranscriptsAutomatically") var saveTranscriptsAutomatically: Bool = true
     @AppStorage("autoScrollTranscript") var autoScrollTranscript: Bool = true
+
+    /// Fold `Speaker N / Voice M` combos that share an assigned name into one speaker.
+    ///
+    /// This is deliberately not an `@AppStorage` like its neighbours: it is the one setting that
+    /// changes *derived* UI (the Voice Identification pane, the transcript speaker menu, colors,
+    /// and the export timeline all regroup when it flips). `@AppStorage` inside an
+    /// `ObservableObject` emits no `objectWillChange`, so as an `@AppStorage` the click was
+    /// persisted but never republished — the checkbox looked like it did nothing until something
+    /// unrelated forced a re-render. `@Published` plus explicit persistence makes it observable.
+    @Published var mergeSameNamedSpeakers: Bool {
+        didSet {
+            guard mergeSameNamedSpeakers != oldValue else { return }
+            UserDefaults.standard.set(mergeSameNamedSpeakers, forKey: Self.mergeSameNamedSpeakersStorageKey)
+        }
+    }
+
+    static let mergeSameNamedSpeakersStorageKey = "mergeSameNamedSpeakers"
     @AppStorage("visualizationSensitivity") var visualizationSensitivity: Double = 1.0
     @AppStorage("ollamaEndpoint") var ollamaEndpoint: String = "http://localhost:11434"
     @AppStorage("ollamaModel") var ollamaModel: String = "igorls/gemma-4-12B-it-heretic-GGUF"
@@ -431,6 +448,7 @@ final class AppSettings: ObservableObject {
     @AppStorage("jevQueriesJSON") private var jevQueriesJSON: String = ""
 
     init() {
+        mergeSameNamedSpeakers = UserDefaults.standard.bool(forKey: Self.mergeSameNamedSpeakersStorageKey)
         migrateLLMEndpointsIfNeeded()
         migratePromptTemplatesIfNeeded()
         migrateDefaultTranscriptionEngineIfNeeded()

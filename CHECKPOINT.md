@@ -4,7 +4,8 @@ Last updated: 2026-09-20
 
 ## Repository State
 
-- Current branch: `main` — sidebar tab split shipped as `v2.4.44` (`IMPLEMENTATION.md` #108)
+- Current branch: `feature/voice-identity-names` in the `../voice-identity-names` worktree — existing-name selection with field locking, plus canonical same-name speaker merging, `IMPLEMENTATION.md` #109, `Info.plist` bumped to `2.4.45`/`88`. Uncommitted; cut from `main` at `1a48dad`.
+- Last shipped: `main` — sidebar tab split shipped as `v2.4.44` (`IMPLEMENTATION.md` #108)
 - `main` state: fast-forward-free merge of `feature/sidebar-tabs` (`5d1aaa6`), tagged and pushed to `origin/main`
 - Latest tag: `v2.4.44`
 - App version on `main`: `2.4.44`, bundle build `87`
@@ -54,7 +55,8 @@ Two parallel AI backends now run per finalized transcript sentence:
   - assign any observed voice tuple,
   - cycle through observed tuples,
   - force a new `Voice N` for the row.
-- Voice candidates can be named and reset.
+- Voice candidates can be named and reset. A candidate can be named by typing, or set from a dropdown of names already assigned this session — picking one keeps that name on the dropdown and hides the type-in field until **Custom…** or a row reset brings it back.
+- A **Merge same-named speakers** toggle in the Voice Identification pane folds every `Speaker N / Voice M` combo sharing an assigned name into one speaker: one pane row (with summed segments/duration), one transcript color, one entry in the transcript row's speaker menu, and one coalesced entry in the exported `# SPEAKERS` timeline. Assigning a merged menu entry uses its first combo; **Reset All** still clears every combo.
 - Voice Identification is in a collapsible right-hand pane.
 - Left source/navigation pane is pinned visible with the right voice pane present.
 - The left sidebar is split into two tabs: **Microphones** (device list + File Sources) and **AI Selection** (AI Prompts + Jev Queries). The split is view state only — it changes what is visible, never what is enabled or transcribed.

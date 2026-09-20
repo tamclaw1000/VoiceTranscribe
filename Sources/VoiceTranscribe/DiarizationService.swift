@@ -26,6 +26,9 @@ final class DiarizationCoordinator: ObservableObject {
     private var ignoredDiarizationBufferCount = 0
     private var speakerNames: [String: String] = [:]
     private var observedVoiceNames: [String: String] = [:]
+    /// How each observed-voice name was set. A `.picked` name locks its type-in field
+    /// so a quick pick from the existing-name list is not overwritten by accident.
+    private var observedVoiceNameOrigins: [String: SpeakerNameOrigin] = [:]
 
     var currentSpeakerLabel: String? {
         lastSpeaker?.speakerLabel
@@ -71,6 +74,7 @@ final class DiarizationCoordinator: ObservableObject {
         ignoredDiarizationBufferCount = 0
         speakerNames = [:]
         observedVoiceNames = [:]
+        observedVoiceNameOrigins = [:]
         isStarting = false
         isRunning = false
         lastError = nil
@@ -191,6 +195,10 @@ final class DiarizationCoordinator: ObservableObject {
         observedVoiceNames[observedVoiceKey(speakerID: speakerID, voiceID: voiceID)]
     }
 
+    func observedVoiceNameOrigin(speakerID: String, voiceID: String?) -> SpeakerNameOrigin? {
+        observedVoiceNameOrigins[observedVoiceKey(speakerID: speakerID, voiceID: voiceID)]
+    }
+
     func setSpeakerName(speakerID: String, name: String?) {
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if trimmed.isEmpty {
@@ -206,21 +214,38 @@ final class DiarizationCoordinator: ObservableObject {
         ])
     }
 
-    func setObservedVoiceName(speakerID: String, voiceID: String?, name: String?) {
+    func setObservedVoiceName(
+        speakerID: String,
+        voiceID: String?,
+        name: String?,
+        origin: SpeakerNameOrigin = .typed
+    ) {
         let key = observedVoiceKey(speakerID: speakerID, voiceID: voiceID)
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if trimmed.isEmpty {
             observedVoiceNames.removeValue(forKey: key)
+            observedVoiceNameOrigins.removeValue(forKey: key)
         } else {
             observedVoiceNames[key] = trimmed
+            observedVoiceNameOrigins[key] = origin
         }
 
         applySpeakerNames()
         Trace.event("diarization.observedVoiceName.updated", [
             "speakerID": speakerID,
             "voiceID": voiceID ?? "",
-            "speakerName": observedVoiceNames[key] ?? ""
+            "speakerName": observedVoiceNames[key] ?? "",
+            "origin": observedVoiceNameOrigins[key]?.rawValue ?? ""
         ])
+    }
+
+    /// Re-enables the type-in field for a combo without discarding its current name.
+    func unlockObservedVoiceName(speakerID: String, voiceID: String?) {
+        let key = observedVoiceKey(speakerID: speakerID, voiceID: voiceID)
+        guard observedVoiceNameOrigins[key] != nil else {
+            return
+        }
+        observedVoiceNameOrigins[key] = .typed
     }
 
     private func replaceSegments(_ newSegments: [SpeakerDiarizationSegment]) {

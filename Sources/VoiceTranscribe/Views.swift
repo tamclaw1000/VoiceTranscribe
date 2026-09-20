@@ -228,6 +228,8 @@ struct ContentView: View {
                     interim: appModel.transcription.interimSegment,
                     aiPrompts: appModel.aiPrompt.items,
                     speakerNameItems: appModel.speakerNameEditorItems,
+                    existingSpeakerNames: appModel.assignedSpeakerNames,
+                    mergeSameNamedSpeakers: $appModel.settings.mergeSameNamedSpeakers,
                     currentSpeakerID: appModel.diarization.currentSpeakerID,
                     currentSpeakerLabel: appModel.diarization.currentSpeakerLabel,
                     isDiarizationActive: appModel.diarization.isStarting || appModel.diarization.isRunning,
@@ -247,8 +249,10 @@ struct ContentView: View {
                     onCycleSpeaker: appModel.cycleTranscriptSegmentSpeaker,
                     onAssignObservedVoice: appModel.assignTranscriptSegmentIdentity,
                     onForceNewVoice: appModel.forceNewVoiceForTranscriptSegment,
-                    onSetSpeakerName: appModel.setObservedVoiceName,
-                    onResetSpeakerName: appModel.resetObservedVoiceName,
+                    onSetSpeakerName: { item, name in appModel.setSpeakerName(name, for: item) },
+                    onSelectSpeakerName: { item, name in appModel.selectExistingSpeakerName(name, for: item) },
+                    onUnlockSpeakerName: { item in appModel.unlockSpeakerName(for: item) },
+                    onResetSpeakerName: appModel.resetSpeakerNames(for:),
                     onResetAllSpeakerNames: appModel.resetAllSpeakerNames,
                     onSaveToFile: appModel.saveTranscriptToFile,
                     onExportMarkdown: appModel.saveTranscriptMarkdownToFile,
@@ -1238,7 +1242,13 @@ private struct TranscriptAIPromptPanel: View {
     let finalized: [TranscriptSegment]
     let interim: TranscriptSegment?
     let aiPrompts: [AIPromptItem]
+    /// One row per canonical speaker — merged by name when the merge toggle is on. The pane
+    /// and the transcript row's speaker menu both read this list, so a speaker appears once
+    /// in each, and a merged entry is assigned through its first combo.
     let speakerNameItems: [SpeakerNameEditorItem]
+    /// Names already assigned this session, offered as quick picks.
+    let existingSpeakerNames: [String]
+    @Binding var mergeSameNamedSpeakers: Bool
     let currentSpeakerID: String?
     let currentSpeakerLabel: String?
     let isDiarizationActive: Bool
@@ -1256,8 +1266,10 @@ private struct TranscriptAIPromptPanel: View {
     let onCycleSpeaker: (UUID) -> Void
     let onAssignObservedVoice: (UUID, String, String?) -> Void
     let onForceNewVoice: (UUID) -> Void
-    let onSetSpeakerName: (String, String?, String) -> Void
-    let onResetSpeakerName: (String, String?) -> Void
+    let onSetSpeakerName: (SpeakerNameEditorItem, String) -> Void
+    let onSelectSpeakerName: (SpeakerNameEditorItem, String) -> Void
+    let onUnlockSpeakerName: (SpeakerNameEditorItem) -> Void
+    let onResetSpeakerName: (SpeakerNameEditorItem) -> Void
     let onResetAllSpeakerNames: () -> Void
     let onSaveToFile: () -> Void
     let onExportMarkdown: () -> Void
@@ -1457,10 +1469,28 @@ private struct TranscriptAIPromptPanel: View {
                         .help("Reset all voice names to their generated labels")
                     }
 
+                    Toggle(isOn: $mergeSameNamedSpeakers) {
+                        Text("Merge same-named speakers")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.checkbox)
+                    .help("Treat every Speaker/Voice combo assigned the same name as one speaker: one row here, one color in the transcript, and one entry in the exported speaker timeline.")
+
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
                             ForEach(speakerNameItems) { item in
-                                voiceIdentificationRow(item)
+                                VoiceIdentificationRow(
+                                    item: item,
+                                    existingSpeakerNames: existingSpeakerNames,
+                                    mergeSameNamedSpeakers: mergeSameNamedSpeakers,
+                                    onSetSpeakerName: onSetSpeakerName,
+                                    onSelectSpeakerName: onSelectSpeakerName,
+                                    onUnlockSpeakerName: onUnlockSpeakerName,
+                                    onResetSpeakerName: onResetSpeakerName
+                                )
+                                // Skips rebuilding rows whose inputs did not change, so a publish
+                                // from anywhere else in the app cannot close an open name menu.
+                                .equatable()
                             }
                         }
                         .padding(.vertical, 2)
@@ -1495,55 +1525,16 @@ private struct TranscriptAIPromptPanel: View {
         }
     }
 
-    private func voiceIdentificationRow(_ item: SpeakerNameEditorItem) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(item.observedLabel)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(speakerColor(for: item.speakerID))
-                    .lineLimit(1)
-
-                Spacer()
-
-                Button {
-                    onResetSpeakerName(item.speakerID, item.voiceID)
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                }
-                .buttonStyle(.borderless)
-                .disabled(!item.hasCustomName)
-                .help("Reset \(item.observedLabel) to its generated name")
-            }
-
-            TextField(
-                item.observedLabel,
-                text: Binding(
-                    get: { item.customName },
-                    set: { onSetSpeakerName(item.speakerID, item.voiceID, $0) }
-                )
-            )
-            .textFieldStyle(.roundedBorder)
-            .help("Enter a display name for \(item.observedLabel)")
-
-            Text(voiceStatsText(item))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+    /// Which label the transcript and pane color by. With same-name merging on, a named
+    /// speaker colors by its name so every combo folded into it shares one color; otherwise
+    /// the speaker slot decides, exactly as before this feature.
+    private func speakerColorKey(speakerID: String?, speakerName: String?) -> String? {
+        if mergeSameNamedSpeakers,
+           let name = speakerName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty {
+            return name
         }
-    }
-
-    private func voiceStatsText(_ item: SpeakerNameEditorItem) -> String {
-        var parts: [String] = []
-        if item.hasCustomName {
-            parts.append(item.displayName)
-        }
-        if item.segmentCount > 0 {
-            parts.append("\(item.segmentCount) segment\(item.segmentCount == 1 ? "" : "s")")
-        }
-        if item.totalDuration > 0 {
-            parts.append(String(format: "%.1fs", item.totalDuration))
-        }
-        return parts.isEmpty ? item.displayName : parts.joined(separator: " - ")
+        return speakerID ?? speakerName
     }
 
     /// Finalized segments with each paused span placed where it interrupted the session.
@@ -1618,13 +1609,17 @@ private struct TranscriptAIPromptPanel: View {
                 .frame(width: 76, alignment: .leading)
 
             Menu {
+                // Deduplicated by canonical speaker, so two combos the user named the same
+                // are one "Dana" entry rather than the same name listed twice.
                 ForEach(speakerNameItems) { item in
                     Button {
                         onAssignObservedVoice(segment.id, item.speakerID, item.voiceID)
                     } label: {
                         Text(item.displayName)
                     }
-                    .help("Assign this row to \(item.observedLabel)")
+                    .help(item.combos.count > 1
+                        ? "Assign this row to \(item.displayName) (\(item.observedLabel))"
+                        : "Assign this row to \(item.observedLabel)")
                 }
 
                 if !speakerNameItems.isEmpty {
@@ -1649,7 +1644,10 @@ private struct TranscriptAIPromptPanel: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(SpeakerLabelButtonStyle(color: speakerColor(for: speakerID ?? speakerLabel)))
+            .buttonStyle(SpeakerLabelButtonStyle(color: speakerColor(for: speakerColorKey(
+                speakerID: speakerID,
+                speakerName: segment.speakerName ?? speakerLabel
+            ))))
             .frame(width: 150, alignment: .leading)
             .help("Choose an observed voice for this row, or force a new voice.")
             .accessibilityLabel("Speaker \(speakerLabel ?? "Detecting")")
@@ -1828,11 +1826,8 @@ private struct TranscriptAIPromptPanel: View {
     }
 
     private var currentSpeakerColor: Color {
-        if let currentSpeakerID {
-            return speakerColor(for: currentSpeakerID)
-        }
-        if let currentSpeakerLabel {
-            return speakerColor(for: currentSpeakerLabel)
+        if let key = speakerColorKey(speakerID: currentSpeakerID, speakerName: currentSpeakerLabel) {
+            return speakerColor(for: key)
         }
         if diarizationError != nil {
             return .orange
@@ -1841,21 +1836,7 @@ private struct TranscriptAIPromptPanel: View {
     }
 
     private func speakerColor(for label: String?) -> Color {
-        guard let label,
-              !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return .secondary
-        }
-
-        let palette: [Color] = [.blue, .purple, .green, .orange, .pink, .teal, .indigo, .mint]
-        let digits = String(label.filter(\.isNumber))
-        if let number = Int(digits), number > 0 {
-            return palette[(number - 1) % palette.count]
-        }
-
-        let checksum = label.unicodeScalars.reduce(0) { partial, scalar in
-            partial + Int(scalar.value)
-        }
-        return palette[checksum % palette.count]
+        voiceSpeakerColor(for: label)
     }
 
     private var aiPromptStatusColor: Color {
@@ -1887,6 +1868,180 @@ private struct TranscriptAIPromptPanel: View {
     }()
 
     private static let bottomScrollID = "transcript-bottom"
+}
+
+/// Stable color for a speaker label, shared by transcript rows and Voice Identification rows so
+/// one speaker looks the same wherever it appears.
+private func voiceSpeakerColor(for label: String?) -> Color {
+    guard let label,
+          !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return .secondary
+    }
+
+    let palette: [Color] = [.blue, .purple, .green, .orange, .pink, .teal, .indigo, .mint]
+    let digits = String(label.filter(\.isNumber))
+    if let number = Int(digits), number > 0 {
+        return palette[(number - 1) % palette.count]
+    }
+
+    let checksum = label.unicodeScalars.reduce(0) { partial, scalar in
+        partial + Int(scalar.value)
+    }
+    return palette[checksum % palette.count]
+}
+
+/// One Voice Identification row: the observed label, a way to reuse a name already assigned this
+/// session, and the type-in field for a custom one.
+///
+/// This is `Equatable` on purpose. The pane rebuilds whenever anything in `AppModel` publishes —
+/// capture levels alone tick many times a second — and rebuilding a row tears down an open
+/// name menu, which is what made the first selection appear to do nothing. `.equatable()` in the
+/// `ForEach` lets SwiftUI skip rows whose inputs are unchanged.
+private struct VoiceIdentificationRow: View, Equatable {
+    let item: SpeakerNameEditorItem
+    let existingSpeakerNames: [String]
+    let mergeSameNamedSpeakers: Bool
+    let onSetSpeakerName: (SpeakerNameEditorItem, String) -> Void
+    let onSelectSpeakerName: (SpeakerNameEditorItem, String) -> Void
+    let onUnlockSpeakerName: (SpeakerNameEditorItem) -> Void
+    let onResetSpeakerName: (SpeakerNameEditorItem) -> Void
+
+    /// Menu entry that hands the row back to the type-in field.
+    private static let customNameTag = "\u{1F}voice-custom-name"
+
+    static func == (lhs: VoiceIdentificationRow, rhs: VoiceIdentificationRow) -> Bool {
+        // The action closures are deliberately excluded: they are recreated on every render but
+        // capture the same `AppModel`, so comparing them would make every render unequal and
+        // defeat the point of conforming to `Equatable` at all.
+        lhs.item == rhs.item
+            && lhs.existingSpeakerNames == rhs.existingSpeakerNames
+            && lhs.mergeSameNamedSpeakers == rhs.mergeSameNamedSpeakers
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            header
+            namePicker
+            // Only one way to set the name is shown at a time: a row holding a name picked from
+            // the list shows just the dropdown, so there is no disabled field to wonder about.
+            // “Custom…” in the dropdown brings the field back.
+            if !item.isNameLocked {
+                nameField
+            }
+
+            Text(statsText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(item.observedLabel)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(voiceSpeakerColor(for: colorKey))
+                .lineLimit(2)
+
+            Spacer()
+
+            Button {
+                onResetSpeakerName(item)
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!item.hasCustomName)
+            .help("Reset \(item.observedLabel) to its generated name")
+        }
+    }
+
+    /// A `Picker` rather than a menu of buttons: its value is read from the row's own state, so a
+    /// selection travels the normal `Binding` path and the control can never display a name the
+    /// model does not actually hold.
+    private var namePicker: some View {
+        Picker("Use Existing Name", selection: Binding(
+            get: { item.isNameLocked ? item.customName : "" },
+            set: { selection in
+                if selection == Self.customNameTag {
+                    onUnlockSpeakerName(item)
+                } else if !selection.isEmpty {
+                    onSelectSpeakerName(item, selection)
+                }
+            }
+        )) {
+            Text(item.isNameLocked ? "Assigned from list" : "Use Existing Name")
+                .tag("")
+            ForEach(existingSpeakerNames, id: \.self) { name in
+                Text(name).tag(name)
+            }
+            Divider()
+            Text("Custom…")
+                .tag(Self.customNameTag)
+        }
+        .pickerStyle(.menu)
+        .font(.caption)
+        .fixedSize()
+        .disabled(existingSpeakerNames.isEmpty && !item.isNameLocked)
+        .help(pickerHelpText)
+        .accessibilityLabel("Speaker name for \(item.observedLabel)")
+        .accessibilityValue(item.hasCustomName ? item.displayName : "No name assigned")
+        .accessibilityHint(item.isNameLocked
+            ? "Assigned from the existing names. Choose Custom to type a different name."
+            : "Choose a name already assigned in this session, or Custom to type one.")
+    }
+
+    private var pickerHelpText: String {
+        if item.isNameLocked {
+            return "\(item.displayName) was chosen from the names already assigned this session. Choose “Custom…” to type a different name."
+        }
+        if existingSpeakerNames.isEmpty {
+            return "Name another speaker first, then reuse that name here"
+        }
+        return "Set this speaker to a name already assigned in this session"
+    }
+
+    private var nameField: some View {
+        TextField(
+            item.observedLabel,
+            text: Binding(
+                get: { item.customName },
+                set: { newValue in
+                    // Picking a name disables this field while it may still hold focus, and
+                    // resigning focus then commits the field's old text — which would look like
+                    // the user clearing the name they just picked.
+                    guard !item.isNameLocked else { return }
+                    onSetSpeakerName(item, newValue)
+                }
+            )
+        )
+        .textFieldStyle(.roundedBorder)
+        .help("Enter a display name for \(item.observedLabel)")
+    }
+
+    private var colorKey: String? {
+        if mergeSameNamedSpeakers {
+            let name = item.customName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty {
+                return name
+            }
+        }
+        return item.speakerID
+    }
+
+    private var statsText: String {
+        var parts: [String] = []
+        if item.hasCustomName {
+            parts.append(item.displayName)
+        }
+        if item.segmentCount > 0 {
+            parts.append("\(item.segmentCount) segment\(item.segmentCount == 1 ? "" : "s")")
+        }
+        if item.totalDuration > 0 {
+            parts.append(String(format: "%.1fs", item.totalDuration))
+        }
+        return parts.isEmpty ? item.displayName : parts.joined(separator: " - ")
+    }
 }
 
 private struct SpeakerLabelButtonStyle: ButtonStyle {

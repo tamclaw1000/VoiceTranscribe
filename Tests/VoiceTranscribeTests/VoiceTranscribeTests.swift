@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Combine
 import Testing
 @testable import VoiceTranscribe
 
@@ -1639,6 +1640,268 @@ private actor JevBatchProbe {
 
     func callCount() -> Int { calls }
     func queryCountOfLastCall() -> Int { lastQueryCount }
+}
+
+// MARK: - Canonical speakers: existing-name selection and same-name merging
+
+private func voiceEntry(
+    _ speakerID: String,
+    _ voiceID: String?,
+    name: String = "",
+    origin: SpeakerNameOrigin? = nil,
+    segmentCount: Int = 0,
+    totalDuration: TimeInterval = 0
+) -> SpeakerComboEntry {
+    SpeakerComboEntry(
+        combo: SpeakerCombo(speakerID: speakerID, voiceID: voiceID),
+        segmentCount: segmentCount,
+        totalDuration: totalDuration,
+        name: name,
+        origin: origin
+    )
+}
+
+@Test func canonicalResolverKeepsNamedCombosSeparateWhileMergingIsOff() {
+    let resolver = CanonicalSpeakerResolver(
+        mergeSameNamedSpeakers: false,
+        entries: [
+            voiceEntry("Speaker 1", "Voice 1", name: "Dana"),
+            voiceEntry("Speaker 2", "Voice 2", name: "Dana")
+        ]
+    )
+
+    let resolutions = resolver.resolutions()
+
+    #expect(resolutions.count == 2)
+    #expect(resolutions.allSatisfy { !$0.isMerged })
+    // Same name, two rows: without merging the pane still exposes both combos.
+    #expect(Set(resolutions.map(\.canonicalID)).count == 2)
+    #expect(resolutions.map(\.displayName) == ["Dana", "Dana"])
+}
+
+@Test func canonicalResolverMergesCombosSharingAName() throws {
+    let resolver = CanonicalSpeakerResolver(
+        mergeSameNamedSpeakers: true,
+        entries: [
+            voiceEntry("Speaker 1", "Voice 1", name: "Dana", origin: .picked, segmentCount: 2, totalDuration: 4),
+            voiceEntry("Speaker 2", "Voice 2", name: "  dana  ", origin: .typed, segmentCount: 3, totalDuration: 9)
+        ]
+    )
+
+    let resolutions = resolver.resolutions()
+
+    #expect(resolutions.count == 1)
+    let merged = try #require(resolutions.first)
+    #expect(merged.isMerged)
+    #expect(merged.combos.count == 2)
+    // The first spelling wins, so merging never silently rewrites the visible name.
+    #expect(merged.displayName == "Dana")
+    #expect(merged.observedLabel == "Speaker 1 / Voice 1 + Speaker 2 / Voice 2")
+}
+
+@Test func canonicalResolverLeavesUnnamedCombosAloneWhileMerging() {
+    let resolver = CanonicalSpeakerResolver(
+        mergeSameNamedSpeakers: true,
+        entries: [
+            voiceEntry("Speaker 1", "Voice 1", name: "Dana"),
+            voiceEntry("Speaker 2", "Voice 2")
+        ]
+    )
+
+    #expect(resolver.resolutions().map(\.displayName) == ["Dana", "Speaker 2 / Voice 2"])
+    #expect(resolver.resolutions().map(\.isMerged) == [false, false])
+}
+
+@Test func canonicalResolverListsDistinctAssignedNamesForQuickPicks() {
+    let resolver = CanonicalSpeakerResolver(
+        mergeSameNamedSpeakers: false,
+        entries: [
+            voiceEntry("Speaker 1", "Voice 1", name: "Dana"),
+            voiceEntry("Speaker 2", "Voice 2", name: "dana"),
+            voiceEntry("Speaker 3", nil, name: "   ")
+        ]
+    )
+
+    #expect(resolver.assignedNames == ["Dana"])
+}
+
+@Test func canonicalResolverNameKeyIgnoresCaseAndSpacing() {
+    #expect(CanonicalSpeakerResolver.nameKey("  Dana   Scully ") == "dana scully")
+    #expect(CanonicalSpeakerResolver.nameKey("DANA SCULLY") == CanonicalSpeakerResolver.nameKey("dana  scully"))
+}
+
+@Test func canonicalResolverSumsMergedStatsAndLocksOnlyPickedNames() throws {
+    var resolver = CanonicalSpeakerResolver(
+        mergeSameNamedSpeakers: true,
+        entries: [
+            voiceEntry("Speaker 1", "Voice 1", name: "Dana", origin: .picked, segmentCount: 2, totalDuration: 4),
+            voiceEntry("Speaker 2", "Voice 2", name: "Dana", origin: .picked, segmentCount: 3, totalDuration: 9),
+            voiceEntry("Speaker 3", "Voice 3", name: "", segmentCount: 5, totalDuration: 1)
+        ]
+    )
+
+    let items = resolver.editorItems()
+    #expect(items.count == 2)
+    // The pane and the transcript speaker menu both render these rows, so with merging on a
+    // speaker must appear exactly once — the names the user sees are unique.
+    #expect(Set(items.map(\.displayName)).count == items.count)
+
+    let merged = try #require(items.first)
+    #expect(merged.displayName == "Dana")
+    #expect(merged.segmentCount == 5)
+    #expect(merged.totalDuration == 13)
+    #expect(merged.combos.count == 2)
+    // Every member was picked, so the merged row's type-in field is locked.
+    #expect(merged.isNameLocked)
+
+    // One typed member is enough to leave the row editable.
+    resolver.entries[1].origin = .typed
+    let reopened = try #require(resolver.editorItems().first)
+    #expect(!reopened.isNameLocked)
+    #expect(reopened.customName == "Dana")
+}
+
+@Test @MainActor func mergeTogglePublishesSoThePaneRegroups() {
+    let key = AppSettings.mergeSameNamedSpeakersStorageKey
+    let original = UserDefaults.standard.object(forKey: key)
+    defer {
+        if let original {
+            UserDefaults.standard.set(original, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    let settings = AppSettings()
+    var notifications = 0
+    let subscription = settings.objectWillChange.sink { _ in notifications += 1 }
+
+    settings.mergeSameNamedSpeakers = true
+
+    #expect(settings.mergeSameNamedSpeakers)
+    #expect(UserDefaults.standard.bool(forKey: key))
+    // The pane only regroups if this fires: `@AppStorage` here would persist the click but
+    // publish nothing, which is exactly how the checkbox appeared to do nothing.
+    #expect(notifications > 0)
+    withExtendedLifetime(subscription) {}
+}
+
+@Test func canonicalEditorRowIDsStayStableWhileANameIsTyped() {
+    let first = SpeakerCombo(speakerID: "Speaker 1", voiceID: "Voice 1")
+    let second = SpeakerCombo(speakerID: "Speaker 2", voiceID: "Voice 2")
+
+    func rowIDs(firstName: String, secondName: String = "", merging: Bool = true) -> [String] {
+        CanonicalSpeakerResolver(
+            mergeSameNamedSpeakers: merging,
+            entries: [
+                voiceEntry("Speaker 1", "Voice 1", name: firstName),
+                voiceEntry("Speaker 2", "Voice 2", name: secondName)
+            ]
+        ).editorItems().map(\.id)
+    }
+
+    // Typing into a row must not change that row's identity, or SwiftUI rebuilds the row and
+    // the type-in field loses focus after every letter.
+    #expect(rowIDs(firstName: "") == [first.id, second.id])
+    #expect(rowIDs(firstName: "D") == [first.id, second.id])
+    #expect(rowIDs(firstName: "Da") == [first.id, second.id])
+    #expect(rowIDs(firstName: "Dana") == [first.id, second.id])
+
+    // Merging changes which rows exist, but never invents an id or duplicates one.
+    #expect(rowIDs(firstName: "Dana", secondName: "dana") == [first.id])
+    #expect(rowIDs(firstName: "Dana", secondName: "Bob") == [first.id, second.id])
+
+    let unmerged = CanonicalSpeakerResolver(
+        mergeSameNamedSpeakers: false,
+        entries: [
+            voiceEntry("Speaker 1", "Voice 1", name: "Dana"),
+            voiceEntry("Speaker 2", "Voice 2", name: "Dana")
+        ]
+    ).editorItems()
+    #expect(Set(unmerged.map(\.id)).count == unmerged.count)
+}
+
+@Test func speakerNameEditorItemFallsBackToItsOwnCombo() {
+    let item = SpeakerNameEditorItem(
+        id: "combo:Speaker 1|Voice 1",
+        speakerID: "Speaker 1",
+        voiceID: "Voice 1",
+        observedLabel: "Speaker 1 / Voice 1",
+        displayName: "Speaker 1 / Voice 1",
+        customName: ""
+    )
+
+    #expect(item.memberCombos == [SpeakerCombo(speakerID: "Speaker 1", voiceID: "Voice 1")])
+    #expect(!item.isNameLocked)
+}
+
+@Test @MainActor func pickedVoiceNameLocksItsFieldUntilUnlockedOrCleared() {
+    let coordinator = DiarizationCoordinator()
+
+    coordinator.setObservedVoiceName(speakerID: "Speaker 1", voiceID: "Voice 1", name: "Dana", origin: .picked)
+    #expect(coordinator.observedVoiceName(speakerID: "Speaker 1", voiceID: "Voice 1") == "Dana")
+    #expect(coordinator.observedVoiceNameOrigin(speakerID: "Speaker 1", voiceID: "Voice 1") == .picked)
+
+    // Unlocking keeps the name and re-enables typing, so a picked name stays correctable.
+    coordinator.unlockObservedVoiceName(speakerID: "Speaker 1", voiceID: "Voice 1")
+    #expect(coordinator.observedVoiceNameOrigin(speakerID: "Speaker 1", voiceID: "Voice 1") == .typed)
+    #expect(coordinator.observedVoiceName(speakerID: "Speaker 1", voiceID: "Voice 1") == "Dana")
+
+    // Clearing the name clears the lock with it, so a later rename starts editable.
+    coordinator.setObservedVoiceName(speakerID: "Speaker 1", voiceID: "Voice 1", name: "")
+    #expect(coordinator.observedVoiceName(speakerID: "Speaker 1", voiceID: "Voice 1") == nil)
+    #expect(coordinator.observedVoiceNameOrigin(speakerID: "Speaker 1", voiceID: "Voice 1") == nil)
+}
+
+@Test func markdownExportCoalescesAdjacentSameNamedSpeakerRunsOnlyWhenAsked() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+
+    let segments = [
+        SpeakerDiarizationSegment(speakerID: "Speaker 1", speakerName: "Dana", startTime: 0, endTime: 3, confidence: 0.8),
+        SpeakerDiarizationSegment(speakerID: "Speaker 2", speakerName: "Dana", startTime: 3, endTime: 6, confidence: 0.6),
+        SpeakerDiarizationSegment(speakerID: "Speaker 3", speakerName: "Bob", startTime: 6, endTime: 8, confidence: 0.9),
+        // A repeated, non-adjacent run stays its own row: the timeline is time-ordered.
+        SpeakerDiarizationSegment(speakerID: "Speaker 1", speakerName: "Dana", startTime: 8, endTime: 10, confidence: 1.0)
+    ]
+
+    func export(merging: Bool) -> String {
+        MarkdownExportService.makeDocument(
+            context: MarkdownExportContext(
+                sourceName: "Test Mic",
+                location: "",
+                startDate: start,
+                endDate: start.addingTimeInterval(10),
+                exportedAt: start,
+                transcriptionEngine: "Apple Speech",
+                aiPromptEnabled: false,
+                llmName: "",
+                llmProvider: "",
+                llmEndpoint: "",
+                llmModel: "",
+                aiPromptPrompt: "",
+                summaryPrompt: ""
+            ),
+            finalizedSegments: [],
+            speakerSegments: segments,
+            mergeSameNamedSpeakers: merging,
+            aiPrompts: [],
+            summaryParagraphs: [],
+            calendar: calendar
+        )
+    }
+
+    let merged = export(merging: true)
+    // Two Dana combos speaking back to back read as one person, with a true mean confidence.
+    #expect(merged.contains("| 0:00 | 0:06 | Dana | 0.70 |"))
+    #expect(merged.contains("| 0:06 | 0:08 | Bob | 0.90 |"))
+    #expect(merged.contains("| 0:08 | 0:10 | Dana | 1.00 |"))
+    #expect(!merged.contains("| 0:00 | 0:03 |"))
+
+    let unmerged = export(merging: false)
+    #expect(unmerged.contains("| 0:00 | 0:03 | Dana | 0.80 |"))
+    #expect(unmerged.contains("| 0:03 | 0:06 | Dana | 0.60 |"))
 }
 
 private struct BatchProbeJevService: JevService {

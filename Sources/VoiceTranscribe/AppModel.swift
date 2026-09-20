@@ -257,24 +257,121 @@ final class AppModel: ObservableObject {
         isStartingRecording || isStartingTranscription || isSwitchingCaptureSource
     }
 
+    /// Voice Identification rows: one per canonical speaker. With same-name merging on,
+    /// combos the user gave the same name collapse into a single row whose stats are the
+    /// sum of its members, and naming that row names every combo behind it.
     var speakerNameEditorItems: [SpeakerNameEditorItem] {
-        knownObservedVoices().map { identity in
-            let customName = observedVoiceName(speakerID: identity.speakerID, voiceID: identity.voiceID) ?? ""
-            let trimmed = customName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let observedLabel = VoiceIdentityKey.observedLabel(
-                speakerID: identity.speakerID,
-                voiceID: identity.voiceID
+        speakerNameEditorItems(mergeSameNamedSpeakers: settings.mergeSameNamedSpeakers)
+    }
+
+    /// The same combos, never merged — one entry per `Speaker N / Voice M` pair. Used where
+    /// every combo has to be visited individually (resetting all names), as opposed to the
+    /// pane and the transcript speaker menu, which show canonical speakers.
+    var observedVoiceCorrectionItems: [SpeakerNameEditorItem] {
+        speakerNameEditorItems(mergeSameNamedSpeakers: false)
+    }
+
+    /// Names already assigned this session, offered as quick picks in the pane.
+    var assignedSpeakerNames: [String] {
+        canonicalSpeakerResolver.assignedNames
+    }
+
+    /// How `Speaker N / Voice M` combos fold into speakers right now, name-driven and
+    /// session-only like the rest of voice identity.
+    var canonicalSpeakerResolver: CanonicalSpeakerResolver {
+        CanonicalSpeakerResolver(
+            mergeSameNamedSpeakers: settings.mergeSameNamedSpeakers,
+            entries: knownObservedVoices().map { identity in
+                SpeakerComboEntry(
+                    combo: SpeakerCombo(speakerID: identity.speakerID, voiceID: identity.voiceID),
+                    segmentCount: identity.segmentCount,
+                    totalDuration: identity.totalDuration,
+                    name: observedVoiceName(speakerID: identity.speakerID, voiceID: identity.voiceID) ?? "",
+                    origin: diarization.observedVoiceNameOrigin(speakerID: identity.speakerID, voiceID: identity.voiceID)
+                )
+            }
+        )
+    }
+
+    private func speakerNameEditorItems(mergeSameNamedSpeakers: Bool) -> [SpeakerNameEditorItem] {
+        var resolver = canonicalSpeakerResolver
+        resolver.mergeSameNamedSpeakers = mergeSameNamedSpeakers
+        return resolver.editorItems()
+    }
+
+    /// Applies a name already used this session to a row, and locks its type-in field so
+    /// the pick cannot be overwritten by a stray keystroke. With merging on, reusing a name
+    /// is also how two combos get folded into one canonical speaker.
+    func selectExistingSpeakerName(_ name: String, for item: SpeakerNameEditorItem) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return
+        }
+        applySpeakerName(trimmed, origin: .picked, to: item.memberCombos)
+        Trace.event("observedVoice.name.selected", [
+            "speakerName": trimmed,
+            "combos": item.memberCombos.map(\.id).joined(separator: ",")
+        ])
+    }
+
+    /// Re-enables typing for a row without discarding its name, so a picked name can be
+    /// corrected by hand. The menu's "Custom…" entry and the row's reset button both land here.
+    func unlockSpeakerName(for item: SpeakerNameEditorItem) {
+        for combo in item.memberCombos {
+            diarization.unlockObservedVoiceName(speakerID: combo.speakerID, voiceID: combo.voiceID)
+        }
+        objectWillChange.send()
+        Trace.event("observedVoice.name.unlocked", [
+            "combos": item.memberCombos.map(\.id).joined(separator: ",")
+        ])
+    }
+
+    /// Applies a typed name to every combo in a row — all of them, for a merged speaker.
+    func setSpeakerName(_ name: String, for item: SpeakerNameEditorItem) {
+        // An empty edit on a row that currently holds a picked name is not the user clearing it:
+        // picking disables the type-in field while it may still hold focus, and resigning focus
+        // commits the field's old (empty) text. Ignoring that commit is what stops a pick from
+        // undoing itself the moment it lands. Checked against live state, not the passed-in row,
+        // because the row handed to this closure can predate the pick.
+        let isLockedByPick = item.memberCombos.contains { combo in
+            diarization.observedVoiceNameOrigin(speakerID: combo.speakerID, voiceID: combo.voiceID) == .picked
+        }
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, isLockedByPick {
+            Trace.event("observedVoice.name.typedIgnored", [
+                "reason": "pickedNameIsLocked",
+                "combos": item.memberCombos.map(\.id).joined(separator: ",")
+            ])
+            return
+        }
+        applySpeakerName(name, origin: .typed, to: item.memberCombos)
+    }
+
+    func resetSpeakerNames(for item: SpeakerNameEditorItem) {
+        applySpeakerName("", origin: .typed, to: item.memberCombos)
+    }
+
+    private func applySpeakerName(_ name: String, origin: SpeakerNameOrigin, to combos: [SpeakerCombo]) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let speakerName = trimmed.isEmpty ? nil : trimmed
+        for combo in combos {
+            diarization.setObservedVoiceName(
+                speakerID: combo.speakerID,
+                voiceID: combo.voiceID,
+                name: speakerName,
+                origin: origin
             )
-            return SpeakerNameEditorItem(
-                speakerID: identity.speakerID,
-                voiceID: identity.voiceID,
-                observedLabel: observedLabel,
-                displayName: trimmed.isEmpty ? observedLabel : trimmed,
-                customName: customName,
-                segmentCount: identity.segmentCount,
-                totalDuration: identity.totalDuration
+            transcription.updateObservedVoiceName(
+                speakerID: combo.speakerID,
+                voiceID: combo.voiceID,
+                speakerName: speakerName
             )
         }
+        objectWillChange.send()
+        Trace.event("observedVoice.name.set", [
+            "combos": combos.map(\.id).joined(separator: ","),
+            "speakerName": speakerName ?? "",
+            "origin": origin.rawValue
+        ])
     }
 
     func refreshDevices() {
@@ -319,7 +416,7 @@ final class AppModel: ObservableObject {
     }
 
     func resetAllSpeakerNames() {
-        for item in speakerNameEditorItems {
+        for item in observedVoiceCorrectionItems {
             resetObservedVoiceName(speakerID: item.speakerID, voiceID: item.voiceID)
         }
         Trace.event("speaker.names.resetAll")
@@ -1294,6 +1391,7 @@ final class AppModel: ObservableObject {
             finalizedSegments: transcription.segments,
             speakerSegments: diarization.segments,
             pauseSpans: transcription.pauseSpans,
+            mergeSameNamedSpeakers: settings.mergeSameNamedSpeakers,
             aiPrompts: aiPrompt.items,
             jevResults: jev.items,
             summaryParagraphs: summary.paragraphs

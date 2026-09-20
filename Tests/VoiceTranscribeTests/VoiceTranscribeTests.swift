@@ -1134,6 +1134,133 @@ private final class FakeMicrophonePermissionProvider: MicrophonePermissionProvid
     }
 }
 
+@Test @MainActor func transcriptionCoordinatorPausesBufferConsumptionAndResumes() async throws {
+    let service = FakeTranscriptionService(engineName: "Pause Test")
+    let coordinator = TranscriptionCoordinator(service: service)
+    try await coordinator.start()
+
+    coordinator.consume(buffer: makeTestAudioBuffer(), time: AVAudioTime(sampleTime: 0, atRate: 16_000))
+    #expect(service.appendedBufferCount == 1)
+
+    coordinator.pause()
+
+    #expect(coordinator.isPaused)
+    #expect(coordinator.pauseSpans.count == 1)
+    #expect(coordinator.pauseSpans.first?.endedAt == nil)
+
+    // Buffers captured while paused must not reach the engine at all.
+    coordinator.consume(buffer: makeTestAudioBuffer(), time: AVAudioTime(sampleTime: 1_024, atRate: 16_000))
+    #expect(service.appendedBufferCount == 1)
+
+    coordinator.resume()
+
+    #expect(!coordinator.isPaused)
+    #expect(coordinator.pauseSpans.first?.endedAt != nil)
+
+    coordinator.consume(buffer: makeTestAudioBuffer(), time: AVAudioTime(sampleTime: 2_048, atRate: 16_000))
+    #expect(service.appendedBufferCount == 2)
+
+    coordinator.stop()
+}
+
+@Test @MainActor func transcriptionCoordinatorStopClosesPauseSpanAndRestartClearsIt() async throws {
+    let service = FakeTranscriptionService(engineName: "Pause Reset Test")
+    let coordinator = TranscriptionCoordinator(service: service)
+    try await coordinator.start()
+
+    coordinator.pause()
+    coordinator.stop()
+
+    #expect(!coordinator.isPaused)
+    #expect(coordinator.pauseSpans.count == 1)
+    #expect(coordinator.pauseSpans.first?.endedAt != nil)
+
+    try await coordinator.start()
+
+    #expect(coordinator.pauseSpans.isEmpty)
+    #expect(!coordinator.isPaused)
+
+    coordinator.stop()
+}
+
+@Test func markdownExportRecordsPausedSpans() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+    let pauseStart = start.addingTimeInterval(30)
+    let pauseEnd = pauseStart.addingTimeInterval(42)
+
+    let markdown = MarkdownExportService.makeDocument(
+        context: MarkdownExportContext(
+            sourceName: "BlackHole 2ch",
+            location: "",
+            startDate: start,
+            endDate: start.addingTimeInterval(90),
+            exportedAt: start.addingTimeInterval(90),
+            transcriptionEngine: "Apple Speech",
+            aiPromptEnabled: false,
+            llmName: "Local Ollama",
+            llmProvider: "Ollama",
+            llmEndpoint: "http://localhost:11434",
+            llmModel: "test-model",
+            aiPromptPrompt: "",
+            summaryPrompt: ""
+        ),
+        finalizedSegments: [
+            TranscriptSegment(text: "Before the pause.", timestamp: start, isFinal: true),
+            TranscriptSegment(text: "After the pause.", timestamp: pauseEnd, isFinal: true)
+        ],
+        pauseSpans: [
+            TranscriptionPauseSpan(startedAt: pauseStart, endedAt: pauseEnd)
+        ],
+        aiPrompts: [],
+        summaryParagraphs: [],
+        calendar: calendar
+    )
+
+    #expect(markdown.contains("- Paused: 1 span totaling 0:42"))
+    #expect(markdown.contains("# PAUSES"))
+    #expect(markdown.contains("| started | duration |"))
+    #expect(markdown.contains("| 0:42 |"))
+}
+
+@Test func markdownExportOmitsPauseSectionWhenNeverPaused() {
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+
+    let markdown = MarkdownExportService.makeDocument(
+        context: MarkdownExportContext(
+            sourceName: "BlackHole 2ch",
+            location: "",
+            startDate: start,
+            endDate: start.addingTimeInterval(30),
+            exportedAt: start.addingTimeInterval(30),
+            transcriptionEngine: "Apple Speech",
+            aiPromptEnabled: false,
+            llmName: "Local Ollama",
+            llmProvider: "Ollama",
+            llmEndpoint: "http://localhost:11434",
+            llmModel: "test-model",
+            aiPromptPrompt: "",
+            summaryPrompt: ""
+        ),
+        finalizedSegments: [
+            TranscriptSegment(text: "Never paused.", timestamp: start, isFinal: true)
+        ],
+        aiPrompts: [],
+        summaryParagraphs: []
+    )
+
+    #expect(!markdown.contains("# PAUSES"))
+    #expect(!markdown.contains("- Paused:"))
+}
+
+private func makeTestAudioBuffer(frames: AVAudioFrameCount = 1_024) -> AVAudioPCMBuffer {
+    let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
+    let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+    buffer.frameLength = frames
+    return buffer
+}
+
 private final class FakeTranscriptionService: TranscriptionService {
     let engineName: String
     private var onSegment: ((TranscriptSegment) -> Void)?
@@ -1146,7 +1273,11 @@ private final class FakeTranscriptionService: TranscriptionService {
         self.onSegment = onSegment
     }
 
-    func append(_ buffer: AVAudioPCMBuffer) {}
+    private(set) var appendedBufferCount = 0
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        appendedBufferCount += 1
+    }
 
     func stop() {}
 

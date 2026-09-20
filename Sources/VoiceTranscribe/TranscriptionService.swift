@@ -192,6 +192,10 @@ final class TranscriptionCoordinator: ObservableObject {
     @Published private(set) var isStarting = false
     @Published private(set) var lastError: String?
     @Published private(set) var bufferSnapshot = TranscriptionBufferSnapshot()
+    /// True while live capture is paused: incoming buffers are dropped instead of fed to the engine.
+    @Published private(set) var isPaused = false
+    /// Paused spans for this session, in pause order; the last span is open while `isPaused`.
+    @Published private(set) var pauseSpans: [TranscriptionPauseSpan] = []
     var onFinalSegment: ((TranscriptSegment) -> Void)?
     var speakerProvider: (() -> SpeakerAnnotation?)?
 
@@ -257,6 +261,8 @@ final class TranscriptionCoordinator: ObservableObject {
         bufferSnapshot = TranscriptionBufferSnapshot()
         consumedBufferCount = 0
         lastFinalizedNormalizedText = ""
+        isPaused = false
+        pauseSpans = []
         isStarting = true
 
         let task = Task { @MainActor in
@@ -300,7 +306,10 @@ final class TranscriptionCoordinator: ObservableObject {
     }
 
     func consume(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
-        guard isTranscribing else {
+        // Paused capture withholds buffers entirely. The engine, its analyzer, and the
+        // in-flight interim utterance all stay alive, so resume continues the same
+        // sentence, but audio captured while paused never reaches the transcript.
+        guard isTranscribing, !isPaused else {
             return
         }
         let duration = TimeInterval(buffer.frameLength) / max(buffer.format.sampleRate, 1)
@@ -329,6 +338,8 @@ final class TranscriptionCoordinator: ObservableObject {
         startTask = nil
         isStarting = false
 
+        closeOpenPauseSpan()
+        isPaused = false
         service.stop()
         isTranscribing = false
         interimSegment = nil
@@ -336,6 +347,44 @@ final class TranscriptionCoordinator: ObservableObject {
         bufferTimer = nil
         bufferSnapshot.isReceivingAudio = false
         Trace.event("transcription.stopped", ["finalSegments": segments.count])
+    }
+
+    /// Pauses live transcription without tearing down the engine. Buffers arriving
+    /// while paused are dropped, so the paused span is absent from the transcript
+    /// rather than being transcribed late when audio resumes.
+    func pause() {
+        guard isTranscribing, !isPaused else {
+            return
+        }
+        isPaused = true
+        pauseSpans.append(TranscriptionPauseSpan())
+        bufferSnapshot.isReceivingAudio = false
+        Trace.event("transcription.paused", [
+            "engine": service.engineName,
+            "segments": segments.count
+        ])
+    }
+
+    /// Resumes buffer consumption after `pause()`. The interim utterance is kept, so
+    /// speech that straddled the pause continues in the same segment.
+    func resume() {
+        guard isPaused else {
+            return
+        }
+        closeOpenPauseSpan()
+        isPaused = false
+        Trace.event("transcription.resumed", [
+            "engine": service.engineName,
+            "pauseSpans": pauseSpans.count,
+            "lastPausedSeconds": String(format: "%.2f", pauseSpans.last?.duration ?? 0)
+        ])
+    }
+
+    private func closeOpenPauseSpan(at date: Date = Date()) {
+        guard let lastIndex = pauseSpans.indices.last, pauseSpans[lastIndex].endedAt == nil else {
+            return
+        }
+        pauseSpans[lastIndex].endedAt = date
     }
 
     func updateSpeakerName(speakerID: String, speakerName: String?) {

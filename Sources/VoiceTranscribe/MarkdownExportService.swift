@@ -34,6 +34,7 @@ enum MarkdownExportService {
         context: MarkdownExportContext,
         finalizedSegments: [TranscriptSegment],
         speakerSegments: [SpeakerDiarizationSegment] = [],
+        pauseSpans: [TranscriptionPauseSpan] = [],
         aiPrompts: [AIPromptItem],
         jevResults: [JevResultItem] = [],
         summaryParagraphs: [String],
@@ -47,6 +48,9 @@ enum MarkdownExportService {
         lines.append("- Location of recording: \(context.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Not specified" : context.location)")
         lines.append("- Audio source: \(context.sourceName)")
         lines.append("- Duration: \(durationText(start: context.startDate, end: context.endDate))")
+        if let pauseSummary = pauseSummaryText(pauseSpans) {
+            lines.append("- Paused: \(pauseSummary)")
+        }
         lines.append("- Transcription engine: \(context.transcriptionEngine)")
         lines.append("- Exported: \(dateTimeText(context.exportedAt, calendar: calendar))")
         lines.append("")
@@ -65,6 +69,12 @@ enum MarkdownExportService {
         if finalizedSegments.isEmpty {
             lines.append("| | | | No finalized transcript text. | | |")
         }
+
+        appendPauseSpans(
+            to: &lines,
+            pauseSpans: pauseSpans,
+            calendar: calendar
+        )
 
         appendSpeakerTimeline(
             to: &lines,
@@ -142,6 +152,42 @@ enum MarkdownExportService {
         lines.append("- Jev model: \(context.jevModel)")
 
         appendPromptSection(title: "Jev Queries", prompt: context.jevQueryDetails, to: &lines)
+    }
+
+    /// One-line summary of paused spans for the DETAILS block, or nil when the session
+    /// was never paused.
+    private static func pauseSummaryText(_ pauseSpans: [TranscriptionPauseSpan]) -> String? {
+        guard !pauseSpans.isEmpty else {
+            return nil
+        }
+        let completed = pauseSpans.compactMap(\.duration)
+        let total = durationText(completed.reduce(0, +))
+        let isPausedNow = pauseSpans.contains { $0.endedAt == nil }
+        if completed.isEmpty {
+            return "currently paused"
+        }
+        let spanText = "\(completed.count) span\(completed.count == 1 ? "" : "s") totaling \(total)"
+        return isPausedNow ? "\(spanText), plus one still in progress" : spanText
+    }
+
+    /// Lists paused spans so a reader can tell why the transcript table skips time.
+    private static func appendPauseSpans(
+        to lines: inout [String],
+        pauseSpans: [TranscriptionPauseSpan],
+        calendar: Calendar
+    ) {
+        guard !pauseSpans.isEmpty else {
+            return
+        }
+        lines.append("")
+        lines.append("# PAUSES")
+        lines.append("")
+        lines.append("| started | duration |")
+        lines.append("| --- | ---: |")
+        for span in pauseSpans {
+            let duration = span.duration.map(durationText) ?? "in progress"
+            lines.append("| \(tableCell(dateTimeText(span.startedAt, calendar: calendar))) | \(tableCell(duration)) |")
+        }
     }
 
     private static func appendSpeakerTimeline(

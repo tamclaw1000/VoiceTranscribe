@@ -2071,3 +2071,33 @@ Small additions folded into the same v2.4.41 branch/release rather than a separa
 - [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
 - [x] Bump `CFBundleShortVersionString` to `2.4.42`.
 - [x] Bump `CFBundleVersion` to `85`.
+
+## 107. v2.4.43. Pause and Resume Live Transcription
+
+### 107a. Pause Semantics
+
+- [x] Added `TranscriptionPauseSpan` (`Models.swift`): a paused interval with `startedAt`/`endedAt` and a `duration`, where `endedAt == nil` means the pause is still open.
+- [x] `TranscriptionCoordinator` gained `isPaused` and `pauseSpans`, plus `pause()` / `resume()`. Paused buffers are dropped in `consume(buffer:time:)`, so paused audio never reaches Apple Speech, while the engine, its analyzer stream, and the in-flight interim utterance stay alive — resuming continues the same sentence instead of restarting the pipeline.
+- [x] `stop()` closes an open pause span and clears the paused flag; `start()` clears `pauseSpans` for the new session.
+
+### 107b. App Wiring and UI
+
+- [x] `AppModel.toggleTranscriptionPause(for:)` pauses/resumes, traced as `transcribe.pause` / `transcribe.resume` button events plus `transcription.paused` / `transcription.resumed` coordinator events.
+- [x] Pausing removes the `diarize` capture consumer and resuming re-adds it (extracted as `addLiveDiarizationConsumer()`), so the speaker timeline covers exactly the transcribed audio. The `record` consumer is untouched: recording stays gapless and only the transcript has a gap.
+- [x] Live capture only — `canPauseTranscription(for:)` excludes file transcription, which drives the same coordinator from disk.
+- [x] `SourceRow` shows a Pause/Resume button while its source is transcribing; `TranscriptionStatusView` reports "Paused" with a yellow indicator instead of the green/orange audio states.
+- [x] The Live Transcript interleaves pause markers with transcript rows through `TranscriptTimelineItem`, placing each span where it interrupted the session and an in-progress span after the last row.
+
+### 107c. Markdown Export
+
+- [x] `MarkdownExportService.makeDocument` accepts `pauseSpans` (defaulted, so existing callers are unaffected) and adds a `- Paused:` line to `# DETAILS` plus a `# PAUSES` table (`started`, `duration`, `in progress` for an open span).
+- [x] Wired from `AppModel.saveTranscriptMarkdownToFile` — the export call site `AGENTS.md` flags as the pillar most likely to be missed.
+
+### 107d. Tests and Version
+
+- [x] Added coordinator tests proving paused buffers never reach the engine, that resume restores them, and that stop/restart close and clear pause history.
+- [x] Added Markdown export tests for the `# PAUSES` table and for its absence when a session was never paused.
+- [x] Verify `swift test` passes (67 tests).
+- [x] Verify `./scripts/build.sh` succeeds end to end (clean build, packaged and ad-hoc signed `dist/VoiceTranscribe.app`, exit 0). `scripts/build.sh` and `scripts/run.sh` are broken on `main` since `e582f3c` ("Move all scripts into scripts/") because they still resolve `ROOT_DIR` as their own directory, so this branch carries the repaired versions of both as an interim measure. The same repair, plus the documentation explaining the `ROOT_DIR` and clean-before-validate hazards, is carried separately by the `fix/script-root-paths` branch; the two are byte-identical for these files, so whichever lands second is a no-op for them.
+- [x] Bump `CFBundleShortVersionString` to `2.4.43`.
+- [x] Bump `CFBundleVersion` to `86`.

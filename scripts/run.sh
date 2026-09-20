@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_NAME="VoiceTranscribe"
 APP_DIR="$ROOT_DIR/dist/$APP_NAME.app"
-PACKAGE_SCRIPT="$ROOT_DIR/scripts/package-app.sh"
+PACKAGE_SCRIPT="$SCRIPT_DIR/package-app.sh"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 
 usage() {
   cat <<USAGE
-Usage: ./run.sh [--no-build]
+Usage: ./scripts/run.sh [--no-build]
 
 Builds and packages VoiceTranscribe, then launches the app bundle.
 
@@ -43,7 +44,7 @@ fi
 
 if [[ ! -d "$APP_DIR" ]]; then
   echo "App bundle not found: $APP_DIR" >&2
-  echo "Run ./run.sh without --no-build to create it." >&2
+  echo "Run ./scripts/run.sh without --no-build to create it." >&2
   exit 1
 fi
 

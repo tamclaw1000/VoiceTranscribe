@@ -45,6 +45,27 @@ enum CaptureStatus: Equatable {
     }
 }
 
+/// A span of live capture during which transcription was paused. The last span in
+/// `TranscriptionCoordinator.pauseSpans` stays open (`endedAt == nil`) while paused.
+struct TranscriptionPauseSpan: Identifiable, Equatable {
+    let id: UUID
+    var startedAt: Date
+    var endedAt: Date?
+
+    var duration: TimeInterval? {
+        guard let endedAt else {
+            return nil
+        }
+        return max(0, endedAt.timeIntervalSince(startedAt))
+    }
+
+    init(id: UUID = UUID(), startedAt: Date = Date(), endedAt: Date? = nil) {
+        self.id = id
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+    }
+}
+
 struct TranscriptSegment: Identifiable, Equatable {
     let id: UUID
     var text: String

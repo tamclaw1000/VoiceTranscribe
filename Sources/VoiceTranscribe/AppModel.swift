@@ -1002,6 +1002,59 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// True when the given live source can be paused. File transcription drives the
+    /// same coordinator from disk, so pausing it has no meaning and is excluded.
+    func canPauseTranscription(for source: SoundInputSource) -> Bool {
+        !isTranscribingFile && transcription.isTranscribing && isTranscribing(source)
+    }
+
+    /// Pauses or resumes live transcription for the active source. Recording is left
+    /// alone on purpose: the audio file stays gapless, while the transcript and the
+    /// speaker timeline both skip the paused span.
+    func toggleTranscriptionPause(for source: SoundInputSource) {
+        Trace.button(
+            transcription.isPaused ? "transcribe.resume" : "transcribe.pause",
+            source: source.name,
+            extra: [
+                "isTranscribing": transcription.isTranscribing,
+                "isTranscribingFile": isTranscribingFile,
+                "segments": transcription.segments.count
+            ]
+        )
+
+        if transcription.isPaused {
+            resumeTranscription()
+        } else {
+            pauseTranscription()
+        }
+    }
+
+    private func pauseTranscription() {
+        guard transcription.isTranscribing, !isTranscribingFile else { return }
+        transcription.pause()
+        // Pause the speaker timeline with the transcript so both cover the same audio;
+        // the diarizer stays started and is simply not fed while paused.
+        captureService.removeConsumer(id: "diarize")
+        Trace.event("transcribe.paused", [
+            "source": transcriptSourceName,
+            "segments": transcription.segments.count,
+            "engine": transcription.engineName
+        ])
+    }
+
+    private func resumeTranscription() {
+        guard transcription.isPaused else { return }
+        transcription.resume()
+        if diarization.isRunning || diarization.isStarting {
+            addLiveDiarizationConsumer()
+        }
+        Trace.event("transcribe.resumed", [
+            "source": transcriptSourceName,
+            "pauseSpans": transcription.pauseSpans.count,
+            "segments": transcription.segments.count
+        ])
+    }
+
     func isRecording(_ source: SoundInputSource) -> Bool {
         guard let session = recordingService.activeSession else { return false }
         return session.source.id == source.id
@@ -1094,11 +1147,7 @@ final class AppModel: ObservableObject {
                 return false
             }
             if addLiveConsumer {
-                captureService.addConsumer(id: "diarize") { [weak diarization] buffer, time in
-                    Task { @MainActor in
-                        diarization?.consume(buffer: buffer, time: time)
-                    }
-                }
+                addLiveDiarizationConsumer()
             }
             return true
         } catch {
@@ -1111,6 +1160,16 @@ final class AppModel: ObservableObject {
                 "error": error.localizedDescription
             ])
             return false
+        }
+    }
+
+    /// Registers the live diarization consumer. Pausing removes this consumer and
+    /// resuming re-adds it, so the speaker timeline covers exactly the transcribed audio.
+    private func addLiveDiarizationConsumer() {
+        captureService.addConsumer(id: "diarize") { [weak diarization] buffer, time in
+            Task { @MainActor in
+                diarization?.consume(buffer: buffer, time: time)
+            }
         }
     }
 
@@ -1234,6 +1293,7 @@ final class AppModel: ObservableObject {
             context: context,
             finalizedSegments: transcription.segments,
             speakerSegments: diarization.segments,
+            pauseSpans: transcription.pauseSpans,
             aiPrompts: aiPrompt.items,
             jevResults: jev.items,
             summaryParagraphs: summary.paragraphs

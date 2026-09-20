@@ -4,11 +4,12 @@ Last updated: 2026-09-20
 
 ## Repository State
 
-- Current branch: `feature/pause-transcription`, checked out in the sibling `../pause-transcription` worktree, closing out as `v2.4.43` (`IMPLEMENTATION.md` #107)
-- `main` state before this close-out: synchronized with `origin/main` at `945af92 chore: branch cleanup`
-- Latest tag before this close-out: `v2.4.42`
-- Feature version: `2.4.43`, bundle build `86`
-- The pause branch also carries repaired `scripts/build.sh` and `scripts/run.sh`; `fix/script-root-paths` carries the same repair plus its documentation
+- Current branch: `main` — pause/resume for live transcription shipped as `v2.4.43` (`IMPLEMENTATION.md` #107)
+- `main` state: fast-forward-free merge of `feature/pause-transcription`, tagged and pushed to `origin/main`
+- Latest tag: `v2.4.43`
+- App version on `main`: `2.4.43`, bundle build `86`
+- `feature/pause-transcription` was merged and its local branch deleted; its worktree `../pause-transcription` is kept on a detached HEAD
+- This release also carries the repaired `scripts/build.sh` and `scripts/run.sh` (broken since the `scripts/` move) plus the doc path updates that go with them
 - Merged branches were pruned back to in-use refs; the remaining worktrees (`explore-versions`, `python-version`, `fix-sentence-occurrence-results`) are intentionally kept
 - Merged-and-cleaned-up branches still present locally/remotely: `fix/transcribe-restart-crash-debounce`, `chore/agents-md-cross-tool-support`, `feature/hide-empty-ai-processing`, `feature/jev-integration`, `fix/jev-markdown-export-and-guardrails` (all merged into `main`, not deleted)
 - Repo-root operating guide is now `AGENTS.md` (cross-tool standard, read natively by Codex/opencode/etc.), with `CLAUDE.md` as a symlink to it so Claude Code also auto-loads it. The old `AGENT.md` (singular, no tool read it automatically) is gone.

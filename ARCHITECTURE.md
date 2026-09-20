@@ -90,6 +90,8 @@ Current limitation: SpeechVAD Sortformer provides session-local speaker slots, n
 
 11. **A per-sentence AI result feature has four touch points, not one.** AI Processing and Jev both prove this out: each needed (a) a Settings tab for configuration, (b) a sidebar section (`ContentView.sourceList`) so results can be toggled per item, (c) a transcript-row block in `TranscriptAIPromptPanel` so results are visible live, and (d) a column/section in `MarkdownExportService` so results survive into the exported record — these are the four technical pillars `AGENTS.md` asks every such feature to check. It is easy to build (a)–(c) by mirroring the UI and forget (d), since the export path is a separate call site (`AppModel.saveTranscriptMarkdownToFile`) not reachable by browsing the live view tree — this happened once already with the initial Jev integration (v2.4.39) and was fixed in the following release.
 
+12. **Sentence-level results are keyed by occurrence, not text.** `AIPromptCoordinator.sentenceOccurrences(in:)` turns a finalized `TranscriptSegment` into `SentenceOccurrence` values (`segmentID` + `sentenceIndex` + text). AI Processing and Jev dedupe repeat submissions of the same occurrence, but repeated identical spoken text in later segments intentionally produces new result items. UI display and Markdown export must match results to transcript rows by `segmentID` first, using normalized text only as a fallback for legacy items that predate occurrence metadata.
+
 ## Critical Gotchas
 
 ### ⚠️ Nested ObservableObject Bug (Fixed in v1.3.1)
@@ -212,6 +214,7 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.42 | 85 | Keyed AI Processing and Jev result rows by transcript sentence occurrence instead of normalized text; improved sentence splitting around ellipses, abbreviations, and decimals; fixed clean worktree builds by tracking `VoiceIdentityService.swift` |
 | 2.4.41 | 84 | Renamed the historical `FactCheck`-prefixed AI Processing code (file, types, coordinator, trace events, tests) to `AIPrompt`, matching the UI label; removed dead legacy `@AppStorage` settings/reset code uncovered along the way |
 | 2.4.40 | 83 | Fixed Markdown export missing AI Processing/Jev results (a pillar the v2.4.39 Jev integration forgot); added a "Feature Surface Checklist" to AGENTS.md so future per-sentence-result features cover all four touch points |
 | 2.4.39 | 82 | Added Jev (TypeSafe System One) as a new AI backend: Jev Configuration settings tab, one-or-many Jev Queries (Noul/Choice/Score primitives), a sidebar "Jev Queries" section, and per-sentence transcript results |

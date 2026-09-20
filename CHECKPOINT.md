@@ -4,7 +4,8 @@ Last updated: 2026-09-20
 
 ## Repository State
 
-- Current branch: `main` — pause/resume for live transcription shipped as `v2.4.43` (`IMPLEMENTATION.md` #107)
+- Current branch: `feature/sidebar-tabs` in the `../sidebar-tabs` worktree — sidebar tab split, `IMPLEMENTATION.md` #108, `Info.plist` bumped to `2.4.44`/`87`. Uncommitted; cut from `main` at `70442fe`. (A `Current Recording` pane was built here and then removed on request — no trace remains.)
+- Last shipped: `v2.4.43` (`main`, `IMPLEMENTATION.md` #107) — pause/resume for live transcription
 - `main` state: fast-forward-free merge of `feature/pause-transcription`, tagged and pushed to `origin/main`
 - Latest tag: `v2.4.43`
 - App version on `main`: `2.4.43`, bundle build `86`
@@ -57,6 +58,7 @@ Two parallel AI backends now run per finalized transcript sentence:
 - Voice candidates can be named and reset.
 - Voice Identification is in a collapsible right-hand pane.
 - Left source/navigation pane is pinned visible with the right voice pane present.
+- The left sidebar is split into two tabs: **Microphones** (device list + File Sources) and **AI Selection** (AI Prompts + Jev Queries). The split is view state only — it changes what is visible, never what is enabled or transcribed.
 - Markdown export includes transcript rows, AI processing output, prompt states, and diarization timeline data.
 - AI processing supports multiple LLM endpoints, multiple prompt templates, prompt enablement, global model override, batching, queueing, and prompt state.
 - The AI Processing per-row transcript block is hidden entirely (not just shown as "Disabled") when no prompt templates are enabled.

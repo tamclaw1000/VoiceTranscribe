@@ -94,6 +94,8 @@ Current limitation: SpeechVAD Sortformer provides session-local speaker slots, n
 
 13. **Pause withholds buffers instead of stopping the pipeline.** `TranscriptionCoordinator.pause()` flips `isPaused`, which makes `consume(buffer:time:)` drop buffers while leaving the engine, its analyzer input stream, and the in-flight interim utterance alive. Resume therefore continues the same sentence, and the paused interval produces no transcript rows because the audio was never fed — instead of stopping and restarting the coordinator, which would discard interim text and pay analyzer startup again. Each pause is recorded as a `TranscriptionPauseSpan` so the live transcript can interleave pause markers and Markdown export can report the gap. Recording is deliberately left running, so a paused session's audio file keeps its full duration while its transcript has a hole in it.
 
+14. **The left sidebar is tabbed, and sections must choose a tab.** `ContentView` renders exactly one of `microphoneSections` or `aiSelectionSections` under a segmented `SidebarTab` picker: **Microphones** holds the device list and File Sources, **AI Selection** holds AI Prompts and Jev Queries. The tab is pure view state (`@State selectedSidebarTab`) — no model, no persistence — so it does not affect what is enabled or transcribed. This matters for decision 11's pillar (b): a new per-sentence AI feature no longer just appends a sidebar section, it also decides which tab that section belongs to. Audio-input sections belong to Microphones; anything about prompts, queries, or models belongs to AI Selection. The tab is expected to stay cheap: it groups existing sections, and per-recording status stays with the recording controls in the Microphones tab rather than in AI configuration.
+
 ## Critical Gotchas
 
 ### ⚠️ Nested ObservableObject Bug (Fixed in v1.3.1)
@@ -216,6 +218,7 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.44 | 87 | Split the left sidebar into two tabs — Microphones (devices + file sources) and AI Selection (AI Prompts + Jev Queries) — so AI configuration no longer competes for vertical space with the device list |
 | 2.4.43 | 86 | Added pause/resume for live transcription: buffers are withheld from the `transcribe` and `diarize` consumers while recording keeps running, the live transcript interleaves pause markers, and Markdown export records the gaps in a `# PAUSES` table |
 | 2.4.42 | 85 | Keyed AI Processing and Jev result rows by transcript sentence occurrence instead of normalized text; improved sentence splitting around ellipses, abbreviations, and decimals; fixed clean worktree builds by tracking `VoiceIdentityService.swift` |
 | 2.4.41 | 84 | Renamed the historical `FactCheck`-prefixed AI Processing code (file, types, coordinator, trace events, tests) to `AIPrompt`, matching the UI label; removed dead legacy `@AppStorage` settings/reset code uncovered along the way |

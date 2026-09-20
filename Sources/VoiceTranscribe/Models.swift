@@ -185,8 +185,175 @@ struct SpeakerAnnotation: Equatable {
     var voiceConfidence: Float?
 }
 
-struct SpeakerNameEditorItem: Identifiable, Equatable {
+/// One observed `Speaker N / Voice M` combination. Session-only, like the rest of
+/// voice identity — it exists because diarization slots and voice labels are both
+/// per-session and the user edits the pair, not either half on its own.
+struct SpeakerCombo: Hashable, Identifiable {
+    var speakerID: String
+    var voiceID: String?
+
     var id: String { VoiceIdentityKey.make(speakerID: speakerID, voiceID: voiceID) }
+
+    var observedLabel: String {
+        VoiceIdentityKey.observedLabel(speakerID: speakerID, voiceID: voiceID)
+    }
+}
+
+/// How a combo got its name. A name the user typed stays editable; a name chosen
+/// from the list of names already assigned this session locks the type-in field,
+/// so a quick pick cannot be silently rewritten by a stray keystroke.
+enum SpeakerNameOrigin: String, Equatable {
+    case typed
+    case picked
+}
+
+/// The speaker a combo is shown as, after canonical-name merging. `canonicalID` is
+/// shared by every combo folded into the same speaker, which is what lets the pane,
+/// the transcript colors, and the export timeline agree on one identity.
+struct SpeakerIdentityResolution: Equatable {
+    var canonicalID: String
+    var displayName: String
+    /// Every combo folded into this speaker, in display order. One entry when merging
+    /// is off, or when the combo carries no assigned name.
+    var combos: [SpeakerCombo]
+    /// True only when more than one combo was folded together by name.
+    var isMerged: Bool
+
+    /// `Speaker 1 / Voice 2` for a single combo, or every folded label joined.
+    var observedLabel: String {
+        combos.map(\.observedLabel).joined(separator: " + ")
+    }
+
+    /// A combo the user can be asked about — the first folded combo.
+    var representative: SpeakerCombo? { combos.first }
+}
+
+/// One observed combo as the Voice Identification pane sees it: the combo, the live stats
+/// behind it, and the name the user gave it (plus how that name was set).
+struct SpeakerComboEntry: Equatable {
+    var combo: SpeakerCombo
+    var segmentCount: Int = 0
+    var totalDuration: TimeInterval = 0
+    var name: String = ""
+    var origin: SpeakerNameOrigin?
+
+    var assignedName: String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+/// Folds `Speaker N / Voice M` combos into canonical speakers using the display names
+/// assigned this session. With merging on, combos sharing a name (compared
+/// case- and whitespace-insensitively, so "alice" and " Alice " are one person)
+/// become a single speaker; with it off, every combo stays its own speaker. Pure and
+/// value-typed so the grouping rules are testable without a running app.
+struct CanonicalSpeakerResolver: Equatable {
+    var mergeSameNamedSpeakers: Bool = false
+    /// Combos to resolve, with stats and names, in the order they should be displayed.
+    var entries: [SpeakerComboEntry] = []
+
+    /// Distinct assigned names in combo order — the list offered as quick picks.
+    var assignedNames: [String] {
+        var seen: Set<String> = []
+        var names: [String] = []
+        for entry in entries {
+            guard let name = entry.assignedName else { continue }
+            guard seen.insert(Self.nameKey(name)).inserted else { continue }
+            names.append(name)
+        }
+        return names
+    }
+
+    /// Resolutions grouped by canonical speaker, ordered by each speaker's first combo.
+    func resolutions() -> [SpeakerIdentityResolution] {
+        var order: [String] = []
+        var grouped: [String: [SpeakerCombo]] = [:]
+        var displayNames: [String: String] = [:]
+
+        for entry in entries {
+            let combo = entry.combo
+            let name = entry.assignedName
+            let canonicalID = makeCanonicalID(for: combo, name: name)
+            if grouped[canonicalID] == nil {
+                order.append(canonicalID)
+            }
+            grouped[canonicalID, default: []].append(combo)
+            if displayNames[canonicalID] == nil {
+                displayNames[canonicalID] = name ?? combo.observedLabel
+            }
+        }
+
+        return order.map { canonicalID in
+            let members = grouped[canonicalID] ?? []
+            return SpeakerIdentityResolution(
+                canonicalID: canonicalID,
+                displayName: displayNames[canonicalID] ?? "",
+                combos: members,
+                isMerged: members.count > 1
+            )
+        }
+    }
+
+    /// The rows the pane edits: one per canonical speaker, with member stats summed and the
+    /// type-in lock derived from how each member's name was set. Naming one row names every
+    /// combo behind it, which is what makes a merge editable as a single person.
+    func editorItems() -> [SpeakerNameEditorItem] {
+        var entriesByComboID: [String: SpeakerComboEntry] = [:]
+        for entry in entries {
+            entriesByComboID[entry.combo.id] = entry
+        }
+
+        return resolutions().map { resolution in
+            let members = resolution.combos
+            let memberEntries = members.compactMap { entriesByComboID[$0.id] }
+            let customName = memberEntries.compactMap(\.assignedName).first ?? ""
+            let observedLabel = resolution.observedLabel
+            let representative = members.first ?? SpeakerCombo(speakerID: "", voiceID: nil)
+            // Identity is the row's first combo, NOT the canonical id: the canonical id is
+            // derived from the assigned name, so it changed on every keystroke, which made
+            // SwiftUI tear the row down and steal focus from the type-in field mid-word.
+            // Locked only when every member was set from the quick-pick list, so a merged row
+            // can never lock a combo the user had left open for typing.
+            let isNameLocked = !memberEntries.isEmpty
+                && memberEntries.allSatisfy { $0.origin == .picked && $0.assignedName != nil }
+            return SpeakerNameEditorItem(
+                id: representative.id,
+                speakerID: representative.speakerID,
+                voiceID: representative.voiceID,
+                observedLabel: observedLabel,
+                displayName: customName.isEmpty ? observedLabel : customName,
+                customName: customName,
+                segmentCount: memberEntries.reduce(0) { $0 + $1.segmentCount },
+                totalDuration: memberEntries.reduce(0) { $0 + $1.totalDuration },
+                combos: members,
+                isNameLocked: isNameLocked
+            )
+        }
+    }
+
+    /// Merging is what makes two combos with the same name share an identity; without
+    /// it each combo keys on its own observed label, exactly as before this feature.
+    private func makeCanonicalID(for combo: SpeakerCombo, name: String?) -> String {
+        if mergeSameNamedSpeakers, let name {
+            return "name:\(Self.nameKey(name))"
+        }
+        return "combo:\(combo.id)"
+    }
+
+    static func nameKey(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+            .lowercased()
+    }
+}
+
+struct SpeakerNameEditorItem: Identifiable, Equatable {
+    /// Row identity, used by `ForEach`. This is the row's first combo id, which stays put as
+    /// the name is edited — keying it on the name instead would rebuild the row and drop focus
+    /// from the type-in field on every keystroke.
+    var id: String
     var speakerID: String
     var voiceID: String?
     var observedLabel: String
@@ -194,9 +361,19 @@ struct SpeakerNameEditorItem: Identifiable, Equatable {
     var customName: String
     var segmentCount: Int = 0
     var totalDuration: TimeInterval = 0
+    /// Every combo this row edits — one for a normal row, several when the row is a
+    /// merged canonical speaker, so naming the row names all of them at once.
+    var combos: [SpeakerCombo] = []
+    /// True when the name came from the quick-pick list, which disables the type-in field.
+    var isNameLocked: Bool = false
 
     var hasCustomName: Bool {
         !customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Combo ids to edit; falls back to this row's own combo when unset.
+    var memberCombos: [SpeakerCombo] {
+        combos.isEmpty ? [SpeakerCombo(speakerID: speakerID, voiceID: voiceID)] : combos
     }
 }
 

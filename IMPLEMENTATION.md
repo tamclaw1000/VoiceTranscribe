@@ -2119,3 +2119,43 @@ Small additions folded into the same v2.4.41 branch/release rather than a separa
 - [x] Bump `CFBundleVersion` to `87`.
 - [x] Scoped to the tab split alone: a `Current Recording` section (and the `CurrentRecordingSummary` model behind it) was built in this worktree and then removed on request, so the AI Selection tab carries AI configuration only. No trace of it remains in the source.
 - [ ] Not visually confirmed: the tab picker and the contents of both tabs have not been seen in a running app.
+
+## 109. v2.4.45. Existing-Name Selection And Canonical Speaker Merging
+
+### 109a. Selecting A Name Instead Of Typing One
+
+- [x] Added `SpeakerCombo` (one observed `Speaker N / Voice M` pair) and `SpeakerNameOrigin` (`.typed` / `.picked`) to `Models.swift`.
+- [x] `DiarizationCoordinator` now records how each observed-voice name was set (`observedVoiceNameOrigins`, cleared by `reset()`, cleared with the name when it is removed), via `setObservedVoiceName(..., origin:)` plus a new `unlockObservedVoiceName(speakerID:voiceID:)`.
+- [x] `AppModel` gained `assignedSpeakerNames` (the quick-pick list), `selectExistingSpeakerName(_:for:)`, `unlockSpeakerName(for:)`, `setSpeakerName(_:for:)`, and `resetSpeakerNames(for:)`; each applies to every combo in a row through the new `SpeakerNameEditorItem.memberCombos`, so naming a merged row names all of its combos.
+- [x] Voice Identification rows now offer a **Use Existing Name** dropdown listing the names assigned this session, plus a **Custom…** entry. Picking a name sets it and keeps it on the dropdown, and the type-in `TextField` is hidden — only one way to set the name is visible at a time, so there is no disabled field to interpret. **Custom…** brings the field back without discarding the current name.
+- [x] Only names already assigned this session are offered: nothing new is persisted, matching the session-only voice-identity model the rest of the feature follows.
+
+### 109b. Merging Same-Named Speakers
+
+- [x] Added `CanonicalSpeakerResolver`, `SpeakerComboEntry`, and `SpeakerIdentityResolution` to `Models.swift`. The resolver folds combos into canonical speakers when merging is on: combos the user named the same share one `canonicalID`. Merging is `settings.mergeSameNamedSpeakers` (`@AppStorage("mergeSameNamedSpeakers")`, default off, so existing behavior is unchanged until it is checked).
+- [x] Names compare case- and whitespace-insensitively (`nameKey`), and the first spelling in display order wins, so merging never silently rewrites the name the user sees.
+- [x] The Voice Identification pane collapses same-named combos into one row, summing segment count and duration and naming every member at once; `CanonicalSpeakerResolver.editorItems()` builds those rows, so the grouping and lock rules are unit-tested rather than living in view code.
+- [x] The transcript row's speaker menu renders the same grouped list as the pane, so a speaker appears once instead of once per combo — two combos named "Dana" are one menu entry, and assigning it uses the merged entry's first combo. The help text on a merged entry names every combo behind it, so the assignment is not hidden.
+- [x] Kept `AppModel.observedVoiceCorrectionItems` (never merged) for operations that must visit every combo individually — `resetAllSpeakerNames()` still resets each `Speaker N / Voice M` pair, not each canonical speaker.
+- [x] Transcript rows, the pane, and the current-speaker banner color by the canonical name when merging is on, so folded combos share one color; with merging off the speaker slot still decides, exactly as before.
+- [x] `MarkdownExportService.makeDocument` takes `mergeSameNamedSpeakers` and coalesces adjacent runs of the same displayed speaker into one `# SPEAKERS` row, reporting the mean confidence of the runs it absorbed (not a running pairwise average). Non-adjacent runs stay separate, since the timeline is time-ordered.
+- [x] Wired from `AppModel.saveTranscriptMarkdownToFile` — the export call site `AGENTS.md` flags as the pillar most likely to be missed.
+
+### 109c. Three Fixes Found By Using It
+
+- [x] **Typing stole focus after every letter.** Row identity for `ForEach` was the canonical id, which is derived from the assigned name (`name:dana`), so each keystroke changed the row's identity — SwiftUI tore the row down and rebuilt it, dropping focus from the type-in field mid-word. `SpeakerNameEditorItem.id` is now the row's *first combo* id, which never moves while a name is edited. Merging still changes which rows exist, but it can neither invent nor duplicate an id.
+- [x] **The merge checkbox appeared to do nothing.** `mergeSameNamedSpeakers` was an `@AppStorage` property, and `@AppStorage` inside an `ObservableObject` emits no `objectWillChange` — so the click was persisted but never republished, and the pane kept its old grouping until something unrelated forced a re-render. `AppModel` was already forwarding `settings.objectWillChange`, so the notification was simply never sent. It is now a `@Published` property with explicit `UserDefaults` persistence (`AppSettings.mergeSameNamedSpeakersStorageKey`), which is the pattern to follow for any future setting that changes *derived* view data.
+- [x] These two compounded: because the toggle persisted without republishing, merging was silently **on** while the UI still looked ungrouped, which is what made the focus bug appear at all.
+- [x] **"Use Existing Name" needed selecting twice.** Two mechanisms, both fixed because either alone can swallow the first pick. (a) The pane rebuilds on every `AppModel` publish — capture levels tick many times a second — and rebuilding a row tears down its open menu, so the click landed on a view that no longer existed. Each row is now its own `Equatable` view used with `.equatable()`, so unrelated publishes skip it. (b) Picking a name takes the type-in field away while it may still hold focus, and ending editing commits the field's old text, which arrived as an empty edit that *cleared* the name just picked; the field's setter now ignores edits on a locked row, and `AppModel.setSpeakerName(_:for:)` ignores an empty edit for a combo whose live origin is `.picked` (checked against live state, since the row handed to the closure can predate the pick).
+- [x] The row's name control also moved from a hand-built `Menu` of buttons to a `Picker` backed by the row's own state, so a selection travels the ordinary `Binding` path and the control can never display a name the model does not hold.
+- [ ] Not reproduced headlessly: the double-selection symptom was diagnosed from the code paths above, not watched in the running app, so this one still needs a manual confirm.
+
+### 109d. Tests and Version
+
+- [x] Added tests: combos stay separate while merging is off, same-named combos merge with the first spelling winning, unnamed combos are never merged, the quick-pick list is distinct and case-insensitive, `nameKey` normalization, merged rows sum stats and lock only when every member was picked, `memberCombos` falls back to the row's own combo, the coordinator lock/unlock/clear cycle, and export coalescing on and off.
+- [x] Added the two regression tests for 109c: row ids stay stable and unique across a typed name (`""` → `"D"` → `"Da"` → `"Dana"`), and the merge toggle both persists to `UserDefaults` and publishes a change.
+- [x] Verify `swift test` passes (78 tests).
+- [x] Verify `./scripts/build.sh` succeeds end to end.
+- [x] Bump `CFBundleShortVersionString` to `2.4.45`.
+- [x] Bump `CFBundleVersion` to `88`.
+- [ ] Not visually confirmed: the existing-name menu, the lock glyph with its disabled field, and the merge checkbox have not been seen in a running app.

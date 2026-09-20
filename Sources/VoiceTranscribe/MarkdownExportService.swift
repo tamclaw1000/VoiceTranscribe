@@ -35,6 +35,7 @@ enum MarkdownExportService {
         finalizedSegments: [TranscriptSegment],
         speakerSegments: [SpeakerDiarizationSegment] = [],
         pauseSpans: [TranscriptionPauseSpan] = [],
+        mergeSameNamedSpeakers: Bool = false,
         aiPrompts: [AIPromptItem],
         jevResults: [JevResultItem] = [],
         summaryParagraphs: [String],
@@ -78,7 +79,8 @@ enum MarkdownExportService {
 
         appendSpeakerTimeline(
             to: &lines,
-            speakerSegments: speakerSegments
+            speakerSegments: speakerSegments,
+            mergeSameNamedSpeakers: mergeSameNamedSpeakers
         )
 
         let summary = summaryParagraphs
@@ -190,9 +192,33 @@ enum MarkdownExportService {
         }
     }
 
+    /// One row of the `# SPEAKERS` timeline. Confidence is a true mean of the runs that
+    /// were coalesced into the row, so a merged speaker's confidence is not double-weighted
+    /// toward whichever segment happened to be recorded last.
+    private struct SpeakerTimelineRow {
+        var startTime: TimeInterval
+        var endTime: TimeInterval
+        var speaker: String
+        var confidenceTotal: Float = 0
+        var confidenceCount: Int = 0
+
+        var confidence: Float? {
+            confidenceCount > 0 ? confidenceTotal / Float(confidenceCount) : nil
+        }
+
+        mutating func absorb(_ segment: SpeakerDiarizationSegment) {
+            endTime = max(endTime, segment.endTime)
+            if let confidence = segment.confidence {
+                confidenceTotal += confidence
+                confidenceCount += 1
+            }
+        }
+    }
+
     private static func appendSpeakerTimeline(
         to lines: inout [String],
-        speakerSegments: [SpeakerDiarizationSegment]
+        speakerSegments: [SpeakerDiarizationSegment],
+        mergeSameNamedSpeakers: Bool = false
     ) {
         guard !speakerSegments.isEmpty else {
             return
@@ -203,9 +229,41 @@ enum MarkdownExportService {
         lines.append("")
         lines.append("| start | end | speaker | confidence |")
         lines.append("| ---: | ---: | --- | ---: |")
-        for segment in speakerSegments.sorted(by: { $0.startTime < $1.startTime }) {
-            lines.append("| \(tableCell(timeOffsetText(segment.startTime))) | \(tableCell(timeOffsetText(segment.endTime))) | \(tableCell(speakerText(segment))) | \(tableCell(segment.confidence.map { String(format: "%.2f", $0) } ?? "")) |")
+        for row in speakerTimelineRows(speakerSegments, mergeSameNamedSpeakers: mergeSameNamedSpeakers) {
+            lines.append("| \(tableCell(timeOffsetText(row.startTime))) | \(tableCell(timeOffsetText(row.endTime))) | \(tableCell(row.speaker)) | \(tableCell(row.confidence.map { String(format: "%.2f", $0) } ?? "")) |")
         }
+    }
+
+    /// The timeline rows to export. When same-name merging is on, adjacent runs of the same
+    /// displayed speaker collapse into one row: merging can leave one person holding several
+    /// `Speaker N / Voice M` combos, and a timeline that lists those as separate rows reads
+    /// like two people. Merged combos also never already sit adjacent, since the diarizer
+    /// alternates between whoever is speaking.
+    private static func speakerTimelineRows(
+        _ segments: [SpeakerDiarizationSegment],
+        mergeSameNamedSpeakers: Bool
+    ) -> [SpeakerTimelineRow] {
+        var rows: [SpeakerTimelineRow] = []
+        for segment in segments.sorted(by: { $0.startTime < $1.startTime }) {
+            let speaker = speakerText(segment)
+            if mergeSameNamedSpeakers,
+               var last = rows.last, !speaker.isEmpty, last.speaker == speaker {
+                last.absorb(segment)
+                rows[rows.count - 1] = last
+                continue
+            }
+            var row = SpeakerTimelineRow(
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                speaker: speaker
+            )
+            if let confidence = segment.confidence {
+                row.confidenceTotal = confidence
+                row.confidenceCount = 1
+            }
+            rows.append(row)
+        }
+        return rows
     }
 
     private static func speakerText(_ segment: TranscriptSegment) -> String {

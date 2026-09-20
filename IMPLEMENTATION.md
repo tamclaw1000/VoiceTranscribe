@@ -2050,3 +2050,24 @@ Small additions folded into the same v2.4.41 branch/release rather than a separa
 - [x] `.gitignore`: added `VT-exports/` (the user's real recordings/transcripts output folder, which had been sitting untracked without an explicit ignore rule) and `sessions/` (this session's own log directory, see `sessions/claude-20260918--074005.md`).
 - [x] `AGENTS.md` (symlinked as `CLAUDE.md`): added a **Close Out Task** section codifying the update-docs → bump-version → verify → commit → merge → tag → push sequence this session had been running manually each release, explicitly scoped to only run when the user asks for it. Also added a Git Hygiene note about the single-shared-working-tree gotcha (uncommitted changes follow `git checkout` across branches; stash before switching away from work you want to keep separate) — hit more than once this session.
 - No test/build impact (documentation and `.gitignore` only).
+
+## 105. v2.4.42. Sentence Occurrence Result Identity
+
+### 105a. AI Processing and Jev Result Matching
+
+- [x] Added `SentenceOccurrence` identity (`segmentID`, `sentenceIndex`, text, timestamp) so sentence-level work is tied to a concrete transcript occurrence instead of just normalized text.
+- [x] Updated `AIPromptCoordinator` to deduplicate only repeat submissions of the same prompt + segment + sentence index, while preserving repeated identical spoken sentences in later transcript segments as separate AI Processing items.
+- [x] Updated `JevCoordinator` to use the same occurrence identity, preserving repeated identical sentences while still batching enabled Jev queries once per sentence occurrence.
+- [x] Updated live transcript rendering and Markdown export to prefer segment-ID matching for AI Processing and Jev results, with text matching kept only as a compatibility fallback for legacy/in-memory items without occurrence metadata.
+- [x] Replaced the naive sentence splitter with a scanner that avoids false splits around ellipses, common abbreviations, decimals, and punctuation-only fragments.
+
+### 105b. Tests and Version
+
+- [x] Added tests for ellipses/abbreviations/decimals in sentence parsing.
+- [x] Added AI Processing and Jev tests proving repeated identical sentence occurrences are preserved while duplicate submissions of the same occurrence are suppressed.
+- [x] Added Markdown export coverage proving repeated text rows receive only the result for their matching transcript segment.
+- [x] Force-added `VoiceIdentityService.swift` because tracked diarization code depends on it and clean worktrees could not otherwise build.
+- [x] Verify `swift test` passes (63 tests).
+- [x] Verify `./build.sh` succeeds and emits `dist/VoiceTranscribe.app`.
+- [x] Bump `CFBundleShortVersionString` to `2.4.42`.
+- [x] Bump `CFBundleVersion` to `85`.

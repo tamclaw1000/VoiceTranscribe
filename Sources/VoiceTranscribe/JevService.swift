@@ -37,6 +37,8 @@ enum JevQueryState: Equatable {
 
 struct JevResultItem: Identifiable, Equatable {
     let id: UUID
+    let segmentID: UUID?
+    let sentenceIndex: Int?
     let sentence: String
     let queryID: String
     let queryName: String
@@ -46,6 +48,8 @@ struct JevResultItem: Identifiable, Equatable {
 
     init(
         id: UUID = UUID(),
+        segmentID: UUID? = nil,
+        sentenceIndex: Int? = nil,
         sentence: String,
         queryID: String,
         queryName: String,
@@ -54,6 +58,8 @@ struct JevResultItem: Identifiable, Equatable {
         createdAt: Date = Date()
     ) {
         self.id = id
+        self.segmentID = segmentID
+        self.sentenceIndex = sentenceIndex
         self.sentence = sentence
         self.queryID = queryID
         self.queryName = queryName
@@ -289,35 +295,39 @@ final class JevCoordinator: ObservableObject {
             return
         }
 
-        for sentence in AIPromptCoordinator.completeSentences(in: segment.text) {
-            enqueue(sentence: sentence, queries: queries, apiKey: apiKey, baseURL: baseURL, model: model)
+        for occurrence in AIPromptCoordinator.sentenceOccurrences(in: segment) {
+            enqueue(occurrence: occurrence, queries: queries, apiKey: apiKey, baseURL: baseURL, model: model)
         }
     }
 
     private func enqueue(
-        sentence: String,
+        occurrence: SentenceOccurrence,
         queries: [JevQueryConfiguration],
         apiKey: String,
         baseURL: String,
         model: String
     ) {
-        let normalized = AIPromptCoordinator.normalizedSentence(sentence)
+        let normalized = AIPromptCoordinator.normalizedSentence(occurrence.text)
         guard !normalized.isEmpty else {
             return
         }
 
-        let unseenQueries = queries.filter { !seenSentences.contains("\($0.id)|\(normalized)") }
+        let unseenQueries = queries.filter {
+            !seenSentences.contains("\($0.id)|\(occurrence.segmentID.uuidString)|\(occurrence.sentenceIndex)")
+        }
         guard !unseenQueries.isEmpty else {
             return
         }
         for query in unseenQueries {
-            seenSentences.insert("\(query.id)|\(normalized)")
+            seenSentences.insert("\(query.id)|\(occurrence.segmentID.uuidString)|\(occurrence.sentenceIndex)")
         }
 
         let batchGroupID = UUID().uuidString
         let newItems = unseenQueries.map { query in
             JevResultItem(
-                sentence: sentence,
+                segmentID: occurrence.segmentID,
+                sentenceIndex: occurrence.sentenceIndex,
+                sentence: occurrence.text,
                 queryID: query.id,
                 queryName: query.displayName,
                 batchGroupID: batchGroupID
@@ -327,7 +337,9 @@ final class JevCoordinator: ObservableObject {
         Trace.event("jev.queued", [
             "batchGroupID": batchGroupID,
             "queries": newItems.count,
-            "sentence": sentence.prefix(120)
+            "segmentID": occurrence.segmentID.uuidString,
+            "sentenceIndex": occurrence.sentenceIndex,
+            "sentence": occurrence.text.prefix(120)
         ])
         startProcessing(queries: queries, apiKey: apiKey, baseURL: baseURL, model: model)
     }

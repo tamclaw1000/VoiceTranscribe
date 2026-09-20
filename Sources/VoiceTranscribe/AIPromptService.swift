@@ -36,8 +36,17 @@ enum AIPromptState: Equatable {
     case failed(String)
 }
 
+struct SentenceOccurrence: Equatable {
+    let segmentID: UUID
+    let sentenceIndex: Int
+    let text: String
+    let timestamp: Date
+}
+
 struct AIPromptItem: Identifiable, Equatable {
     let id: UUID
+    let segmentID: UUID?
+    let sentenceIndex: Int?
     let sentence: String
     let llm: LLMEndpointConfiguration
     let promptTemplateID: String
@@ -50,6 +59,8 @@ struct AIPromptItem: Identifiable, Equatable {
 
     init(
         id: UUID = UUID(),
+        segmentID: UUID? = nil,
+        sentenceIndex: Int? = nil,
         sentence: String,
         llm: LLMEndpointConfiguration,
         promptTemplateID: String = AIPromptTemplateConfiguration.defaultID,
@@ -61,6 +72,8 @@ struct AIPromptItem: Identifiable, Equatable {
         createdAt: Date = Date()
     ) {
         self.id = id
+        self.segmentID = segmentID
+        self.sentenceIndex = sentenceIndex
         self.sentence = sentence
         self.llm = llm
         self.promptTemplateID = promptTemplateID
@@ -75,6 +88,8 @@ struct AIPromptItem: Identifiable, Equatable {
     func withPromptState(_ promptState: String) -> AIPromptItem {
         AIPromptItem(
             id: id,
+            segmentID: segmentID,
+            sentenceIndex: sentenceIndex,
             sentence: sentence,
             llm: llm,
             promptTemplateID: promptTemplateID,
@@ -786,11 +801,11 @@ final class AIPromptCoordinator: ObservableObject {
         let canBatchPrompts = batchPrompts
             && promptRoutes.count > 1
             && Set(promptRoutes.map { $0.llm.id }).count == 1
-        for sentence in Self.completeSentences(in: segment.text) {
+        for occurrence in Self.sentenceOccurrences(in: segment) {
             let batchGroupID = canBatchPrompts ? UUID().uuidString : nil
             for route in promptRoutes {
                 enqueue(
-                    sentence: sentence,
+                    occurrence: occurrence,
                     llm: route.llm,
                     promptTemplate: route.promptTemplate,
                     promptContext: promptContext,
@@ -801,21 +816,23 @@ final class AIPromptCoordinator: ObservableObject {
     }
 
     private func enqueue(
-        sentence: String,
+        occurrence: SentenceOccurrence,
         llm: LLMEndpointConfiguration,
         promptTemplate: AIPromptTemplateConfiguration,
         promptContext: AIPromptPromptContext,
         batchGroupID: String?
     ) {
-        let normalized = Self.normalizedSentence(sentence)
-        let dedupeKey = "\(promptTemplate.id)|\(normalized)"
+        let normalized = Self.normalizedSentence(occurrence.text)
+        let dedupeKey = "\(promptTemplate.id)|\(occurrence.segmentID.uuidString)|\(occurrence.sentenceIndex)"
         guard !normalized.isEmpty, !seenSentences.contains(dedupeKey) else {
             return
         }
 
         seenSentences.insert(dedupeKey)
         let item = AIPromptItem(
-            sentence: sentence,
+            segmentID: occurrence.segmentID,
+            sentenceIndex: occurrence.sentenceIndex,
+            sentence: occurrence.text,
             llm: llm,
             promptTemplateID: promptTemplate.id,
             promptTemplateName: promptTemplate.displayName,
@@ -829,7 +846,9 @@ final class AIPromptCoordinator: ObservableObject {
             "promptTemplate": promptTemplate.displayName,
             "provider": llm.provider.rawValue,
             "model": llm.model,
-            "sentence": sentence.prefix(120)
+            "segmentID": occurrence.segmentID.uuidString,
+            "sentenceIndex": occurrence.sentenceIndex,
+            "sentence": occurrence.text.prefix(120)
         ])
         startProcessing()
     }
@@ -978,6 +997,17 @@ final class AIPromptCoordinator: ObservableObject {
         items[index].state = state
     }
 
+    nonisolated static func sentenceOccurrences(in segment: TranscriptSegment) -> [SentenceOccurrence] {
+        completeSentences(in: segment.text).enumerated().map { index, sentence in
+            SentenceOccurrence(
+                segmentID: segment.id,
+                sentenceIndex: index,
+                text: sentence,
+                timestamp: segment.timestamp
+            )
+        }
+    }
+
     nonisolated static func completeSentences(in text: String) -> [String] {
         var sentences: [String] = []
         var start = text.startIndex
@@ -985,10 +1015,11 @@ final class AIPromptCoordinator: ObservableObject {
 
         while index < text.endIndex {
             let character = text[index]
-            if character == "." || character == "?" || character == "!" {
-                let end = text.index(after: index)
+            if isSentenceTerminator(character),
+               isSentenceBoundary(in: text, at: index) {
+                let end = sentenceEnd(in: text, after: index)
                 let sentence = String(text[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !sentence.isEmpty {
+                if isMeaningfulSentence(sentence) {
                     sentences.append(sentence)
                 }
                 start = end
@@ -998,6 +1029,90 @@ final class AIPromptCoordinator: ObservableObject {
 
         return sentences
     }
+
+    nonisolated private static func isSentenceTerminator(_ character: Character) -> Bool {
+        character == "." || character == "?" || character == "!"
+    }
+
+    nonisolated private static func isSentenceBoundary(in text: String, at index: String.Index) -> Bool {
+        let character = text[index]
+        if character == "." {
+            if isEllipsisPeriod(in: text, at: index) {
+                return false
+            }
+            if isDecimalPeriod(in: text, at: index) {
+                return false
+            }
+            if isKnownAbbreviationPeriod(in: text, at: index) {
+                return false
+            }
+        }
+
+        let next = sentenceEnd(in: text, after: index)
+        guard next < text.endIndex else {
+            return true
+        }
+
+        let nextCharacter = text[next]
+        return nextCharacter.isWhitespace || nextCharacter.isNewline
+    }
+
+    nonisolated private static func sentenceEnd(in text: String, after index: String.Index) -> String.Index {
+        var end = text.index(after: index)
+        while end < text.endIndex, isClosingSentencePunctuation(text[end]) {
+            end = text.index(after: end)
+        }
+        return end
+    }
+
+    nonisolated private static func isClosingSentencePunctuation(_ character: Character) -> Bool {
+        character == "\"" || character == "'" || character == ")" || character == "]" || character == "}"
+    }
+
+    nonisolated private static func isEllipsisPeriod(in text: String, at index: String.Index) -> Bool {
+        let previous = index > text.startIndex ? text[text.index(before: index)] : nil
+        let nextIndex = text.index(after: index)
+        let next = nextIndex < text.endIndex ? text[nextIndex] : nil
+        return previous == "." || next == "."
+    }
+
+    nonisolated private static func isDecimalPeriod(in text: String, at index: String.Index) -> Bool {
+        guard index > text.startIndex else {
+            return false
+        }
+        let nextIndex = text.index(after: index)
+        guard nextIndex < text.endIndex else {
+            return false
+        }
+        return text[text.index(before: index)].isNumber && text[nextIndex].isNumber
+    }
+
+    nonisolated private static func isKnownAbbreviationPeriod(in text: String, at index: String.Index) -> Bool {
+        var start = index
+        while start > text.startIndex {
+            let previous = text.index(before: start)
+            let character = text[previous]
+            if character.isWhitespace || character.isNewline {
+                break
+            }
+            start = previous
+        }
+
+        let token = String(text[start...index])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return abbreviations.contains(token)
+    }
+
+    nonisolated private static func isMeaningfulSentence(_ sentence: String) -> Bool {
+        sentence.contains { $0.isLetter || $0.isNumber }
+    }
+
+    nonisolated private static let abbreviations: Set<String> = [
+        "mr.", "mrs.", "ms.", "miss.", "dr.", "prof.", "sr.", "jr.", "st.",
+        "capt.", "cmdr.", "lt.", "sgt.", "col.", "gen.", "adm.",
+        "vs.", "etc.", "e.g.", "i.e.", "a.m.", "p.m.", "u.s.", "u.k."
+    ]
 
     nonisolated static func normalizedSentence(_ sentence: String) -> String {
         sentence

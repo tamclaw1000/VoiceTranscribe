@@ -332,6 +332,9 @@ enum MarkdownExportService {
         })
 
         return aiPrompts.filter { item in
+            if let segmentID = item.segmentID {
+                return segmentID == segment.id
+            }
             let normalizedItem = AIPromptCoordinator.normalizedSentence(item.sentence)
             return normalizedItem == normalizedSegment
                 || normalizedSentences.contains(normalizedItem)
@@ -371,6 +374,9 @@ enum MarkdownExportService {
         })
 
         return jevResults.filter { item in
+            if let segmentID = item.segmentID {
+                return segmentID == segment.id
+            }
             let normalizedItem = AIPromptCoordinator.normalizedSentence(item.sentence)
             return normalizedItem == normalizedSegment
                 || normalizedSentences.contains(normalizedItem)

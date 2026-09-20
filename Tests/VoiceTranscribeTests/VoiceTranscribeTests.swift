@@ -518,6 +518,58 @@ import Testing
     #expect(markdown.contains("`/tmp/recording.m4a`"))
 }
 
+@Test func markdownExportMatchesAIResultsBySegmentOccurrenceBeforeTextFallback() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+    let firstID = UUID()
+    let secondID = UUID()
+    let llm = LLMEndpointConfiguration.defaultConfiguration()
+    let aiPrompt = AIPromptItem(
+        segmentID: secondID,
+        sentenceIndex: 0,
+        sentence: "Confirmed.",
+        llm: llm,
+        promptTemplateName: "Verifier",
+        promptTemplate: AIPromptPrompt.defaultTemplate,
+        state: .completed(AIPromptResult(
+            sentence: "Confirmed.",
+            verdict: .supported,
+            confidence: .high,
+            explanation: "This result belongs to the second occurrence."
+        )),
+        createdAt: start
+    )
+
+    let markdown = MarkdownExportService.makeDocument(
+        context: MarkdownExportContext(
+            sourceName: "Test",
+            location: "",
+            startDate: start,
+            endDate: start.addingTimeInterval(2),
+            exportedAt: start,
+            transcriptionEngine: "Apple Speech",
+            aiPromptEnabled: true,
+            llmName: "Local Ollama",
+            llmProvider: "Ollama",
+            llmEndpoint: "http://localhost:11434",
+            llmModel: "test-model",
+            aiPromptPrompt: "Verify {{sentence}}",
+            summaryPrompt: "Summarize."
+        ),
+        finalizedSegments: [
+            TranscriptSegment(id: firstID, text: "Confirmed.", timestamp: start, isFinal: true),
+            TranscriptSegment(id: secondID, text: "Confirmed.", timestamp: start.addingTimeInterval(1), isFinal: true)
+        ],
+        aiPrompts: [aiPrompt],
+        summaryParagraphs: [],
+        calendar: calendar
+    )
+
+    #expect(markdown.contains("| 2026-05-28 07:33:17 | 0:01 |  | Confirmed. |  |"))
+    #expect(markdown.contains("| 2026-05-28 07:33:18 | 0:01 |  | Confirmed. | Verifier: Verdict: Supported<br>Confidence: High<br>This result belongs to the second occurrence. |"))
+}
+
 @Test func markdownExportIncludesJevResults() {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -785,8 +837,21 @@ import Testing
     #expect(result.displayText == raw)
 }
 
+@Test func sentenceParserKeepsEllipsesAbbreviationsAndDecimalsTogether() {
+    let text = "It appears to be... humanoid. Make it so, Mr. Crusher. Starbate 424 02.7. Confirmed."
+
+    let sentences = AIPromptCoordinator.completeSentences(in: text)
+
+    #expect(sentences == [
+        "It appears to be... humanoid.",
+        "Make it so, Mr. Crusher.",
+        "Starbate 424 02.7.",
+        "Confirmed."
+    ])
+}
+
 @MainActor
-@Test func aiPromptCoordinatorSuppressesDuplicateSentences() async {
+@Test func aiPromptCoordinatorSuppressesDuplicateSentenceOccurrence() async {
     let service = FakeAIPromptService()
     let coordinator = AIPromptCoordinator(service: service)
     let llm = LLMEndpointConfiguration.defaultConfiguration(
@@ -794,16 +859,17 @@ import Testing
         model: "test-model"
     )
     let promptTemplate = AIPromptTemplateConfiguration.defaultConfiguration(llmEndpointID: llm.id)
+    let segmentID = UUID()
 
     coordinator.enqueueTranscriptSegment(
-        TranscriptSegment(text: "The Earth orbits the Sun.", isFinal: true),
+        TranscriptSegment(id: segmentID, text: "The Earth orbits the Sun.", isFinal: true),
         enabled: true,
         promptTemplates: [promptTemplate],
         llmEndpoints: [llm],
         fallbackLLM: llm
     )
     coordinator.enqueueTranscriptSegment(
-        TranscriptSegment(text: "  The Earth orbits the Sun.  ", isFinal: true),
+        TranscriptSegment(id: segmentID, text: "  The Earth orbits the Sun.  ", isFinal: true),
         enabled: true,
         promptTemplates: [promptTemplate],
         llmEndpoints: [llm],
@@ -813,6 +879,37 @@ import Testing
     try? await Task.sleep(nanoseconds: 50_000_000)
 
     #expect(coordinator.items.count == 1)
+}
+
+@MainActor
+@Test func aiPromptCoordinatorKeepsRepeatedSentenceOccurrencesSeparate() async {
+    let service = FakeAIPromptService()
+    let coordinator = AIPromptCoordinator(service: service)
+    let llm = LLMEndpointConfiguration.defaultConfiguration(
+        endpoint: "http://localhost:11434",
+        model: "test-model"
+    )
+    let promptTemplate = AIPromptTemplateConfiguration.defaultConfiguration(llmEndpointID: llm.id)
+
+    coordinator.enqueueTranscriptSegment(
+        TranscriptSegment(text: "Confirmed.", isFinal: true),
+        enabled: true,
+        promptTemplates: [promptTemplate],
+        llmEndpoints: [llm],
+        fallbackLLM: llm
+    )
+    coordinator.enqueueTranscriptSegment(
+        TranscriptSegment(text: "Confirmed.", isFinal: true),
+        enabled: true,
+        promptTemplates: [promptTemplate],
+        llmEndpoints: [llm],
+        fallbackLLM: llm
+    )
+
+    try? await Task.sleep(nanoseconds: 80_000_000)
+
+    #expect(coordinator.items.count == 2)
+    #expect(Set(coordinator.items.compactMap(\.segmentID)).count == 2)
 }
 
 @MainActor
@@ -1343,13 +1440,14 @@ private struct SlowAIPromptService: AIPromptService {
 }
 
 @MainActor
-@Test func jevCoordinatorDedupesResubmittedSentencePerQuery() async {
+@Test func jevCoordinatorDedupesResubmittedSentenceOccurrencePerQuery() async {
     let probe = JevBatchProbe()
     let coordinator = JevCoordinator(service: BatchProbeJevService(probe: probe))
     let query = JevQueryConfiguration(name: "Urgency", primitiveType: .noul)
+    let segmentID = UUID()
 
     coordinator.enqueueTranscriptSegment(
-        TranscriptSegment(text: "The export button crashes.", isFinal: true),
+        TranscriptSegment(id: segmentID, text: "The export button crashes.", isFinal: true),
         enabled: true,
         queries: [query],
         apiKey: "test-key",
@@ -1357,7 +1455,7 @@ private struct SlowAIPromptService: AIPromptService {
         model: "jev-latest"
     )
     coordinator.enqueueTranscriptSegment(
-        TranscriptSegment(text: "  The export button crashes.  ", isFinal: true),
+        TranscriptSegment(id: segmentID, text: "  The export button crashes.  ", isFinal: true),
         enabled: true,
         queries: [query],
         apiKey: "test-key",
@@ -1368,6 +1466,35 @@ private struct SlowAIPromptService: AIPromptService {
     try? await Task.sleep(nanoseconds: 80_000_000)
 
     #expect(coordinator.items.count == 1)
+}
+
+@MainActor
+@Test func jevCoordinatorKeepsRepeatedSentenceOccurrencesSeparate() async {
+    let probe = JevBatchProbe()
+    let coordinator = JevCoordinator(service: BatchProbeJevService(probe: probe))
+    let query = JevQueryConfiguration(name: "Urgency", primitiveType: .noul)
+
+    coordinator.enqueueTranscriptSegment(
+        TranscriptSegment(text: "Confirmed.", isFinal: true),
+        enabled: true,
+        queries: [query],
+        apiKey: "test-key",
+        baseURL: "https://api.typesafe.ai",
+        model: "jev-latest"
+    )
+    coordinator.enqueueTranscriptSegment(
+        TranscriptSegment(text: "Confirmed.", isFinal: true),
+        enabled: true,
+        queries: [query],
+        apiKey: "test-key",
+        baseURL: "https://api.typesafe.ai",
+        model: "jev-latest"
+    )
+
+    try? await Task.sleep(nanoseconds: 80_000_000)
+
+    #expect(coordinator.items.count == 2)
+    #expect(Set(coordinator.items.compactMap(\.segmentID)).count == 2)
 }
 
 private actor JevBatchProbe {

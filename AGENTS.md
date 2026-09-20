@@ -8,6 +8,7 @@ Use this as the quick operating guide before making changes in this repo.
 - Start from an up-to-date `main` unless the user explicitly asks to continue another branch.
 - Use descriptive branch names, for example `feature/nonblocking-diarization` or `fix/prompt-template-editing`.
 - Do not merge or push unless the user asks for it.
+- Delete a branch as soon as it is merged (`git branch -d <branch>`) instead of leaving the ref behind; see Close Out Task step 8 for the full sequence.
 
 ## Build And Test
 
@@ -70,3 +71,4 @@ Run this only when the user explicitly asks to close out, finish, or ship the cu
 5. **Merge to `main`.** `git checkout main`, `git fetch origin main` and confirm it still matches `origin/main` before merging (someone else, or you in an earlier session, may have moved it). `git merge --no-ff <branch> -m "Merge <description>"` — this repo's history uses explicit merge commits, not fast-forwards or squashes.
 6. **Tag the release.** `git tag -a v<version> -m "v<version> - <one-line summary>"`.
 7. **Push.** `git push origin main --follow-tags`.
+8. **Delete the branch.** Remove the now-merged branch so dead refs don't accumulate: `git branch -d <branch>`, plus `git push origin --delete <branch>` if it was ever pushed. Use plain `-d`, never `-D` — it refuses to delete anything not fully merged, so it cannot silently drop work. Deleting the label loses nothing: the merge commit's second parent is the old branch tip, so `git branch <branch> <merge-sha>^2` rebuilds it at any time. If the branch is checked out in another worktree, `git -C <worktree> checkout --detach` frees the name without disturbing that worktree's files or build cache.

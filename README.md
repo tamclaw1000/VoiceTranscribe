@@ -123,7 +123,7 @@ API keys are never included in Markdown exports.
 ## Build
 
 ```sh
-./build.sh
+./scripts/build.sh
 ```
 
 ## Test
@@ -149,13 +149,13 @@ The local bundle includes microphone and speech-recognition permission descripti
 ## Launch
 
 ```sh
-./run.sh
+./scripts/run.sh
 ```
 
 To relaunch an existing packaged app without rebuilding:
 
 ```sh
-./run.sh --no-build
+./scripts/run.sh --no-build
 ```
 
 ## Logs

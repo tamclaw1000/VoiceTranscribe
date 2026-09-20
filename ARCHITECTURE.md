@@ -46,7 +46,7 @@ Mic → AVAudioEngine tap → copyBuffer() → Task { @MainActor }
 
 VoiceTranscribe uses a split voice-processing pipeline: Apple provides speech-to-text and sentence timing, while SpeechVAD provides best-effort speaker diarization and session-local voice identity. These paths run from the same copied `AVAudioPCMBuffer` stream but are intentionally separate so diarization or voice-embedding latency/failure does not block transcript text.
 
-1. **Audio capture and fan-out — AVFoundation/CoreAudio.** `AudioCaptureService` owns one `AVAudioEngine` input tap for the selected source, including physical microphones and virtual devices such as BlackHole. It deep-copies every tap buffer, computes RMS/peak visualization metrics, and fans buffers out to registered consumers (`record`, `transcribe`, and `diarize`). Source switches must stop active consumers first because all modes share this capture service.
+1. **Audio capture and fan-out — AVFoundation/CoreAudio.** `AudioCaptureService` owns one `AVAudioEngine` input tap for the selected source, including physical microphones and virtual devices such as BlackHole. It deep-copies every tap buffer, computes RMS/peak visualization metrics, and fans buffers out to registered consumers (`record`, `transcribe`, and `diarize`). Source switches must stop active consumers first because all modes share this capture service. Live transcription can be paused without tearing anything down: pause removes the `transcribe` and `diarize` consumers from the fan-out while `record` stays registered, so audio captured while paused reaches the saved recording but never reaches Apple Speech or Sortformer.
 
 2. **Recording — AVFoundation.** `RecordingService` writes copied buffers through `AsyncAudioFileWriter` on a utility queue. Recording is independent of transcription and diarization; it can run at the same time because it is just another capture consumer.
 
@@ -91,6 +91,8 @@ Current limitation: SpeechVAD Sortformer provides session-local speaker slots, n
 11. **A per-sentence AI result feature has four touch points, not one.** AI Processing and Jev both prove this out: each needed (a) a Settings tab for configuration, (b) a sidebar section (`ContentView.sourceList`) so results can be toggled per item, (c) a transcript-row block in `TranscriptAIPromptPanel` so results are visible live, and (d) a column/section in `MarkdownExportService` so results survive into the exported record — these are the four technical pillars `AGENTS.md` asks every such feature to check. It is easy to build (a)–(c) by mirroring the UI and forget (d), since the export path is a separate call site (`AppModel.saveTranscriptMarkdownToFile`) not reachable by browsing the live view tree — this happened once already with the initial Jev integration (v2.4.39) and was fixed in the following release.
 
 12. **Sentence-level results are keyed by occurrence, not text.** `AIPromptCoordinator.sentenceOccurrences(in:)` turns a finalized `TranscriptSegment` into `SentenceOccurrence` values (`segmentID` + `sentenceIndex` + text). AI Processing and Jev dedupe repeat submissions of the same occurrence, but repeated identical spoken text in later segments intentionally produces new result items. UI display and Markdown export must match results to transcript rows by `segmentID` first, using normalized text only as a fallback for legacy items that predate occurrence metadata.
+
+13. **Pause withholds buffers instead of stopping the pipeline.** `TranscriptionCoordinator.pause()` flips `isPaused`, which makes `consume(buffer:time:)` drop buffers while leaving the engine, its analyzer input stream, and the in-flight interim utterance alive. Resume therefore continues the same sentence, and the paused interval produces no transcript rows because the audio was never fed — instead of stopping and restarting the coordinator, which would discard interim text and pay analyzer startup again. Each pause is recorded as a `TranscriptionPauseSpan` so the live transcript can interleave pause markers and Markdown export can report the gap. Recording is deliberately left running, so a paused session's audio file keeps its full duration while its transcript has a hole in it.
 
 ## Critical Gotchas
 
@@ -169,11 +171,11 @@ No CLI flag needed. The `Trace.swift` utility fires on every:
 
 ```sh
 cd ~/projects/ai/VoiceTranscribe
-./build.sh
-./run.sh
+./scripts/build.sh
+./scripts/run.sh
 ```
 
-`./build.sh` always performs a clean SwiftPM build and refreshes the packaged app at `dist/VoiceTranscribe.app`.
+`./scripts/build.sh` always performs a clean SwiftPM build and refreshes the packaged app at `dist/VoiceTranscribe.app`. It validates its prerequisites (package manifest, sibling prepare script, `external/` dependency checkouts) before running `swift package clean`, because SwiftPM resolves the package by walking up from the current directory — a clean that runs before validation would delete the build products of a checkout that cannot rebuild. `CONFIGURATION` is exported so the packaging step builds and copies the same configuration. All three scripts resolve the repo root from their own location, so they work from any working directory.
 
 Refresh only the .app package from the current build:
 ```sh
@@ -214,6 +216,7 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.43 | 86 | Added pause/resume for live transcription: buffers are withheld from the `transcribe` and `diarize` consumers while recording keeps running, the live transcript interleaves pause markers, and Markdown export records the gaps in a `# PAUSES` table |
 | 2.4.42 | 85 | Keyed AI Processing and Jev result rows by transcript sentence occurrence instead of normalized text; improved sentence splitting around ellipses, abbreviations, and decimals; fixed clean worktree builds by tracking `VoiceIdentityService.swift` |
 | 2.4.41 | 84 | Renamed the historical `FactCheck`-prefixed AI Processing code (file, types, coordinator, trace events, tests) to `AIPrompt`, matching the UI label; removed dead legacy `@AppStorage` settings/reset code uncovered along the way |
 | 2.4.40 | 83 | Fixed Markdown export missing AI Processing/Jev results (a pillar the v2.4.39 Jev integration forgot); added a "Feature Surface Checklist" to AGENTS.md so future per-sentence-result features cover all four touch points |

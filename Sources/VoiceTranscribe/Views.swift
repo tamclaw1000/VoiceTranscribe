@@ -186,6 +186,8 @@ struct ContentView: View {
                     isJevEnabled: appModel.settings.isJevActive,
                     buffer: appModel.transcription.bufferSnapshot,
                     isTranscribing: appModel.transcription.isTranscribing,
+                    isPaused: appModel.transcription.isPaused,
+                    pauseSpans: appModel.transcription.pauseSpans,
                     autoScrollToBottom: $appModel.settings.autoScrollTranscript,
                     hasTranscriptText: !appModel.transcription.transcriptText
                         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -291,6 +293,25 @@ private struct SourceRow: View {
                 .disabled(!permissionsOK || (sourceActionBusy && !isTranscribingSource))
                 .help(!permissionsOK ? "Microphone and speech recognition permissions are required" : (sourceActionBusy && !isTranscribingSource ? "Another audio source is starting or stopping." : ""))
                 .accessibilityValue(isTranscribingSource ? "Active" : "Inactive")
+
+                // Pause / Resume button — live capture only, while this source is transcribing.
+                let isPausedSource = appModel.transcription.isPaused
+                if appModel.canPauseTranscription(for: source) {
+                    Button {
+                        appModel.toggleTranscriptionPause(for: source)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: isPausedSource ? "play.fill" : "pause.fill")
+                                .symbolRenderingMode(.hierarchical)
+                            Text(isPausedSource ? "Resume" : "Pause")
+                        }
+                    }
+                    .tint(isPausedSource ? .yellow : .accentColor)
+                    .help(isPausedSource
+                        ? "Resume live transcription. Audio captured while paused was not transcribed."
+                        : "Pause live transcription. Recording keeps running, and audio captured while paused is not transcribed.")
+                    .accessibilityValue(isPausedSource ? "Paused" : "Active")
+                }
 
                 // Record checkbox
                 Toggle(isOn: Binding(
@@ -1145,6 +1166,22 @@ private struct GraphPanel: View {
     }
 }
 
+/// Row content for the live transcript: either a finalized segment or a pause marker,
+/// interleaved in the order the session happened.
+private enum TranscriptTimelineItem: Identifiable {
+    case segment(TranscriptSegment)
+    case pause(TranscriptionPauseSpan)
+
+    var id: String {
+        switch self {
+        case .segment(let segment):
+            return "segment-\(segment.id.uuidString)"
+        case .pause(let span):
+            return "pause-\(span.id.uuidString)"
+        }
+    }
+}
+
 private struct TranscriptAIPromptPanel: View {
     let finalized: [TranscriptSegment]
     let interim: TranscriptSegment?
@@ -1160,6 +1197,8 @@ private struct TranscriptAIPromptPanel: View {
     let isJevEnabled: Bool
     let buffer: TranscriptionBufferSnapshot
     let isTranscribing: Bool
+    let isPaused: Bool
+    let pauseSpans: [TranscriptionPauseSpan]
     @Binding var autoScrollToBottom: Bool
     let hasTranscriptText: Bool
     let onCycleSpeaker: (UUID) -> Void
@@ -1219,7 +1258,7 @@ private struct TranscriptAIPromptPanel: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                TranscriptionStatusView(buffer: buffer, isTranscribing: isTranscribing)
+                TranscriptionStatusView(buffer: buffer, isTranscribing: isTranscribing, isPaused: isPaused)
                     .frame(width: 260)
             }
 
@@ -1283,15 +1322,20 @@ private struct TranscriptAIPromptPanel: View {
                         .frame(maxWidth: .infinity, minHeight: 180)
                         .gridCellColumns(3)
                     } else {
-                        ForEach(finalized) { segment in
-                            transcriptRows(
-                                segment: segment,
-                                fallbackSpeakerID: currentSpeakerID,
-                                fallbackSpeakerLabel: currentSpeakerLabel,
-                                aiPrompts: aiPrompts(for: segment),
-                                jevItems: jevResults(for: segment),
-                                isInterim: false
-                            )
+                        ForEach(timelineItems) { item in
+                            switch item {
+                            case .segment(let segment):
+                                transcriptRows(
+                                    segment: segment,
+                                    fallbackSpeakerID: currentSpeakerID,
+                                    fallbackSpeakerLabel: currentSpeakerLabel,
+                                    aiPrompts: aiPrompts(for: segment),
+                                    jevItems: jevResults(for: segment),
+                                    isInterim: false
+                                )
+                            case .pause(let span):
+                                pauseMarkerRow(span)
+                            }
                         }
                         if let interim {
                             transcriptRows(
@@ -1317,6 +1361,9 @@ private struct TranscriptAIPromptPanel: View {
                 scrollToBottom(proxy)
             }
             .onChange(of: interim?.text ?? "") { _, _ in
+                scrollToBottom(proxy)
+            }
+            .onChange(of: pauseSpans.count) { _, _ in
                 scrollToBottom(proxy)
             }
         }
@@ -1445,6 +1492,60 @@ private struct TranscriptAIPromptPanel: View {
             parts.append(String(format: "%.1fs", item.totalDuration))
         }
         return parts.isEmpty ? item.displayName : parts.joined(separator: " - ")
+    }
+
+    /// Finalized segments with each paused span placed where it interrupted the session.
+    /// A span still open (paused right now) sorts to the end, after the last segment.
+    private var timelineItems: [TranscriptTimelineItem] {
+        var items: [TranscriptTimelineItem] = []
+        var pendingSpans = pauseSpans
+            .filter { $0.startedAt < ($0.endedAt ?? .distantFuture) }
+            .sorted { $0.startedAt < $1.startedAt }
+        for segment in finalized {
+            while let span = pendingSpans.first, span.startedAt < segment.timestamp {
+                items.append(.pause(span))
+                pendingSpans.removeFirst()
+            }
+            items.append(.segment(segment))
+        }
+        items.append(contentsOf: pendingSpans.map(TranscriptTimelineItem.pause))
+        return items
+    }
+
+    @ViewBuilder
+    private func pauseMarkerRow(_ span: TranscriptionPauseSpan) -> some View {
+        GridRow {
+            HStack(spacing: 8) {
+                Image(systemName: span.endedAt == nil ? "pause.circle.fill" : "pause.circle")
+                    .foregroundStyle(Color.yellow)
+                Text(pauseMarkerText(span))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.yellow.opacity(0.30))
+            )
+            .gridCellColumns(3)
+        }
+        .accessibilityLabel("Transcription paused")
+    }
+
+    private func pauseMarkerText(_ span: TranscriptionPauseSpan) -> String {
+        let start = span.startedAt.formatted(date: .omitted, time: .standard)
+        guard let duration = span.duration else {
+            return "Paused at \(start)"
+        }
+        return "Paused \(Self.durationText(duration)) at \(start)"
+    }
+
+    private static func durationText(_ duration: TimeInterval) -> String {
+        let totalSeconds = Int(duration.rounded())
+        return String(format: "%d:%02d", totalSeconds / 60, totalSeconds % 60)
     }
 
     @ViewBuilder
@@ -1825,10 +1926,14 @@ private struct SummaryPanel: View {
 private struct TranscriptionStatusView: View {
     let buffer: TranscriptionBufferSnapshot
     let isTranscribing: Bool
+    let isPaused: Bool
 
     private var statusText: String {
         guard isTranscribing else {
             return "Idle"
+        }
+        if isPaused {
+            return "Paused"
         }
         if buffer.isReceivingAudio {
             return "Receiving audio"
@@ -1839,11 +1944,21 @@ private struct TranscriptionStatusView: View {
         return "Waiting for audio"
     }
 
+    private var statusColor: Color {
+        guard isTranscribing else {
+            return .secondary
+        }
+        if isPaused {
+            return .yellow
+        }
+        return buffer.isReceivingAudio ? .green : .orange
+    }
+
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(isTranscribing ? (buffer.isReceivingAudio ? Color.green : Color.orange) : Color.secondary)
+                    .fill(statusColor)
                     .frame(width: 7, height: 7)
                 Text(statusText)
                     .font(.caption)
@@ -1858,7 +1973,7 @@ private struct TranscriptionStatusView: View {
                     RoundedRectangle(cornerRadius: 3)
                         .fill(Color.secondary.opacity(0.18))
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(isTranscribing ? Color.green : Color.secondary.opacity(0.45))
+                        .fill(isTranscribing ? statusColor : Color.secondary.opacity(0.45))
                         .frame(width: geometry.size.width * buffer.fillFraction)
                 }
             }

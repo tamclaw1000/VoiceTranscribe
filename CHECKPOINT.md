@@ -1,14 +1,15 @@
 # VoiceTranscribe Checkpoint
 
-Last updated: 2026-09-18
+Last updated: 2026-09-20
 
 ## Repository State
 
-- Current branch: `refactor/rename-factcheck-to-ai-prompt` (uncommitted work in progress)
-- `main` state: synchronized with `origin/main` at `bd0ea5a Merge Jev markdown export fix and process guardrail`
-- Latest tag: `v2.4.40`
-- App version on `main`: `2.4.40`, bundle build `83`
-- App version in the current working tree (uncommitted, on `refactor/rename-factcheck-to-ai-prompt`): `2.4.41`, bundle build `84`
+- Current branch: `feature/pause-transcription`, checked out in the sibling `../pause-transcription` worktree, closing out as `v2.4.43` (`IMPLEMENTATION.md` #107)
+- `main` state before this close-out: synchronized with `origin/main` at `945af92 chore: branch cleanup`
+- Latest tag before this close-out: `v2.4.42`
+- Feature version: `2.4.43`, bundle build `86`
+- The pause branch also carries repaired `scripts/build.sh` and `scripts/run.sh`; `fix/script-root-paths` carries the same repair plus its documentation
+- Merged branches were pruned back to in-use refs; the remaining worktrees (`explore-versions`, `python-version`, `fix-sentence-occurrence-results`) are intentionally kept
 - Merged-and-cleaned-up branches still present locally/remotely: `fix/transcribe-restart-crash-debounce`, `chore/agents-md-cross-tool-support`, `feature/hide-empty-ai-processing`, `feature/jev-integration`, `fix/jev-markdown-export-and-guardrails` (all merged into `main`, not deleted)
 - Repo-root operating guide is now `AGENTS.md` (cross-tool standard, read natively by Codex/opencode/etc.), with `CLAUDE.md` as a symlink to it so Claude Code also auto-loads it. The old `AGENT.md` (singular, no tool read it automatically) is gone.
 - The historical `FactCheck`-prefixed naming (file, types, coordinator, trace events) is gone as of the current working-tree changes — renamed to `AIPrompt` throughout. See `IMPLEMENTATION.md` #103 for the full scope. `Sources/VoiceTranscribe/FactCheckService.swift` is now `AIPromptService.swift`.
@@ -44,6 +45,7 @@ Two parallel AI backends now run per finalized transcript sentence:
 - Live input visualization with RMS/peak/clipping state.
 - Recording to disk with recent recordings.
 - Live transcription and file transcription through Apple Speech.
+- Live transcription can be paused and resumed on the active source: paused audio is neither transcribed nor diarized, recording continues gaplessly, the transcript shows a pause marker where the session resumed, and Markdown export reports each paused span.
 - SpeechVAD Sortformer diarization alongside transcription.
 - SpeechVAD WeSpeaker voice identity matching within the current session only.
 - Transcript rows show timestamp, speaker/voice identity, and transcript text.
@@ -81,11 +83,13 @@ Two parallel AI backends now run per finalized transcript sentence:
 Common commands:
 
 ```sh
-./build.sh
-./run.sh
+./scripts/build.sh
+./scripts/run.sh
 swift test
 ./scripts/package-app.sh
 ```
+
+`scripts/build.sh` and `scripts/run.sh` were repaired during this close-out: `e582f3c` ("Move all scripts into scripts/") had left both resolving `ROOT_DIR` as their own directory, so they invoked `scripts/scripts/prepare-speech-swift.sh` and exited 127. All three scripts now resolve the repo root from their own location, `build.sh` validates its prerequisites before the destructive `swift package clean`, and it exports `CONFIGURATION` so packaging matches the build configuration.
 
 Project convention:
 
@@ -98,7 +102,7 @@ Project convention:
 Last known verification (on `feature/jev-integration`, uncommitted):
 
 - `swift test` passed with 58 tests (52 pre-existing + 6 new Jev tests).
-- `./build.sh` completed and packaged `dist/VoiceTranscribe.app`, no new warnings.
+- `./scripts/build.sh` completed and packaged `dist/VoiceTranscribe.app`, no new warnings.
 - `git diff --check` not yet re-run since the last doc edits.
 - Manual UI verification: Settings → Jev Configuration (connection fields, Noul editor, Choice editor incl. validation) and sidebar "Jev Queries" section (hidden-when-empty, correct rows once populated) all confirmed via screenshots. Transcript-row rendering with a real Jev response is **not yet confirmed** — live-transcription audio routing (BlackHole / physical-mic acoustic pickup) wasn't successfully completed in the verification session.
 
@@ -114,6 +118,8 @@ Last known verification (on `feature/jev-integration`, uncommitted):
 
 ## Suggested Next Steps
 
+- **Land `fix/script-root-paths`**: it carries the same two repaired scripts as this close-out plus the doc updates `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, and `CHECKPOINT.md` that name `./scripts/build.sh` and `./scripts/run.sh`. Merging it after this release is expected to be a no-op for the script files themselves; its `IMPLEMENTATION.md` section stays at 106.
+- **Decide whether `fix/script-root-paths` still needs merging**: this release already carries the repaired scripts and the matching `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, and `CHECKPOINT.md` path updates, so that branch's remaining unique content is its `IMPLEMENTATION.md` #106 record.
 - **Finish verifying Jev end-to-end**: get a real live transcription through (fix BlackHole routing or use a loaded sample file instead of live capture) and confirm the per-row Jev result block actually renders correctly for a completed Noul/Choice/Score answer, and for a failed request (e.g. bad API key). Then commit, merge `feature/jev-integration` into `main`, tag, and push, following this session's established pattern.
 - Consider fixing the `.gitignore` `sources/` collision properly (change to `/sources/` or remove if stale) rather than working around it with `-f` each time.
 - Test the current `main` build (`v2.4.38`) plus the in-progress Jev build against live BlackHole input and loaded sample files together.

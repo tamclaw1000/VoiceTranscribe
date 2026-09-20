@@ -12,7 +12,8 @@ Use this as the quick operating guide before making changes in this repo.
 
 ## Build And Test
 
-- Run `./build.sh` for app builds. The script performs the required clean build path and refreshes `dist/VoiceTranscribe.app`.
+- Run `./scripts/build.sh` for app builds. The script performs the required clean build path and refreshes `dist/VoiceTranscribe.app`.
+- Both `scripts/build.sh` and `scripts/run.sh` resolve the repo root from their own location, so they work from any working directory. Keep that pattern when editing them (`dirname "${BASH_SOURCE[0]}"/..`), and keep prerequisite checks before `swift package clean` — SwiftPM walks up to find the package, so a clean followed by a failure leaves the checkout with no build at all.
 - Run `swift test` before committing code changes.
 - Use `./scripts/package-app.sh` only when explicitly refreshing the app bundle outside the normal build flow.
 - Treat dependency warnings as separate cleanup unless they block the requested work.
@@ -66,7 +67,7 @@ Run this only when the user explicitly asks to close out, finish, or ship the cu
 
 1. **Update docs.** Add a new numbered section to `IMPLEMENTATION.md` describing what changed. Add a row to `ARCHITECTURE.md`'s Version History table, and update any architecture prose the change affects (diagram, pipeline description, key design decisions, file table). Update `REQUIREMENTS.md` if product/UI behavior changed.
 2. **Bump the version.** `CFBundleShortVersionString` and `CFBundleVersion` in `Resources/Info.plist`, matching the version/build named in the `IMPLEMENTATION.md`/`ARCHITECTURE.md` entries from step 1.
-3. **Verify.** Run `swift test` (all tests pass) and `./build.sh` (clean build, no new warnings). Do not proceed to committing on a failing build or failing tests.
+3. **Verify.** Run `swift test` (all tests pass) and `./scripts/build.sh` (clean build, refreshes `dist/VoiceTranscribe.app`, no new warnings). Do not proceed to committing on a failing build or failing tests.
 4. **Check in changes.** Stage and commit. New files under `Sources/VoiceTranscribe/` need `git add -f <path>` — `.gitignore`'s `sources/` entry matches `Sources/` too on this case-insensitive filesystem, so `git status` won't even list a new file there as untracked. Write a commit message explaining why, not just what.
 5. **Merge to `main`.** `git checkout main`, `git fetch origin main` and confirm it still matches `origin/main` before merging (someone else, or you in an earlier session, may have moved it). `git merge --no-ff <branch> -m "Merge <description>"` — this repo's history uses explicit merge commits, not fast-forwards or squashes.
 6. **Tag the release.** `git tag -a v<version> -m "v<version> - <one-line summary>"`.

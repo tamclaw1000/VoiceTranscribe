@@ -112,6 +112,8 @@ Internal architecture, programming languages, frameworks, processing algorithms,
 - Keep recognition errors separate from spoken transcript text so errors are not processed as speech by summaries or AI prompts.
 - Display confidence when supplied by the recognizer without inventing scores when unavailable.
 - Show whether audio is being received, transcription is waiting for audio, or processing remains outstanding.
+- Let the user pause and resume live transcription on the active source. Pausing withholds newly captured audio from recognition without ending the session, stopping recording, or discarding transcript text already produced, and the paused state must be distinguishable from recording and from stopped transcription.
+- Paused audio is not transcribed. When recording is active it keeps running so the saved audio retains its full duration, which means the transcript has an interval with no entries; resuming continues the session without reordering, duplicating, or retroactively filling that interval, and the transcript must indicate where the pause occurred.
 - Changing the preferred transcription option applies to subsequent sessions; it must not silently discard an active session's work.
 
 ### 5.2 Which Audio Is Transcribed
@@ -289,6 +291,7 @@ Use local timestamps and a filesystem-safe, lowercase source name with separator
 - Allow export of the current session to a user-selected `.md` file, including sessions without a saved audio recording.
 - Export a consistent snapshot of available results. Identify pending or failed work when exporting before all processing finishes.
 - Include recording start/end date and time when known, duration, source, transcription option, export time, and location. Use `Not specified` for an unknown location; automatic location collection is not required.
+- When the session was paused, report it rather than leaving an unexplained gap: a paused summary in `# DETAILS` and a `# PAUSES` table listing each paused span's start time and duration, marking a span that is still open as in progress.
 - For imported audio with no known recording date, mark it unknown rather than using the transcription date as if it were the recording date.
 - Use one recording table with one row per finalized transcript segment and these columns:
 
@@ -297,6 +300,7 @@ Use local timestamps and a filesystem-safe, lowercase source name with separator
 
 - Time of recording: start and end time, in progress, or unknown
 - Location of recording: location or Not specified
+- Paused: paused summary when the session was paused, omitted otherwise
 
 # RECORDING
 

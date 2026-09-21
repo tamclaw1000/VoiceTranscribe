@@ -1305,7 +1305,7 @@ Expose operational counters for active sessions, queued file work, storage usage
 
 **Release:** `0.2.0`
 **Build:** `28`
-**Git commit:** recorded after this phase commit
+**Git commit:** `14b6989`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -1323,7 +1323,7 @@ Verify that server observability reflects live API state rather than being a sta
 
 **Release:** `0.2.0`
 **Build:** `29`
-**Git commit:** recorded after this phase commit
+**Git commit:** `5bfdc92`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -1344,7 +1344,7 @@ Reduce common browser embedding, content-sniffing, referrer, and microphone-poli
 
 **Release:** `0.2.0`
 **Build:** `30`
-**Git commit:** recorded after this phase commit
+**Git commit:** `ee0b894`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -1364,7 +1364,7 @@ Prevent multiple imported files from starting unbounded ASR work on CPU deployme
 
 **Release:** `0.2.0`
 **Build:** `31`
-**Git commit:** recorded after this phase commit
+**Git commit:** `e49ad2a`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -1384,7 +1384,7 @@ Make Markdown exports self-describing while preserving the rule that secrets and
 
 **Release:** `0.2.0`
 **Build:** `32`
-**Git commit:** recorded after this phase commit
+**Git commit:** `7b0f9dc`
 
 **Status:** Complete
 **Date:** 2026-09-21

@@ -6,7 +6,7 @@ os.environ["VT_DATA_DIR"] = str(Path(__file__).parent / "data")
 
 from fastapi.testclient import TestClient
 
-from app.main import APP_BUILD, APP_VERSION, FileSource, Session, app, audio_path, load_persistent_state, markdown_for, persist_session, sessions
+from app.main import APP_BUILD, APP_VERSION, FileSource, Session, app, audio_path, file_sources, load_persistent_state, markdown_for, persist_session, sessions
 
 
 def test_browser_shell_exposes_accessible_notification_surface():
@@ -143,6 +143,46 @@ def test_websocket_reconnect_replays_events_and_cleans_up_disconnect():
         assert replayed_event["type"] == "audio.level"
 
     sessions.pop(session_id, None)
+
+
+def test_failed_file_transcription_can_be_requeued(tmp_path):
+    original = tmp_path / "retry.wav"
+    normalized = tmp_path / "retry-normalized.wav"
+    original.write_bytes(b"original")
+    normalized.write_bytes(b"normalized")
+    previous = Session(
+        id="failed-file-session",
+        source_name="retry.wav",
+        sample_rate=16000,
+        channels=1,
+        created_at="2026-09-21T00:00:00+00:00",
+        state="failed",
+    )
+    sessions[previous.id] = previous
+    source = FileSource(
+        id="retry-file",
+        original_name="retry.wav",
+        original_path=original,
+        normalized_path=normalized,
+        size_bytes=10,
+        duration=0.0,
+        sample_rate=16000,
+        channels=1,
+        format_name="WAV",
+        status="failed",
+        error="Temporary ASR failure",
+        session_id=previous.id,
+    )
+    file_sources[source.id] = source
+    response = TestClient(app).post(f"/api/files/{source.id}/transcribe")
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    assert response.json()["error"] is None
+    file_sources.pop(source.id, None)
+    for session_id, candidate in list(sessions.items()):
+        if candidate.source_name == "retry.wav":
+            sessions.pop(session_id, None)
+    sessions.pop(previous.id, None)
 
 
 def test_session_delete_removes_recording_artifact_and_metadata():

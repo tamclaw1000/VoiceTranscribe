@@ -209,7 +209,9 @@ function renderFileSources(files) {
     const card = document.createElement('div');
     card.className = 'file-source';
     const status = file.error || `${file.status} · ${Math.round(file.progress * 100)}%`;
-    card.innerHTML = `<strong class="name" title=""></strong><span class="meta"></span><span class="meta status-text"></span><audio class="file-player" controls preload="metadata"></audio><div class="file-transcript"></div><div class="button-row"><button class="secondary" ${file.status !== 'ready' ? 'disabled' : ''}>Transcribe file</button><button class="secondary delete-file">Delete</button></div>`;
+    const canTranscribe = ['ready', 'failed'].includes(file.status);
+    const actionLabel = file.status === 'failed' ? 'Retry transcription' : 'Transcribe file';
+    card.innerHTML = `<strong class="name" title=""></strong><span class="meta"></span><span class="meta status-text"></span><audio class="file-player" controls preload="metadata"></audio><div class="file-transcript"></div><div class="button-row"><button class="secondary" ${canTranscribe ? '' : 'disabled'}>${actionLabel}</button><button class="secondary delete-file">Delete</button></div>`;
     card.querySelector('.name').textContent = file.name;
     card.querySelector('.name').title = file.name;
     card.querySelector('.meta').textContent = `${formatDuration(file.duration)} · ${formatBytes(file.sizeBytes)} · ${file.format}`;

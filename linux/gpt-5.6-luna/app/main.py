@@ -877,10 +877,15 @@ async def file_transcribe(file_id: str) -> dict[str, Any]:
     source = file_sources.get(file_id)
     if source is None:
         raise HTTPException(status_code=404, detail="File source not found")
-    if source.status in {"normalizing", "transcribing"}:
-        raise HTTPException(status_code=409, detail="File is already processing")
+    if source.status not in {"ready", "failed"}:
+        raise HTTPException(status_code=409, detail="File is already processing or has completed transcription")
     if source.normalized_path is None or not source.normalized_path.exists():
         raise HTTPException(status_code=422, detail="File has no normalized audio artifact")
+    if source.status == "failed" and source.session_id:
+        previous_session = sessions.get(source.session_id)
+        if previous_session is not None:
+            delete_session_data(previous_session)
+        source.session_id = None
     source.status = "queued"
     source.progress = 0.0
     source.error = None

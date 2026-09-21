@@ -2,7 +2,7 @@
 
 This directory contains the Linux implementation from `docs/linux/linux-implementation-plan.md`.
 
-Current release metadata: **version 0.2.0, build 15**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
+Current release metadata: **version 0.2.0, build 16**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
 
 ## Included
 
@@ -32,6 +32,7 @@ Current release metadata: **version 0.2.0, build 15**. The browser header and he
 - Explicit WebSocket ping intervals and clean disconnect handling for direct and Traefik deployments.
 - Accessible live notification surface for microphone, upload, transcription, deletion, and connection errors.
 - Negotiated microphone device, sample-rate, channel, and input-track diagnostics.
+- Retry controls for failed imported-file transcription jobs without re-uploading the source.
 
 The default deployment now uses `faster-whisper` for real local file and rolling-window live transcription. Model weights are downloaded into the persistent model volume on first use. Fake ASR remains available by setting `VT_ASR_ENGINE=fake` for deterministic development tests.
 
@@ -116,7 +117,7 @@ curl http://tamclaw:10000/api/capabilities
 - Live event replay and active WebSocket state remain in memory for one process. SQLite preserves completed session/file metadata; Redis/PostgreSQL belong to later deployment profiles. The browser reconnects with its last sequence, while Uvicorn protocol pings keep an idle proxy route open.
 - Authentication is not included. The service is currently unauthenticated; only expose it on a trusted network until authentication is implemented.
 - Deletion is explicit and refuses active recording/transcription jobs; retention automation is not yet implemented.
-- File transcription is asynchronous; the browser shows queued/loading/transcribing/finalizing/completed/failed status and finalized segment text when available.
+- File transcription is asynchronous; the browser shows queued/loading/transcribing/finalizing/completed/failed status and finalized segment text when available. Failed jobs can be retried when the normalized artifact remains available.
 - Playback is available for finalized imported originals; timestamped rows follow that playback. Raw live PCM still needs a finalized container for broad browser compatibility.
 - Request IDs improve diagnostics but are not an authentication or authorization mechanism.
 - The browser notification surface announces important success, warning, and error states, but it is not a replacement for authentication or server-side alerting.

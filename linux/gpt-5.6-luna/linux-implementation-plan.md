@@ -156,7 +156,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Preserve engine-reported word or segment audio offsets.
 - [ ] Ensure file processing timestamps are never used as audio positions.
 - [x] Allow playback before or after export only when the source file is finalized and readable.
-- [ ] Add retry behavior for recoverable model or worker failures.
+- [x] Add retry behavior for recoverable model or worker failures.
 - [ ] Add concurrent-job limits and per-user quotas.
 - [ ] Test files that finish decoding before transcription and AI work finish.
 

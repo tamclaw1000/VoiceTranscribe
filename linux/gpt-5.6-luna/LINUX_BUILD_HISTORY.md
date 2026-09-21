@@ -810,3 +810,37 @@ Make the live capture state truthful by showing the browser's selected input and
 ### Limitations and next step
 
 - Browser-level permission and physical device unplug automation remain unavailable in the current test suite.
+
+## Phase 22 — Retry failed file transcription
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Allow recoverable imported-file transcription failures to be retried without forcing the user to upload and normalize the original again.
+
+### Delivered
+
+- Allowed the file transcription endpoint to requeue `failed` sources when the normalized artifact remains available.
+- Removed the previous failed transcription session before creating a fresh attempt.
+- Cleared the prior error and progress state when retrying.
+- Added a browser Retry transcription action for failed file cards.
+- Added a contract test covering requeue behavior.
+- Bumped Linux metadata from build `15` to build `16` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- Local checklist section 10: retry behavior for recoverable model or worker failures.
+
+### Verification
+
+- Python, JavaScript, shell, Compose, and diff checks passed.
+- Dockerized regression suite passed: `14 passed` with one existing Starlette deprecation warning.
+- Docker image rebuilt successfully.
+- Direct and public Traefik health endpoints report version `0.2.0`, build `16`.
+- Served public browser JavaScript contains the failed-job Retry transcription action.
+
+### Limitations and next step
+
+- Retry is available only while the normalized artifact exists and does not add cancellation, backoff, or concurrent-job quotas.

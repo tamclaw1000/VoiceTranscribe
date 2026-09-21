@@ -2,6 +2,40 @@
 
 This file records each implementation phase for the Linux web version. Every completed implementation step must update this file and `LINUX_ARCHITECTURE.md` before the next step begins. The local `linux-implementation-plan.md` is the checklist for this working directory; mark an item complete only after implementation and verification.
 
+## Release/build and commit index
+
+All released Linux implementation phases in this history use release `0.2.0`. The table preserves the original phase numbering while recording the corresponding build and rewritten commit ID. Phase 0–7 were delivered together as the initial build-1 implementation; the Traefik-only checkpoint is recorded against build 11.
+
+| Phase | Release | Build | Git commit |
+|---:|---|---:|---|
+| 0–7 | 0.2.0 | 1 | `bf181ab` |
+| 8 | 0.2.0 | 2 | `879ff3a` |
+| 9 | 0.2.0 | 3 | `dae4642` |
+| 10 | 0.2.0 | 4 | `c0777f2` |
+| 11 | 0.2.0 | 5 | `3bc57a5` |
+| 12 | 0.2.0 | 6 | `60400ed` |
+| 13 | 0.2.0 | 7 | `442941f` |
+| 14 | 0.2.0 | 8 | `3b5fe55` |
+| 15 | 0.2.0 | 9 | `b4319b3` |
+| 16 | 0.2.0 | 10 | `ed8b306` |
+| 17 | 0.2.0 | 11 | `3123548` |
+| 17 (Traefik deployment checkpoint) | 0.2.0 | 11 | `ad0cf14` |
+| 18 | 0.2.0 | 12 | `ce70f8d` |
+| 19 | 0.2.0 | 13 | `cc766d2` |
+| 20 | 0.2.0 | 14 | `81d113d` |
+| 21 | 0.2.0 | 15 | `3943ef6` |
+| 22 | 0.2.0 | 16 | `46a4eef` |
+| 23 | 0.2.0 | 17 | `cbbefff` |
+| 24 | 0.2.0 | 18 | `a7b8353` |
+| 25 | 0.2.0 | 19 | `1951260` |
+| 26 | 0.2.0 | 20 | `4b60e7e` |
+| 27 | 0.2.0 | 21 | `7cf79a8` |
+| 28 | 0.2.0 | 22 | `111d10d` |
+| 29 | 0.2.0 | 23 | `3a71893` |
+| 30 | 0.2.0 | 24 | `9a54dde` |
+| 31 | 0.2.0 | 25 | `cc1bfe5` |
+| 32 | 0.2.0 | 26 | `e06e2b2` |
+
 
 ## Phase 0 — Design and implementation target
 

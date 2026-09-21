@@ -1071,3 +1071,27 @@ Show how long browser capture has been active independently of transcription pro
 - Compose configuration passed.
 - Docker image rebuilt and restarted.
 - Direct backend health reports build `23`.
+
+## Phase 30 — Live event count
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Make event-flow activity visible in the Capture panel without changing the WebSocket contract.
+
+### Delivered
+
+- Added an Events metric counting rendered server events per live session.
+- Reset the count at session start.
+- Updated tests, checklist, architecture, README, and agent guide.
+- Bumped Linux metadata from build `23` to build `24`.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized contract tests passed.
+- Compose configuration passed.
+- Docker image rebuilt and restarted.
+- Direct backend health reports build `24`.

@@ -17,6 +17,7 @@ let lastAckedAudioFrame = 0;
 let droppedAudioFrames = 0;
 let audioAckCount = 0;
 let captureStartedAt = 0;
+let eventCount = 0;
 let pageHidden = document.hidden;
 
 function showNotification(text, kind = 'neutral', timeout = 5000) {
@@ -94,6 +95,8 @@ function applyEvent(event) {
   if (event.type !== 'audio.ack' && event.sequence && event.sequence <= lastSequence) return;
   if (event.sequence) lastSequence = event.sequence;
   logEvent(event);
+  eventCount += 1;
+  $('eventCount').textContent = String(eventCount);
   const payload = event.payload || {};
   switch (event.type) {
     case 'session.created':
@@ -432,6 +435,8 @@ async function startSession() {
     droppedAudioFrames = 0;
     audioAckCount = 0;
     captureStartedAt = Date.now();
+    eventCount = 0;
+    $('eventCount').textContent = '0';
     $('audioAckCount').textContent = '0';
     renderCaptureUptime();
     $('audioDroppedFrames').textContent = '0';

@@ -137,13 +137,14 @@ HTTP failures use a stable envelope: `{ "error": { "code": "â€¦", "message": "â€
 29. Acknowledgement sequence gaps increment the browser's local dropped-frame counter; the counter resets for each session and does not infer loss before the first acknowledgement.
 30. The browser also counts accepted audio acknowledgements per session, providing a simple denominator for interpreting transport latency and dropped-frame observations.
 31. Capture uptime starts when a live session is created and is rendered independently of ASR progress, making stalled processing distinguishable from stopped capture.
+32. The browser counts rendered server events per live session, providing a lightweight indication of event-flow activity without changing the event contract.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `23`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `24`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`https://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.

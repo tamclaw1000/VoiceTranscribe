@@ -268,7 +268,13 @@ enum MarkdownExportService {
 
     private static func speakerText(_ segment: TranscriptSegment) -> String {
         if let manualName = trimmedNonEmpty(segment.speakerName) {
-            return manualName
+            // An assigned name is what the reader wants first, but it must not erase the identity
+            // the rest of the export uses: the SPEAKERS timeline and unnamed rows both carry the
+            // combo, so a named row that dropped it was the one place the export lost the pair.
+            guard let pair = trimmedNonEmpty(segment.speakerVoicePair) else {
+                return manualName
+            }
+            return "\(manualName) (\(pair))"
         }
         if let voiceName = trimmedNonEmpty(segment.voiceName) {
             if let speakerID = trimmedNonEmpty(segment.speakerID), speakerID != voiceName {

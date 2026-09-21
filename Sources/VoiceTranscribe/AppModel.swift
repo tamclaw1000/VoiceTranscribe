@@ -41,6 +41,13 @@ final class AppModel: ObservableObject {
     @Published var aiPrompt = AIPromptCoordinator()
     @Published var jev = JevCoordinator()
     @Published var summary = SummaryCoordinator()
+    /// Plays the audio the current transcript belongs to, so the transcript pane can follow
+    /// the playhead instead of sitting where it was left.
+    @Published var playback = AudioPlaybackService()
+    /// Audio the on-screen transcript can be played against, with the wall-clock anchor that
+    /// maps its rows onto the audio's timeline. Nil when nothing playable is associated with
+    /// the current transcript (a live session that was never recorded, or one just started).
+    @Published private(set) var transcriptAudioTarget: TranscriptAudioTarget?
     @Published private(set) var aiReachability = AIReachabilityStatus()
 
     /// Tracks whether the user has completed the initial permissions setup flow.
@@ -243,6 +250,9 @@ final class AppModel: ObservableObject {
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         permissionService.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        playback.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
 
@@ -1075,6 +1085,9 @@ final class AppModel: ObservableObject {
                 Trace.event("transcribe.capture.ensuring", ["source": source.name])
                 try await self.ensureCapture(for: source)
                 self.transcriptSourceName = source.name
+                // A fresh live session has no audio of its own yet. If the user records, the
+                // finalize path below attaches that recording; until then nothing is playable.
+                self.setTranscriptAudioTarget(nil)
                 self.aiPrompt.reset()
                 self.jev.reset()
                 self.summary.reset()
@@ -1297,6 +1310,17 @@ final class AppModel: ObservableObject {
                 recordingFilename = finalized.basename
                 recordingFileURL = finalized.audioURL
 
+                // The recorder wrote every captured buffer in real time from `startDate`, so
+                // that instant is the audio's zero and the transcript can be mapped onto it.
+                // Only now is the file final enough to play: while it was being written the
+                // `.m4a` had no `moov` atom, and `AVAudioPlayer` refuses a header-only file.
+                setTranscriptAudioTarget(TranscriptAudioTarget(
+                    url: finalized.audioURL,
+                    label: finalized.basename,
+                    duration: finalized.duration,
+                    anchorDate: finalized.startDate
+                ))
+
                 // Auto-load the recording as a file input source (v1.7.0).
                 if let source = FileInputSource.from(url: finalized.audioURL) {
                     fileSources.append(source)
@@ -1331,6 +1355,140 @@ final class AppModel: ObservableObject {
     func revealRecordingInFinder() {
         guard let url = recordingFileURL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    // MARK: - Playback Follow
+
+    /// Points playback at the audio the on-screen transcript belongs to.
+    ///
+    /// Any playback in flight is dropped on purpose: the previous target's playhead has no
+    /// meaning against a different file, and leaving it loaded would let the transcript pane
+    /// follow a position in audio that is no longer on screen.
+    private func setTranscriptAudioTarget(_ target: TranscriptAudioTarget?) {
+        playback.unload()
+        transcriptAudioTarget = target
+        if let target {
+            Trace.event("playback.target", [
+                "file": target.label,
+                // Which route places this transcript's rows on this audio: the file's own wall-clock
+                // anchor (a recording), or the engine's per-row audio offsets (an imported file).
+                "placement": target.anchorDate == nil ? "audioOffsets" : "anchor"
+            ])
+        }
+    }
+
+    /// Maps the current transcript onto the associated audio's timeline. Nil when nothing is
+    /// playable, or when no row carries a position in that audio.
+    ///
+    /// The rows are placed by the file's wall-clock anchor when there is one, and otherwise by the
+    /// engine's per-row audio offsets — which is what makes an imported file followable.
+    var transcriptPlaybackTimeline: TranscriptPlaybackTimeline? {
+        guard let target = transcriptAudioTarget else {
+            return nil
+        }
+        return TranscriptPlaybackTimeline(
+            segments: transcription.segments,
+            pauseSpans: transcription.pauseSpans,
+            anchorDate: target.anchorDate,
+            audioDuration: target.duration
+        )
+    }
+
+    /// The transcript row under the playhead, or nil when playback has not moved off the start.
+    /// Held while paused so the highlight stays put when the user stops to read.
+    var playbackFollowRowID: String? {
+        guard let timeline = transcriptPlaybackTimeline else {
+            return nil
+        }
+        guard playback.isPlaying || playback.currentTime > 0 else {
+            return nil
+        }
+        return timeline.rowID(atOffset: playback.currentTime)
+    }
+
+    var transcriptPlaybackState: TranscriptPlaybackState {
+        guard let target = transcriptAudioTarget else {
+            return .unavailable
+        }
+        // Followable exactly when the rows can be placed on this audio. Built here rather than
+        // inferred from the target, because whether the rows carry positions is a property of the
+        // transcript, not of the file: an imported file is followable once its rows report offsets.
+        let timeline = transcriptPlaybackTimeline
+        return TranscriptPlaybackState(
+            label: target.label,
+            duration: playback.duration > 0 ? playback.duration : (target.duration ?? 0),
+            currentTime: playback.currentTime,
+            isPlaying: playback.isPlaying,
+            canFollow: timeline != nil,
+            activeRowID: playbackFollowRowID,
+            error: playback.lastError
+        )
+    }
+
+    /// Opens the transcript's audio if it is not already open.
+    ///
+    /// Loading lives here, in one place, because every entry point needs it and each one forgot
+    /// it in a different way: playing, scrubbing, and jumping to a row. In particular the file is
+    /// opened lazily, so dragging the scrubber *before* pressing play used to move a playhead that
+    /// belonged to no open file, and `AudioPlaybackService.seek` quietly dropped the position.
+    ///
+    /// A target whose load already failed is not retried on every scrub tick — the pane shows the
+    /// error, and changing the target (a new recording, another file) starts a fresh attempt.
+    private func ensureTranscriptPlaybackLoaded() -> Bool {
+        guard let target = transcriptAudioTarget else {
+            return false
+        }
+        if playback.url == target.url {
+            if playback.hasAudio {
+                return true
+            }
+            if playback.lastError != nil {
+                return false
+            }
+        }
+        return playback.load(url: target.url)
+    }
+
+    /// Starts or stops playback of the transcript's audio, opening the file on first use.
+    func toggleTranscriptPlayback() {
+        guard ensureTranscriptPlaybackLoaded() else {
+            // `AudioPlaybackService` records why; the pane surfaces it rather than the log alone.
+            return
+        }
+        playback.toggle()
+    }
+
+    /// Moves the playhead, used by the scrubber.
+    ///
+    /// Scrubbing only repositions: it never starts playback, so dragging through a recording can
+    /// be used to review the transcript without audio firing up. The transcript follows the new
+    /// position through `playbackFollowRowID`, which also means scrubbing past the last processed
+    /// row holds that row rather than inventing one.
+    func seekTranscriptPlayback(toOffset offset: TimeInterval) {
+        guard ensureTranscriptPlaybackLoaded() else {
+            return
+        }
+        playback.seek(to: offset)
+    }
+
+    /// Jumps to the row the user clicked and plays from there, so a click is a "read this
+    /// passage" action rather than a silent reposition.
+    func seekTranscriptPlayback(toRowID rowID: String) {
+        guard let offset = transcriptPlaybackTimeline?.offset(forRowID: rowID) else {
+            return
+        }
+        guard ensureTranscriptPlaybackLoaded() else {
+            return
+        }
+        playback.seek(to: offset)
+        if !playback.isPlaying {
+            playback.play()
+        }
+        Trace.event("playback.seekToRow", ["row": rowID, "offset": String(format: "%.2f", offset)])
+    }
+
+    func stopTranscriptPlayback() {
+        playback.stop()
     }
 
     func copyTranscriptText() {
@@ -1590,6 +1748,16 @@ final class AppModel: ObservableObject {
         isTranscribingFile = true
         fileTranscriptionProgress = 0
         transcriptSourceName = source.name
+        // Imported audio has no wall-clock anchor — the file is fed to the recognizer as fast as it
+        // can be read, so each row's `timestamp` is the moment Apple Speech returned it, which is
+        // processing time rather than audio time (`REQUIREMENTS.md` §7). Its rows carry the
+        // engine's audio time ranges instead, so the transcript can still follow this file.
+        setTranscriptAudioTarget(TranscriptAudioTarget(
+            url: source.url,
+            label: source.name,
+            duration: source.duration,
+            anchorDate: nil
+        ))
         diarization.reset()
 
         fileTranscriptionTask = Task { [weak self] in

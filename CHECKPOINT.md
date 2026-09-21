@@ -4,7 +4,9 @@ Last updated: 2026-09-20
 
 ## Repository State
 
-- Current branch: `main` — existing-name selection and canonical speaker merging shipped as `v2.4.45` (`IMPLEMENTATION.md` #109)
+- Current branch: `feature/transcript-speaker-voice-display` in worktree `../transcript-speaker-voice` — the transcript's speaker cell shows each row's raw `Speaker N / Voice M` pair beneath its label, so assigning a name no longer hides the combo, and the Markdown export appends that pair to named rows. Pending release as `v2.4.47` / `90`, carrying this feature and the playback work merged in from `feature/audio-playback-transcript-follow` (`bfa32ab`) — playback of the audio the transcript belongs to with the transcript following the playhead, including for imported files (`IMPLEMENTATION.md` #111), beside this display change (`#110`). That branch was merged into this one rather than landed on `main`, so both ship in one release and **`2.4.46` is never released**: the version steps from `2.4.45` straight to `2.4.47` to stay monotonic. Committed; `main` is untouched at `f3d7fcb`. The worktree needs `external` symlinked to the main checkout's copy (untracked, gitignored) or SwiftPM cannot resolve its local dependencies.
+- Worktree note: `samples/` and `VT-exports/` now live in the repo's **parent** folder (`../samples`, `../VT-exports`), beside the worktrees rather than inside the checkout — so sample material is shared across worktrees instead of duplicated.
+- Previous release on `main`: `v2.4.45` — existing-name selection and canonical speaker merging (`IMPLEMENTATION.md` #109)
 - `main` state: fast-forward-free merge of `feature/voice-identity-names` (`b6589dd`), tagged and pushed to `origin/main`
 - Latest tag: `v2.4.45`
 - App version on `main`: `2.4.45`, bundle build `88`
@@ -54,13 +56,16 @@ Two parallel AI backends now run per finalized transcript sentence:
 - Live transcription can be paused and resumed on the active source: paused audio is neither transcribed nor diarized, recording continues gaplessly, the transcript shows a pause marker where the session resumed, and Markdown export reports each paused span.
 - SpeechVAD Sortformer diarization alongside transcription.
 - SpeechVAD WeSpeaker voice identity matching within the current session only.
-- Transcript rows show timestamp, speaker/voice identity, and transcript text.
+- Transcript rows show timestamp, speaker/voice identity, and transcript text. The speaker cell is two lines: the label (assigned name, else the voice name/voice, else the speaker) with the row's raw `Speaker N / Voice M` pair beneath it whenever that pair says something the label does not — so naming a row no longer hides which observed combo it is, and a row with only one half known is not restated. The Markdown export carries the same pair on named rows as `Dana (Speaker 1)`; the plain-text export and clipboard copy keep the collapsed label (`evaluated in v2.4.46`).
 - Speaker labels can be clicked to correct identity:
   - assign any observed voice tuple,
   - cycle through observed tuples,
   - force a new `Voice N` for the row.
 - Voice candidates can be named and reset. A candidate can be named by typing, or set from a dropdown of names already assigned this session — picking one keeps that name on the dropdown and hides the type-in field until **Custom…** or a row reset brings it back.
 - A **Merge same-named speakers** toggle in the Voice Identification pane folds every `Speaker N / Voice M` combo sharing an assigned name into one speaker: one pane row (with summed segments/duration), one transcript color, one entry in the transcript row's speaker menu, and one coalesced entry in the exported `# SPEAKERS` timeline. Assigning a merged menu entry uses its first combo; **Reset All** still clears every combo.
+- The audio the current transcript belongs to can be played back from the Live Transcript pane: play/pause, scrubber, and elapsed/total time. While the playhead moves, the transcript follows it — the row being played is highlighted and scrolled into view — and clicking a row's timestamp plays the audio from that row. Bottom-scrolling is suspended while following so live text cannot drag the pane off the playhead.
+- while playback is engaged the transcript's **time column reads as positions in the audio** (heading switches from **Timestamp** to **Playback**), so the times agree with the scrubber and the followed row; at the start of playback, and for any row that cannot be placed in the audio, it reverts to clock time. Scrubbing repositions the transcript without starting playback, and each timestamp is a button that plays from that row.
+- Following is exact for both kinds of audio, by two different routes. App-recorded audio is placed by the recording's wall-clock `startDate`, which is the audio's zero because the recorder writes every captured buffer in real time. An **imported file** has no such anchor — it is fed to the recognizer faster than real time, so its rows' timestamps are when they were recognized — but each row carries the position the engine reported for it on the audio's own timeline, so imported files follow and jump exactly too. Only finalized audio is playable — an in-progress `.m4a` has no `moov` atom, so `AVAudioPlayer` refuses it.
 - Voice Identification is in a collapsible right-hand pane.
 - Left source/navigation pane is pinned visible with the right voice pane present.
 - The left sidebar is split into two tabs: **Microphones** (device list + File Sources) and **AI Selection** (AI Prompts + Jev Queries). The split is view state only — it changes what is visible, never what is enabled or transcribed.

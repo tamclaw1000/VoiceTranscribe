@@ -53,6 +53,7 @@ When planning a new per-sentence/per-item result feature, name all four pillars 
 - Update `ARCHITECTURE.md` for technical workflow, data flow, dependency, or service changes.
 - Update `ARCHITECTURE.md` whenever build scripts, launch flow, packaging behavior, dependencies, or version/build history change.
 - Update `CHECKPOINT.md` to allow other agents/sessions to be able to quickly pick up the current state of the project.
+- Record anything a session leaves unfinished — open bugs, or behavior shipped but never confirmed in the running app — in `TODO.md` under `# BUGS`, so it outlives the branch that carried it.
 
 ## Git
 
@@ -64,6 +65,8 @@ When planning a new per-sentence/per-item result feature, name all four pillars 
 ## Close Out Task
 
 Run this only when the user explicitly asks to close out, finish, or ship the current task — never automatically at the end of a change, and never merge or push without being asked (see Branching).
+
+**Open bugs do not block a close-out.** The user's standing preference is to close out the branch at the end of a session even when that session turned up bugs or issues, including ones still open. Do not hold a branch open to chase something discovered along the way, and do not treat an unresolved bug as a reason to keep the branch alive. Record each one in `TODO.md` under `# BUGS` and close out anyway, so the work that is finished lands and the loose ends are written down rather than carried. The one exception is a regression this branch itself introduced: fix that before closing out, because shipping it is worse than leaving the branch open.
 
 1. **Update docs.** Add a new numbered section to `IMPLEMENTATION.md` describing what changed. Add a row to `ARCHITECTURE.md`'s Version History table, and update any architecture prose the change affects (diagram, pipeline description, key design decisions, file table). Update `REQUIREMENTS.md` if product/UI behavior changed.
 2. **Bump the version.** `CFBundleShortVersionString` and `CFBundleVersion` in `Resources/Info.plist`, matching the version/build named in the `IMPLEMENTATION.md`/`ARCHITECTURE.md` entries from step 1.

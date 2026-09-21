@@ -129,14 +129,14 @@ Last known verification (on `feature/jev-integration`, uncommitted):
 - File and live transcription rely on Apple Speech for sentence boundaries because FluidAudio-style diarization was not reliable for segmentation.
 - `/tmp/VoiceTranscribe.log` is the primary trace log and should include transcription, diarization, voice identity, AI Processing (`aiPrompt.*`), and Jev (`jev.*`) events.
 - All LLM/Jev API keys are stored in plaintext in `UserDefaults` (no Keychain anywhere in this app) — a known, accepted, pre-existing risk, not something introduced this session.
-- The `.gitignore` `sources/`-vs-`Sources/` case-collision bug (see Local working tree notes above) is unresolved; new files under `Sources/` need `git add -f`.
+- The `.gitignore` `sources/`-vs-`Sources/` case-collision bug is fixed: the rule matched no existing directory and was deleted, so new files under `Sources/` no longer need `git add -f`. Note that the replacement suggested below (`/sources/`) does not work: case-folding matches `Sources/` for every spelling of that pattern.
 
 ## Suggested Next Steps
 
 - **Land `fix/script-root-paths`**: it carries the same two repaired scripts as this close-out plus the doc updates `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, and `CHECKPOINT.md` that name `./scripts/build.sh` and `./scripts/run.sh`. Merging it after this release is expected to be a no-op for the script files themselves; its `IMPLEMENTATION.md` section stays at 106.
 - **Decide whether `fix/script-root-paths` still needs merging**: this release already carries the repaired scripts and the matching `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, and `CHECKPOINT.md` path updates, so that branch's remaining unique content is its `IMPLEMENTATION.md` #106 record.
 - **Finish verifying Jev end-to-end**: get a real live transcription through (fix BlackHole routing or use a loaded sample file instead of live capture) and confirm the per-row Jev result block actually renders correctly for a completed Noul/Choice/Score answer, and for a failed request (e.g. bad API key). Then commit, merge `feature/jev-integration` into `main`, tag, and push, following this session's established pattern.
-- Consider fixing the `.gitignore` `sources/` collision properly (change to `/sources/` or remove if stale) rather than working around it with `-f` each time.
+- ~~Consider fixing the `.gitignore` `sources/` collision properly (change to `/sources/` or remove if stale) rather than working around it with `-f` each time.~~ **Done in v2.4.47**: removed, since it matched nothing. `/sources/` was measured and does not help — the leading slash does not defeat case-folding, so under `core.ignoreCase` every spelling of `sources/` still matches `Sources/`.
 - Test the current `main` build (`v2.4.38`) plus the in-progress Jev build against live BlackHole input and loaded sample files together.
 - Review whether the right-hand Voice Identification pane needs resizing behavior after real usage.
 - Continue improving voice identity correction UX if Sortformer/WeSpeaker produce too many candidate tuples.

@@ -151,7 +151,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 
 - [x] Add a file-transcription job endpoint.
 - [x] Run file ASR through an offline adapter where appropriate.
-- [ ] Report queued, loading, processing, finalizing, completed, and failed states.
+- [x] Report queued, loading, processing, finalizing, completed, and failed states.
 - [x] Report progress only when a reliable denominator exists.
 - [x] Preserve engine-reported word or segment audio offsets.
 - [ ] Ensure file processing timestamps are never used as audio positions.

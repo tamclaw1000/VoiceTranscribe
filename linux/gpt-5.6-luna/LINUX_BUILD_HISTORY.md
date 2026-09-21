@@ -504,3 +504,34 @@ Make imported-file transcription visibly useful in the browser instead of showin
 
 - The default faster-whisper profile still requires model inference and may take time before results appear.
 - Full browser automation and playback of imported source files remain open checklist items.
+
+## Phase 13 — File job lifecycle states
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Expose meaningful file-transcription phases so users can tell whether the service is waiting, loading the model, decoding, finalizing results, or has failed.
+
+### Delivered
+
+- Added persisted `queued`, `loading`, `transcribing`, and `finalizing` file states before terminal `completed`/`failed` states.
+- Updated restart recovery so every nonterminal file job state is marked failed after interruption.
+- Extended browser polling to retain the file card through every nonterminal phase.
+- Bumped Linux build metadata from `6` to `7` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- Local checklist section 10: queued, loading, processing, finalizing, completed, and failed file-transcription status reporting.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized tests and Compose validation passed.
+- Live service reports build `7` after rebuild and restart.
+
+### Limitations and next step
+
+- Progress remains phase-based rather than a precise model-level denominator during loading or decoding.
+- Full browser end-to-end automation and playback remain open.

@@ -120,14 +120,14 @@ HTTP failures use a stable envelope: `{ "error": { "code": "â€¦", "message": "â€
 13. Stop commands finalize live transcription and recording independently.
 14. Markdown export reads the in-memory session and references the persisted PCM or normalized file artifact.
 15. Explicit deletion removes session/file metadata and data-volume artifacts; active work must be stopped first.
-16. File transcription is queued before its background task starts; the browser polls through queued/processing terminal states and renders finalized segments in the file card.
+16. File transcription is queued before its background task starts; the worker persists `loading`, `transcribing`, and `finalizing` transitions before `completed` or `failed`, while the browser polls those states and renders finalized segments in the file card.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `6`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `7`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`http://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.

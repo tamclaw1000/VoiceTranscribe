@@ -2,7 +2,7 @@
 
 This directory contains the Linux implementation from `docs/linux/linux-implementation-plan.md`.
 
-Current release metadata: **version 0.2.0, build 6**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
+Current release metadata: **version 0.2.0, build 7**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
 
 ## Included
 
@@ -99,6 +99,6 @@ curl http://tamclaw:10000/api/capabilities
 - Live event replay and active WebSocket state remain in memory for one process. SQLite preserves completed session/file metadata; Redis/PostgreSQL belong to later deployment profiles.
 - Authentication is not included. The service is currently unauthenticated; only expose it on a trusted network until authentication and HTTPS are implemented.
 - Deletion is explicit and refuses active recording/transcription jobs; retention automation is not yet implemented.
-- File transcription is asynchronous; the browser shows queued/processing/completed/failed status and finalized segment text when available.
+- File transcription is asynchronous; the browser shows queued/loading/transcribing/finalizing/completed/failed status and finalized segment text when available.
 - Request IDs improve diagnostics but are not an authentication or authorization mechanism.
 - The browser must use HTTPS, or localhost, for microphone access.

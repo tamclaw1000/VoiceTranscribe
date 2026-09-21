@@ -268,7 +268,7 @@ def load_persistent_state() -> None:
                 continue
             status = row[9]
             error = row[11]
-            if status in {"normalizing", "transcribing"}:
+            if status in {"queued", "loading", "normalizing", "transcribing", "finalizing"}:
                 status = "failed"
                 error = "Processing was interrupted by a service restart"
             source = FileSource(
@@ -547,8 +547,9 @@ async def drain_live_asr(session: Session) -> None:
 
 
 async def transcribe_file(source: FileSource) -> None:
-    source.status = "transcribing"
+    source.status = "loading"
     source.progress = 0.0
+    persist_file_source(source)
     session = create_file_session(source)
     await publish(session, "session.created", session.snapshot())
     try:
@@ -570,12 +571,18 @@ async def transcribe_file(source: FileSource) -> None:
                 }
                 for index in range(count)
             ]
+        source.status = "transcribing"
+        source.progress = 0.1
+        persist_file_source(source)
         for index, segment in enumerate(segments):
             session.transcript_index += 1
             session.finalized_segments.append(segment)
             persist_session(session)
             await publish(session, "transcript.segment.final", segment)
-            source.progress = min(1.0, (index + 1) / max(1, len(segments)))
+            source.progress = 0.1 + (0.8 * (index + 1) / max(1, len(segments)))
+            persist_file_source(source)
+        source.status = "finalizing"
+        source.progress = 0.95
         persist_file_source(source)
     except Exception as error:
         session.transcribing = False

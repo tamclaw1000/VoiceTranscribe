@@ -191,7 +191,7 @@ async function transcribeFile(fileId) {
   const poll = async () => {
     const files = await refreshFiles();
     const file = files.find((item) => item.id === fileId);
-    if (file && ['queued', 'transcribing', 'normalizing'].includes(file.status)) {
+    if (file && ['queued', 'loading', 'transcribing', 'finalizing', 'normalizing'].includes(file.status)) {
       setTimeout(poll, 500);
     } else if (file?.status === 'completed') {
       setConnection(`Transcription complete: ${(file.transcript || []).length} segment${file.transcript?.length === 1 ? '' : 's'}`, 'good');

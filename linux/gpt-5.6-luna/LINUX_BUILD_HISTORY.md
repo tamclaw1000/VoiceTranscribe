@@ -1023,3 +1023,27 @@ Make gaps in acknowledged audio-frame sequences visible so transport loss is not
 
 - A count of acknowledged sequence gaps cannot distinguish network loss from browser scheduling or a server-side acknowledgement ordering problem; server-side counters and browser end-to-end tests remain open.
 - Authentication, durable event storage, and browser end-to-end automation remain open.
+
+## Phase 28 — Audio acknowledgement count
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Expose the number of accepted audio acknowledgements so the existing latency and dropped-frame diagnostics have an observable session count.
+
+### Delivered
+
+- Added an Acks metric to the browser Capture panel.
+- Incremented and reset the count per live session.
+- Added contract assertions and updated the local checklist, architecture, README, and agent guide.
+- Bumped Linux metadata from build `21` to build `22`.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized contract tests passed.
+- Compose configuration passed.
+- Docker image rebuilt and restarted.
+- Direct backend and public Traefik health endpoints report build `22`.

@@ -374,6 +374,12 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 
 ## 21. First-release acceptance checklist
 
+### Iteration diagnostics completed
+
+- [x] Expose acknowledged audio-frame count beside transport diagnostics.
+
+
+
 - [ ] `docker compose up` starts a health-checked service using documented commands.
 - [ ] The browser can request microphone access and display available browser-visible inputs.
 - [ ] Live levels appear without waiting for ASR.

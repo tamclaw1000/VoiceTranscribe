@@ -135,13 +135,14 @@ HTTP failures use a stable envelope: `{ "error": { "code": "â€¦", "message": "â€
 27. When the browser hides a live capture tab, the client announces that background throttling may delay frames and changes the connection badge; on return it restores the connected state or invokes the existing bounded reconnect path.
 28. Each `audio.ack` timestamp is compared with the browser clock and the latest acknowledgement latency is shown beside the audio byte counter; this is a transport diagnostic, not an authoritative server timing metric.
 29. Acknowledgement sequence gaps increment the browser's local dropped-frame counter; the counter resets for each session and does not infer loss before the first acknowledgement.
+30. The browser also counts accepted audio acknowledgements per session, providing a simple denominator for interpreting transport latency and dropped-frame observations.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `21`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `22`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`https://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.

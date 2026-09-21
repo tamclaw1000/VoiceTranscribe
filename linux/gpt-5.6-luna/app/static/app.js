@@ -15,6 +15,7 @@ let captureStopping = false;
 let audioFrameSequence = 0;
 let lastAckedAudioFrame = 0;
 let droppedAudioFrames = 0;
+let audioAckCount = 0;
 let pageHidden = document.hidden;
 
 function showNotification(text, kind = 'neutral', timeout = 5000) {
@@ -144,6 +145,8 @@ function applyEvent(event) {
       showNotification(`Transcription failed: ${payload.error || 'unknown error'}`, 'bad', 0);
       break;
     case 'audio.ack':
+      audioAckCount += 1;
+      $('audioAckCount').textContent = String(audioAckCount);
       $('audioBytes').textContent = formatBytes(payload.totalBytes);
       const capturedAt = Number(payload.capturedAt);
       if (Number.isFinite(capturedAt)) {
@@ -422,6 +425,8 @@ async function startSession() {
     audioFrameSequence = 0;
     lastAckedAudioFrame = 0;
     droppedAudioFrames = 0;
+    audioAckCount = 0;
+    $('audioAckCount').textContent = '0';
     $('audioDroppedFrames').textContent = '0';
     $('transcript').innerHTML = '';
     shouldReconnect = true;

@@ -6,7 +6,7 @@ services:
     environment:
       VT_DATA_DIR: /data
       VT_VERSION: ${VT_VERSION:-0.2.0}
-      VT_BUILD: ${VT_BUILD:-18}
+      VT_BUILD: ${VT_BUILD:-19}
       VT_HTTPS: ${VT_HTTPS:-true}
       VT_WS_PING_INTERVAL: ${VT_WS_PING_INTERVAL:-15}
       VT_WS_PING_TIMEOUT: ${VT_WS_PING_TIMEOUT:-30}

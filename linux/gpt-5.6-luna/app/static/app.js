@@ -14,6 +14,7 @@ let notificationTimer = null;
 let captureStopping = false;
 let audioFrameSequence = 0;
 let lastAckedAudioFrame = 0;
+let pageHidden = document.hidden;
 
 function showNotification(text, kind = 'neutral', timeout = 5000) {
   const el = $('notification');
@@ -314,6 +315,19 @@ function sendJson(value) {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value));
 }
 
+function handleVisibilityChange() {
+  pageHidden = document.hidden;
+  if (!session) return;
+  if (pageHidden) {
+    showNotification('This tab is in the background. Keep it active to avoid delayed microphone frames.', 'neutral', 0);
+    setConnection('Tab inactive; capture may be delayed', 'neutral');
+    return;
+  }
+  showNotification('Capture tab is active again.', 'good');
+  if (shouldReconnect) connectEvents();
+  if (socket?.readyState === WebSocket.OPEN) setConnection('Connected', 'good');
+}
+
 function microphoneAvailabilityMessage() {
   if (!window.isSecureContext) return 'Microphone requires HTTPS. Open https://tamclaw:10000/ and accept the development certificate warning first.';
   if (!navigator.mediaDevices?.getUserMedia) return 'This Edge context does not expose microphone capture. Check site permissions and browser policy.';
@@ -484,6 +498,7 @@ async function loadDevices() {
   }
 }
 
+document.addEventListener('visibilitychange', handleVisibilityChange);
 $('startButton').addEventListener('click', startSession);
 $('stopButton').addEventListener('click', stopSession);
 $('pauseButton').addEventListener('click', togglePause);

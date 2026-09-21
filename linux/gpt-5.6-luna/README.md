@@ -2,7 +2,7 @@
 
 This directory contains the Linux implementation from `docs/linux/linux-implementation-plan.md`.
 
-Current release metadata: **version 0.2.0, build 18**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
+Current release metadata: **version 0.2.0, build 19**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
 
 ## Included
 
@@ -126,4 +126,5 @@ curl http://tamclaw:10000/api/capabilities
 - If the selected microphone is unplugged or its permission is revoked during capture, the session is stopped and the browser displays a persistent diagnostic.
 - Audio-frame sequence/timestamp values are transport diagnostics only; they are not authentication or authorization controls.
 - Stop waits briefly for outstanding frame acknowledgements and reports any unacknowledged frames instead of silently discarding the count.
+- Backgrounding the capture tab produces a visible warning; return the tab to the foreground to restore the event connection promptly and avoid browser throttling delays.
 - HTTPS is enabled by default for microphone access. The generated development certificate is not publicly trusted; production deployments should replace it with a certificate trusted by the client.

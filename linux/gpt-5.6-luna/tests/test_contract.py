@@ -20,6 +20,8 @@ def test_browser_shell_exposes_accessible_notification_surface():
     browser_script = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text()
     assert "waitForAudioFlush" in browser_script
     assert "lastAckedAudioFrame" in browser_script
+    assert "visibilitychange" in browser_script
+    assert "Tab inactive; capture may be delayed" in browser_script
 
 
 def test_health_and_capabilities_expose_version_and_build():

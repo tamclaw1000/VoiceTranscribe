@@ -916,3 +916,38 @@ Prevent the browser from stopping a live session while recently captured PCM fra
 ### Limitations and next step
 
 - The flush is bounded at 1.5 seconds; network loss can still leave an acknowledged-gap diagnostic.
+
+## Phase 25 — Browser tab suspension diagnostics
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Make browser backgrounding visible during live capture and recover the event connection promptly when the capture tab returns to the foreground.
+
+### Delivered
+
+- Added a `visibilitychange` listener to the browser client.
+- Added a persistent warning when a live capture tab is backgrounded because browser throttling can delay AudioWorklet and WebSocket activity.
+- Changed the connection badge to `Tab inactive; capture may be delayed` while the session tab is hidden.
+- Reused the existing bounded reconnect path when the tab becomes visible again and restores the connected badge when the socket is open.
+- Bumped Linux metadata from build `18` to build `19` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- Local checklist section 6: browser tab suspension, device unplug, and input-track termination handling.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized contract tests passed.
+- Compose configuration passed.
+- Docker image rebuilt and restarted.
+- Direct health and public Traefik health endpoints report version `0.2.0`, build `19`.
+- Served browser JavaScript contains the visibility-change warning and reconnect behavior.
+
+### Limitations and next step
+
+- Browser vendors may still throttle or pause microphone processing while a tab is hidden; this phase reports that risk but cannot override browser scheduling.
+- Authentication, durable event storage, and browser end-to-end automation remain open.

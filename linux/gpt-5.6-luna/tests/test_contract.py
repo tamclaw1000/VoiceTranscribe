@@ -74,3 +74,5 @@ def test_session_snapshot_keeps_recording_and_transcription_independent():
     assert snapshot["recording"] is True
     assert snapshot["transcribing"] is True
     assert snapshot["state"] == "created"
+    assert snapshot["asrStatus"] == "idle"
+    assert snapshot["asrWindowsProcessed"] == 0

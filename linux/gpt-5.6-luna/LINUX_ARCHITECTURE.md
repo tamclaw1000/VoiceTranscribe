@@ -48,7 +48,7 @@ The client tracks `lastSequence` and reconnects the event WebSocket with `?after
 
 `FileSource` tracks the original upload, safe generated storage path, FFprobe metadata, normalized artifact, progress, status, error, and any file-transcription session. Uploads are extension-filtered and size-limited, written below `/data/files`, probed with `ffprobe`, and normalized with `ffmpeg` to mono 16 kHz signed PCM WAV. The original is retained for later playback or reprocessing. The file-transcription job selects the configured adapter: deterministic fake text in the default image, or lazy faster-whisper inference in the optional ASR image. The normalized artifact and file-session contract provide audio-relative offsets for either path.
 
-The WebSocket path selects fake finalization by default or an optional rolling-window faster-whisper worker. File transcription uses the same lazy model loader. Both paths preserve the session/event contract; the live worker processes ten-second windows and emits audio-relative offsets.
+The WebSocket path selects the rolling-window faster-whisper worker by default or fake finalization in development mode. File transcription uses the same lazy model loader. Both paths preserve the session/event contract; the live worker processes ten-second windows, emits audio-relative offsets, and publishes queued/running/completed/failed ASR status.
 
 ### Session state
 
@@ -94,6 +94,10 @@ Current event families include:
 - `transcript.segment.final`
 - `audio.level`
 - `audio.ack`
+- `asr.window.queued`
+- `asr.window.started`
+- `asr.window.completed`
+- `transcription.failed` with live ASR scope
 
 ## Data flow and lifecycle
 
@@ -117,7 +121,7 @@ Current event families include:
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `2`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `3`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`http://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.

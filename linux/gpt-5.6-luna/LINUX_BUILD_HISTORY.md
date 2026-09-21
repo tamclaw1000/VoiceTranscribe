@@ -362,6 +362,42 @@ Make real local transcription the default service behavior instead of fake demo 
 
 - Live microphone recognition through the browser has not been manually confirmed with spoken audio in this session.
 - The first live result is emitted after a ten-second window; interim decoder text is not yet shown.
+- Browser UI now exposes ASR queued/running/ready/failed status and processed-window counts.
 - Model download, CPU usage, and transcription latency should be measured on the target host.
 - Next recommended step is manual browser speech verification followed by VAD/interim improvements.
+
+## Phase 9 — Live ASR observability
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Make rolling-window ASR progress and failures visible in the browser instead of leaving the user with an unexplained wait.
+
+### Delivered
+
+- Added ASR status and processed-window fields to session snapshots.
+- Added queued, started, completed, and failed ASR events.
+- Added browser ASR status display with window counts and error text.
+- Added a session contract assertion for the initial ASR state.
+
+### Verification
+
+- Python syntax checks passed.
+- JavaScript syntax checks passed.
+- Dockerized tests passed: `7 passed` with one Starlette deprecation warning.
+- Default service rebuilt and restarted at `http://tamclaw:10000/`.
+- Health, browser HTML, and ASR status surface verified.
+
+### Remaining work
+
+- Add runtime verification for a real spoken browser window.
+
+## Build 3 — Per-iteration build bump
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+The live-ASR observability iteration increments the Linux build number from `2` to `3` while keeping version `0.2.0`. Future implementation iterations must increment `VT_BUILD` and update the runtime, browser, README, architecture, and history metadata together.
 - Live results are finalized window segments; interim decoder text, VAD-driven boundaries, and model-backed performance metrics remain open.

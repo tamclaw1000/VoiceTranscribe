@@ -46,7 +46,7 @@ The current deployment is:
 ## Version and build metadata
 
 - Current version: `0.2.0`.
-- Current build: `2`.
+- Current build: `3`.
 - Runtime configuration names are `VT_VERSION` and `VT_BUILD`.
 - The values must appear consistently in:
   - `compose.yml` defaults.
@@ -55,6 +55,7 @@ The current deployment is:
   - The browser header.
   - `README.md` when the release metadata changes.
   - The relevant `LINUX_BUILD_HISTORY.md` phase.
+- Every implementation iteration increments the build number, even when the marketing version stays the same.
 - When code is released, increment the version/build intentionally and document why. Do not silently change only one surface.
 
 ## Default and optional Docker profiles

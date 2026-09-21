@@ -108,6 +108,9 @@ class Session:
     live_pcm: bytearray = field(default_factory=bytearray)
     live_asr_bytes: int = 0
     live_asr_task: asyncio.Task[Any] | None = None
+    asr_status: str = "idle"
+    asr_windows_processed: int = 0
+    asr_last_error: str | None = None
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -121,6 +124,9 @@ class Session:
             "transcribing": self.transcribing,
             "paused": self.paused,
             "transcript": self.finalized_segments,
+            "asrStatus": self.asr_status,
+            "asrWindowsProcessed": self.asr_windows_processed,
+            "asrLastError": self.asr_last_error,
         }
 
 
@@ -459,6 +465,8 @@ async def process_live_asr(session: Session, force: bool = False) -> None:
     path = DATA_DIR / f"{session.id}-live-window.wav"
     try:
         await asyncio.to_thread(write_float32_wav, path, audio, session.sample_rate, session.channels)
+        session.asr_status = "running"
+        await publish(session, "asr.window.started", {"offset": base_offset, "duration": len(audio) / (session.sample_rate * session.channels * 4)})
         segments = await asyncio.to_thread(transcribe_with_faster_whisper, path)
         for segment in segments:
             segment["audioOffset"] = base_offset + float(segment["audioOffset"])
@@ -467,6 +475,14 @@ async def process_live_asr(session: Session, force: bool = False) -> None:
             session.finalized_segments.append(segment)
             persist_session(session)
             await publish(session, "transcript.segment.final", segment)
+        session.asr_windows_processed += 1
+        session.asr_status = "ready"
+        session.asr_last_error = None
+        persist_session(session)
+        await publish(session, "asr.window.completed", {"windows": session.asr_windows_processed, "segments": len(segments)})
+    except Exception:
+        session.asr_status = "failed"
+        raise
     finally:
         path.unlink(missing_ok=True)
 
@@ -480,10 +496,16 @@ async def schedule_live_asr(session: Session) -> None:
     if len(session.live_pcm) < chunk_bytes:
         return
 
+    session.asr_status = "queued"
+    await publish(session, "asr.window.queued", {"bytes": len(session.live_pcm)})
+
     async def run() -> None:
         try:
             await process_live_asr(session)
         except Exception as error:
+            session.asr_status = "failed"
+            session.asr_last_error = str(error)
+            persist_session(session)
             await publish(session, "transcription.failed", {"error": str(error), "scope": "live"})
 
     session.live_asr_task = asyncio.create_task(run())
@@ -795,6 +817,8 @@ async def transcription_start(session_id: str, _: SessionCommand | None = None) 
     session = get_session(session_id)
     session.transcribing = True
     session.paused = False
+    session.asr_status = "waiting"
+    session.asr_last_error = None
     session.state = "recording" if session.recording else "transcribing"
     persist_session(session)
     await publish(session, "transcription.started", {"engine": ASR_ENGINE, "model": ASR_MODEL if ASR_ENGINE == "faster-whisper" else "demo"})
@@ -830,6 +854,7 @@ async def transcription_stop(session_id: str, _: SessionCommand | None = None) -
         await fake_finalize(session, force=True)
     session.transcribing = False
     session.paused = False
+    session.asr_status = "idle"
     session.state = "recording" if session.recording else "completed"
     persist_session(session)
     await publish(session, "transcription.completed", {"segments": len(session.finalized_segments)})

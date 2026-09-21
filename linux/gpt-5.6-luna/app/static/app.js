@@ -32,6 +32,9 @@ function renderSession() {
     ? `${session.state}${session.paused ? ' · transcription paused' : ''}`
     : 'No active session';
   $('segmentCount').textContent = `${session?.transcript?.length ?? 0} segments`;
+  $('asrStatus').textContent = active
+    ? `ASR: ${session.asrStatus || 'idle'} · windows ${session.asrWindowsProcessed || 0}${session.asrLastError ? ` · ${session.asrLastError}` : ''}`
+    : 'ASR status: idle';
 }
 
 function renderSegment(segment) {
@@ -86,6 +89,20 @@ function applyEvent(event) {
       break;
     case 'audio.level':
       updateLevel(payload.rms, payload.peak, payload.clipping);
+      break;
+    case 'asr.window.queued':
+      session.asrStatus = 'queued';
+      break;
+    case 'asr.window.started':
+      session.asrStatus = 'running';
+      break;
+    case 'asr.window.completed':
+      session.asrStatus = 'ready';
+      session.asrWindowsProcessed = payload.windows;
+      break;
+    case 'transcription.failed':
+      session.asrStatus = 'failed';
+      session.asrLastError = payload.error;
       break;
     case 'audio.ack':
       $('audioBytes').textContent = formatBytes(payload.totalBytes);

@@ -308,7 +308,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [ ] Add a diagnostics view or downloadable redacted session diagnostics.
 - [ ] Add log rotation and retention configuration.
 - [ ] Add startup checks for storage, models, provider configuration, and queues.
-- [ ] Add alerts or clear operator messages for degraded capabilities.
+- [x] Add alerts or clear operator messages for degraded capabilities.
 
 ## 19. Testing
 

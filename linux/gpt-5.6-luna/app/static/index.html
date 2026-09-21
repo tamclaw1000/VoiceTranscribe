@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoiceTranscribe Linux</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>VoiceTranscribe</h1>
+      <p>Linux web vertical slice · <span id="versionText">version loading…</span></p>
+    </div>
+    <span id="connection" class="status neutral">Not connected</span>
+  </header>
+
+  <main class="layout">
+    <aside class="panel controls">
+      <h2>Session</h2>
+      <label>Input source
+        <select id="deviceSelect" disabled><option>Requesting devices…</option></select>
+      </label>
+      <label>Session name
+        <input id="sourceName" value="Browser microphone" maxlength="200">
+      </label>
+      <div class="button-row">
+        <button id="startButton">Start session</button>
+        <button id="stopButton" class="secondary" disabled>Stop</button>
+      </div>
+      <div class="button-row">
+        <button id="pauseButton" class="secondary" disabled>Pause transcription</button>
+        <button id="exportButton" class="secondary" disabled>Export Markdown</button>
+      </div>
+
+      <h2>File Sources</h2>
+      <label class="file-picker">Import audio
+        <input id="fileInput" type="file" accept="audio/*,.wav,.m4a,.mp3,.flac,.ogg,.webm,.mp4,.avi,.mov">
+      </label>
+      <div id="fileSources" class="file-sources"><p class="muted">No files imported.</p></div>
+
+      <h2>Capture</h2>
+      <div class="meter"><div id="meterFill"></div></div>
+      <div class="metric-grid">
+        <span>RMS</span><strong id="rms">0%</strong>
+        <span>Peak</span><strong id="peak">0%</strong>
+        <span>Audio</span><strong id="audioBytes">0 B</strong>
+      </div>
+      <p id="capabilityText" class="muted">Checking capabilities…</p>
+      <p class="muted">The first slice uses a fake ASR adapter. Audio is stored in the Docker data volume.</p>
+    </aside>
+
+    <section class="panel transcript-panel">
+      <div class="panel-heading">
+        <div>
+          <h2>Live Transcript</h2>
+          <p id="sessionState" class="muted">No active session</p>
+        </div>
+        <span id="segmentCount" class="badge">0 segments</span>
+      </div>
+      <div id="transcript" class="transcript" aria-live="polite">
+        <div class="empty">Start a session to see transcript events.</div>
+      </div>
+      <details class="events">
+        <summary>Event diagnostics</summary>
+        <pre id="eventLog"></pre>
+      </details>
+    </section>
+  </main>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

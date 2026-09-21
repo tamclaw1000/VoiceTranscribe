@@ -1,0 +1,16 @@
+services:
+  voice-transcribe:
+    build: .
+    ports:
+      - "${VT_BIND_ADDRESS:-0.0.0.0}:${VT_PORT:-10000}:8000"
+    environment:
+      VT_DATA_DIR: /data
+      VT_VERSION: ${VT_VERSION:-0.1.0}
+      VT_BUILD: ${VT_BUILD:-1}
+      VT_FAKE_ASR: "true"
+    volumes:
+      - voice-transcribe-data:/data
+    restart: unless-stopped
+
+volumes:
+  voice-transcribe-data:

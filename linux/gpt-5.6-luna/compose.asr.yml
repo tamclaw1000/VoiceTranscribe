@@ -1,0 +1,16 @@
+services:
+  voice-transcribe:
+    build:
+      context: .
+      args:
+        INSTALL_ASR: "true"
+    environment:
+      VT_ASR_ENGINE: faster-whisper
+      VT_ASR_MODEL: ${VT_ASR_MODEL:-small.en}
+      VT_ASR_COMPUTE_TYPE: ${VT_ASR_COMPUTE_TYPE:-int8}
+    volumes:
+      - voice-transcribe-data:/data
+      - voice-transcribe-models:/data/models
+
+volumes:
+  voice-transcribe-models:

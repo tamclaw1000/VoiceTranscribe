@@ -2159,3 +2159,21 @@ Small additions folded into the same v2.4.41 branch/release rather than a separa
 - [x] Bump `CFBundleShortVersionString` to `2.4.45`.
 - [x] Bump `CFBundleVersion` to `88`.
 - [ ] Not visually confirmed: the existing-name menu, the lock glyph with its disabled field, and the merge checkbox have not been seen in a running app.
+
+### 110. The Speaker/Voice Pair In The Transcript Display
+
+A row's speaker cell could never show both identities at once. `TranscriptSegment.speakerLabel` (`Models.swift`) collapses them into one string by priority — name, else voice name, else **voice**, else speaker — so a **named** row showed the name and nothing else, hiding the combo it belongs to, and an **unnamed** row showed the voice *instead of* the speaker. A real session proves the second case from the log alone: `/tmp/VoiceTranscribe.log` recorded 123 rows as `"speaker":"Voice N"` against 430 as `"speaker":"Speaker N"`, and that trace field is the collapsed label.
+
+- [x] Added `TranscriptSegment.speakerVoicePair` — `"Speaker 3 / Voice 1"`, or the single half that is known, or nil. It has to live apart from `speakerLabel` because that accessor's entire job is collapsing the pair; the raw identities are what identify the combo in the Voice Identification pane and what stay stable as names come and go.
+- [x] The speaker cell is now two lines: the existing label, and beneath it the pair in `caption2` / secondary. The pair line appears only when it says something the label does not (`pair != label`), so a row whose label already *is* one half is not restated, while a named row reveals the combo its name was hiding.
+- [x] Cell width unchanged (`frame(width: 150, alignment: .leading)`): `"Speaker 3 / Voice 1"` at `caption2` measures well inside it, so the grid does not shift and rows grow by one caption line.
+- [x] The tooltip now names the pair before the action, and the accessibility label carries it too — the visual second line has no VoiceOver equivalent otherwise, so the pair would be silent to a screen reader.
+- [x] Markdown export: `speakerText` returned a bare name for a named row, which was the one place the export lost the combo — unnamed rows already carried it as `"Voice 1 (Speaker 3)"`. A named row now renders `"Dana (Speaker 1)"`. Deliberately left alone: the `# SPEAKERS` timeline, which identifies a run rather than a row, and the plain-text export and clipboard copy, at the user's direction that only the Markdown export outputs the pair.
+- [x] Updated `markdownExportUsesCustomSpeakerNames`, which asserted the old behavior (`| Dana |` on a row whose speaker is `Speaker 1`). Recorded rather than quietly rewritten: that assertion was documenting exactly what the user asked to change, so it is evidence of the gap, not collateral damage.
+- [x] Added tests: the pair survives a name and is not the collapsed label; the pair falls back to whichever half is known; blank strings are not identities; a named export row keeps the combo while an unnamed row's existing form is unchanged.
+- [x] Verify `swift test` passes (81 tests, 78 → 81).
+- [x] Verify `./scripts/build.sh` succeeds and packages `dist/VoiceTranscribe.app`.
+- [x] Bump `CFBundleShortVersionString` to `2.4.46` and `CFBundleVersion` to `89`.
+- [ ] Not visually confirmed: the two-line speaker cell and its pair line have not been seen rendering. This is a purely visual change — no log line and no test can observe it — so it is being put in front of the user rather than documented as working.
+
+**Numbering collision to resolve at merge time.** The unmerged `feature/audio-playback-transcript-follow` branch also claims `2.4.46` / `89` and also used `#110` in this file. Whichever of the two lands second needs a renumber; the version was taken as the next in sequence from `main` (`2.4.45` / `88`) rather than skipping ahead, so whichever merges first is monotonic.

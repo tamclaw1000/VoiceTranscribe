@@ -95,6 +95,24 @@ struct TranscriptSegment: Identifiable, Equatable {
         return id?.isEmpty == false ? id : nil
     }
 
+    /// The Speaker/Voice pair this row belongs to — "Speaker 3 / Voice 1" — or the single half that
+    /// is known, or nil when neither is.
+    ///
+    /// `speakerLabel` above collapses both identities into one string (name, else voice, else
+    /// speaker), which is why the pair needs its own accessor: a row can only ever display one of
+    /// the two there, so a named row loses the pair entirely and an unnamed row shows the voice
+    /// *instead of* the speaker it belongs to.
+    ///
+    /// The raw identities, not display names: "Speaker 3 / Voice 1" is what identifies the combo in
+    /// the Voice Identification pane, and it stays stable as names come and go.
+    var speakerVoicePair: String? {
+        let halves = [speakerID, voiceID].compactMap { value -> String? in
+            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed?.isEmpty == false ? trimmed : nil
+        }
+        return halves.isEmpty ? nil : halves.joined(separator: " / ")
+    }
+
     var textWithSpeaker: String {
         guard let speakerLabel else {
             return text

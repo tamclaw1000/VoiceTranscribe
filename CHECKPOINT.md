@@ -4,7 +4,7 @@ Last updated: 2026-09-20
 
 ## Repository State
 
-- Current branch: `main` — existing-name selection and canonical speaker merging shipped as `v2.4.45` (`IMPLEMENTATION.md` #109)
+- Current branch: `feature/transcript-speaker-voice-display` in worktree `../transcript-speaker-voice` — the transcript's speaker cell shows each row's raw `Speaker N / Voice M` pair beneath its label, so assigning a name no longer hides the combo, and the Markdown export appends that pair to named rows. Staged as `v2.4.46` (`IMPLEMENTATION.md` #110). Uncommitted; `main` is untouched at `f3d7fcb`. The worktree needs `external` symlinked to the main checkout's copy (untracked, gitignored) or SwiftPM cannot resolve its local dependencies.
 - `main` state: fast-forward-free merge of `feature/voice-identity-names` (`b6589dd`), tagged and pushed to `origin/main`
 - Latest tag: `v2.4.45`
 - App version on `main`: `2.4.45`, bundle build `88`
@@ -54,7 +54,7 @@ Two parallel AI backends now run per finalized transcript sentence:
 - Live transcription can be paused and resumed on the active source: paused audio is neither transcribed nor diarized, recording continues gaplessly, the transcript shows a pause marker where the session resumed, and Markdown export reports each paused span.
 - SpeechVAD Sortformer diarization alongside transcription.
 - SpeechVAD WeSpeaker voice identity matching within the current session only.
-- Transcript rows show timestamp, speaker/voice identity, and transcript text.
+- Transcript rows show timestamp, speaker/voice identity, and transcript text. The speaker cell is two lines: the label (assigned name, else the voice name/voice, else the speaker) with the row's raw `Speaker N / Voice M` pair beneath it whenever that pair says something the label does not — so naming a row no longer hides which observed combo it is, and a row with only one half known is not restated. The Markdown export carries the same pair on named rows as `Dana (Speaker 1)`; the plain-text export and clipboard copy keep the collapsed label (`evaluated in v2.4.46`).
 - Speaker labels can be clicked to correct identity:
   - assign any observed voice tuple,
   - cycle through observed tuples,

@@ -419,6 +419,97 @@ import Testing
     #expect(matcher.profiles.count == 2)
 }
 
+// MARK: - Speaker/Voice pair in the transcript display
+
+@Test func speakerVoicePairKeepsBothIdentitiesWhenARowIsNamed() {
+    // A name used to be the whole story: `speakerLabel` returns it and the pair vanished, which is
+    // the gap this accessor exists to close.
+    let named = TranscriptSegment(
+        text: "one",
+        isFinal: true,
+        speakerID: "Speaker 3",
+        speakerName: "Dana",
+        voiceID: "Voice 1"
+    )
+    #expect(named.speakerLabel == "Dana")
+    #expect(named.speakerVoicePair == "Speaker 3 / Voice 1")
+
+    // Unnamed was little better: one half showed and the other was hidden. A real session logged
+    // 123 rows like this, labelled "Voice N" with no sign of the speaker they belonged to.
+    let unnamed = TranscriptSegment(
+        text: "two",
+        isFinal: true,
+        speakerID: "Speaker 3",
+        voiceID: "Voice 1"
+    )
+    #expect(unnamed.speakerLabel == "Voice 1")
+    #expect(unnamed.speakerVoicePair == "Speaker 3 / Voice 1")
+}
+
+@Test func speakerVoicePairFallsBackToWhicheverHalfIsKnown() {
+    let speakerOnly = TranscriptSegment(text: "one", isFinal: true, speakerID: "Speaker 3")
+    #expect(speakerOnly.speakerVoicePair == "Speaker 3")
+
+    let voiceOnly = TranscriptSegment(text: "two", isFinal: true, voiceID: "Voice 1")
+    #expect(voiceOnly.speakerVoicePair == "Voice 1")
+
+    // Nothing detected yet — and blank strings are nothing, not identities.
+    #expect(TranscriptSegment(text: "three", isFinal: true).speakerVoicePair == nil)
+    #expect(TranscriptSegment(text: "four", isFinal: true, speakerID: "  ", voiceID: "").speakerVoicePair == nil)
+}
+
+@Test func markdownExportKeepsThePairOnNamedRows() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+
+    let markdown = MarkdownExportService.makeDocument(
+        context: MarkdownExportContext(
+            sourceName: "Built-in Microphone",
+            location: "",
+            startDate: start,
+            endDate: start.addingTimeInterval(6),
+            exportedAt: start.addingTimeInterval(6),
+            transcriptionEngine: "Apple SpeechTranscriber",
+            aiPromptEnabled: false,
+            llmName: "",
+            llmProvider: "",
+            llmEndpoint: "",
+            llmModel: "",
+            aiPromptPrompt: "",
+            summaryPrompt: "",
+            audioURL: nil,
+            transcriptURL: nil,
+            metadataURL: nil
+        ),
+        finalizedSegments: [
+            TranscriptSegment(
+                text: "Named row.",
+                timestamp: start,
+                isFinal: true,
+                speakerID: "Speaker 3",
+                speakerName: "Dana",
+                voiceID: "Voice 1"
+            ),
+            TranscriptSegment(
+                text: "Unnamed row.",
+                timestamp: start.addingTimeInterval(3),
+                isFinal: true,
+                speakerID: "Speaker 3",
+                voiceID: "Voice 1"
+            )
+        ],
+        aiPrompts: [],
+        summaryParagraphs: [],
+        calendar: calendar
+    )
+
+    // A named row keeps the identity the rest of the export identifies it by.
+    #expect(markdown.contains("| Dana (Speaker 3 / Voice 1) | Named row."))
+    // An unnamed row is untouched: the pair was already there in the app's "voice (speaker)" form.
+    #expect(markdown.contains("| Voice 1 (Speaker 3) | Unnamed row."))
+}
+
 @Test func markdownExportIncludesDetailsRecordingSummaryAndAIPrompts() {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -672,7 +763,11 @@ import Testing
         calendar: calendar
     )
 
-    #expect(markdown.contains("| 2026-05-28 07:33:17 | 0:04 | Dana | Hello there. |  |"))
+    // The name leads, but the identity it would otherwise hide stays with it: this row has no
+    // matched voice yet, so the speaker slot is the whole pair. (Until v2.4.47 this asserted
+    // "| Dana |" — a named row silently dropping the identity the export is built on.)
+    #expect(markdown.contains("| 2026-05-28 07:33:17 | 0:04 | Dana (Speaker 1) | Hello there. |  |"))
+    // The SPEAKERS timeline is unchanged: it identifies the run, not the row.
     #expect(markdown.contains("| 0:00 | 0:04 | Dana |  |"))
 }
 

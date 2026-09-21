@@ -1591,6 +1591,25 @@ private struct TranscriptAIPromptPanel: View {
         return String(format: "%d:%02d", totalSeconds / 60, totalSeconds % 60)
     }
 
+    /// The speaker cell's tooltip. Naming the pair here means a row whose label is a single name
+    /// still answers "which combo is this?" on hover, without widening the cell.
+    private func pairHelpText(for segment: TranscriptSegment) -> String {
+        let action = "Choose an observed voice for this row, or force a new voice."
+        guard let pair = segment.speakerVoicePair else {
+            return action
+        }
+        return "\(pair). \(action)"
+    }
+
+    /// Spoken form of the cell, pair included — the visual second line has no VoiceOver equivalent
+    /// otherwise, so the pair would be silent to a screen reader.
+    private func accessibilitySpeakerLabel(for segment: TranscriptSegment, label: String) -> String {
+        guard let pair = segment.speakerVoicePair, pair != label else {
+            return "Speaker \(label)"
+        }
+        return "Speaker \(label), \(pair)"
+    }
+
     @ViewBuilder
     private func transcriptRows(
         segment: TranscriptSegment,
@@ -1602,6 +1621,7 @@ private struct TranscriptAIPromptPanel: View {
     ) -> some View {
         let speakerID = segment.speakerID ?? fallbackSpeakerID
         let speakerLabel = segment.speakerLabel ?? fallbackSpeakerLabel
+        let label = speakerLabel ?? "Detecting"
         GridRow(alignment: .top) {
             Text(timestampText(for: segment.timestamp))
                 .font(.caption.monospacedDigit())
@@ -1639,18 +1659,30 @@ private struct TranscriptAIPromptPanel: View {
                 }
                 .disabled(speakerNameItems.isEmpty)
             } label: {
-                Text(speakerLabel ?? "Detecting")
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(label)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    // The Speaker/Voice pair the row belongs to, shown whenever it says something
+                    // the label above does not: a named row reveals which combo it is, where today
+                    // the name hides it completely. Rows whose label already *is* the pair (one
+                    // half known, no name) are left alone rather than stating it twice.
+                    if let pair = segment.speakerVoicePair, pair != label {
+                        Text(pair)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(SpeakerLabelButtonStyle(color: speakerColor(for: speakerColorKey(
                 speakerID: speakerID,
                 speakerName: segment.speakerName ?? speakerLabel
             ))))
             .frame(width: 150, alignment: .leading)
-            .help("Choose an observed voice for this row, or force a new voice.")
-            .accessibilityLabel("Speaker \(speakerLabel ?? "Detecting")")
+            .help(pairHelpText(for: segment))
+            .accessibilityLabel(accessibilitySpeakerLabel(for: segment, label: label))
             .accessibilityHint("Opens voice correction options for this transcript row.")
 
             Text(segment.text)

@@ -6,7 +6,9 @@ services:
     environment:
       VT_DATA_DIR: /data
       VT_VERSION: ${VT_VERSION:-0.2.0}
-      VT_BUILD: ${VT_BUILD:-10}
+      VT_BUILD: ${VT_BUILD:-11}
+      VT_HTTPS: ${VT_HTTPS:-true}
+      VT_TLS_HOST: ${VT_TLS_HOST:-tamclaw}
       VT_ASR_ENGINE: faster-whisper
       VT_ASR_MODEL: ${VT_ASR_MODEL:-small.en}
       VT_ASR_COMPUTE_TYPE: ${VT_ASR_COMPUTE_TYPE:-int8}

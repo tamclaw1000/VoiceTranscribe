@@ -95,7 +95,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [ ] Flush pending frames before stopping a session.
 - [ ] Handle browser tab suspension, device unplug, and input-track termination.
 - [ ] Add a browser fake-audio test source for deterministic tests.
-- [ ] Document HTTPS requirements for non-localhost microphone capture.
+- [x] Document HTTPS requirements for non-localhost microphone capture.
 
 ## 7. Recording pipeline
 
@@ -283,7 +283,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 ## 17. Security and privacy
 
 - [x] Bind the default local deployment to localhost.
-- [ ] Require HTTPS for non-localhost microphone access.
+- [x] Require HTTPS for non-localhost microphone access.
 - [ ] Add authentication before LAN/public exposure.
 - [ ] Protect WebSocket commands and session ownership.
 - [ ] Add CSRF protection or scoped bearer-token handling.
@@ -355,7 +355,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Add Linux setup instructions for CPU Docker Compose.
 - [x] Add model download and licensing instructions.
 - [ ] Add optional GPU setup instructions.
-- [ ] Add browser permission and HTTPS troubleshooting.
+- [x] Add browser permission and HTTPS troubleshooting.
 - [ ] Add optional PipeWire/host-audio instructions.
 - [ ] Add configuration reference and secret-management guidance.
 - [ ] Add backup, retention, and deletion instructions.

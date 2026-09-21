@@ -257,7 +257,15 @@ function sendJson(value) {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value));
 }
 
+function microphoneAvailabilityMessage() {
+  if (!window.isSecureContext) return 'Microphone requires HTTPS. Open https://tamclaw:10000/ and accept the development certificate warning first.';
+  if (!navigator.mediaDevices?.getUserMedia) return 'This Edge context does not expose microphone capture. Check site permissions and browser policy.';
+  return null;
+}
+
 async function setupMicrophone() {
+  const unavailableMessage = microphoneAvailabilityMessage();
+  if (unavailableMessage) throw new Error(unavailableMessage);
   mediaStream = await navigator.mediaDevices.getUserMedia({
     audio: {
       deviceId: $('deviceSelect').value ? { exact: $('deviceSelect').value } : undefined,
@@ -358,6 +366,12 @@ async function exportMarkdown() {
 }
 
 async function loadDevices() {
+  const unavailableMessage = microphoneAvailabilityMessage();
+  if (unavailableMessage) {
+    $('deviceSelect').innerHTML = `<option>${unavailableMessage}</option>`;
+    setConnection(unavailableMessage, 'bad');
+    return;
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     stream.getTracks().forEach((track) => track.stop());

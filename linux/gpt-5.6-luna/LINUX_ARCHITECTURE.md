@@ -124,19 +124,20 @@ HTTP failures use a stable envelope: `{ "error": { "code": "â€¦", "message": "â€
 17. Imported originals are served through `GET /api/files/{file_id}/audio`; the browser uses native audio controls for playback and the original artifact remains separate from normalized ASR audio.
 18. Imported transcript rows use engine-reported audio offsets; playback `timeupdate` highlights the active row, and row clicks seek without starting playback.
 19. Imported-file review is rendered in the main content panel; the sidebar is reserved for session controls, capture state, and capabilities.
+20. The container starts Uvicorn with a persistent development TLS certificate by default so non-localhost browsers can expose `getUserMedia`; `VT_HTTPS=false` is retained for HTTP-only diagnostics.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `10`, configurable with `VT_VERSION` and `VT_BUILD`.
-- Default host binding: `0.0.0.0:10000` (`http://tamclaw:10000/`).
+- Application metadata: version `0.2.0`, build `11`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Default host binding: `0.0.0.0:10000` (`https://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.
 - Optional development mode: `VT_ASR_ENGINE=fake` for deterministic output without model weights.
 - No host PipeWire/PulseAudio/ALSA access.
-- No authentication or HTTPS; this deployment must remain on a trusted network until the security phase is implemented.
+- HTTPS is enabled by default with a persistent self-signed development certificate; authentication is still absent, so this deployment must remain on a trusted network until the security phase is implemented.
 
 ## Deferred architecture
 

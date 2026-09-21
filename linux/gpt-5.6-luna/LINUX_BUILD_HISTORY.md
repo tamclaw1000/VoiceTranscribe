@@ -638,3 +638,39 @@ Make imported-file review a primary content experience rather than a cramped sid
 
 - The live session transcript remains the primary main-panel view beneath the imported-file review area.
 - Dedicated Summary, Recent Recordings, and Settings views remain future information-architecture work.
+
+## Phase 17 — HTTPS microphone access
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Make browser microphone capture usable from the requested non-localhost `tamclaw` URL and provide an actionable diagnosis when Edge blocks microphone APIs.
+
+### Delivered
+
+- Added HTTPS-by-default container startup using Uvicorn TLS.
+- Added persistent self-signed development certificate generation under `/data/tls` with `tamclaw`, `localhost`, and `127.0.0.1` names.
+- Added `VT_HTTPS=false` HTTP override for API-only diagnostics.
+- Updated browser diagnostics to distinguish insecure-context failures from unavailable browser capture APIs.
+- Updated the documented browser URL to `https://tamclaw:10000/`.
+- Bumped Linux build metadata from `10` to `11` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- Local checklist section 6: HTTPS requirement for non-localhost microphone access is now implemented in the default deployment.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Docker image builds with OpenSSL and the startup certificate path.
+- Compose configuration passed.
+- HTTPS health and browser smoke checks passed after container restart.
+- Live service reports build `11`.
+
+### Limitations and next step
+
+- The development certificate is self-signed; Edge requires accepting the certificate warning once before granting microphone permission.
+- Production use requires a trusted certificate and authentication.
+- Microphone capture still requires an Edge site permission grant and a non-blocking browser policy.

@@ -46,7 +46,7 @@ The current deployment is:
 ## Version and build metadata
 
 - Current version: `0.2.0`.
-- Current build: `10`.
+- Current build: `11`.
 - Runtime configuration names are `VT_VERSION` and `VT_BUILD`.
 - The values must appear consistently in:
   - `compose.yml` defaults.
@@ -68,7 +68,7 @@ Run from this directory:
 docker compose -f compose.yml up -d --build
 ```
 
-It uses faster-whisper by default and may download model weights on first use. For deterministic development checks, set `VT_ASR_ENGINE=fake`. Verify:
+It uses HTTPS by default with a persistent development certificate. Open `https://tamclaw:10000/` and accept the certificate warning before granting microphone access. Set `VT_HTTPS=false` only for HTTP/API diagnostics. It uses faster-whisper by default and may download model weights on first use. For deterministic development checks, set `VT_ASR_ENGINE=fake`. Verify:
 
 ```sh
 curl --fail http://tamclaw:10000/api/health/live

@@ -621,6 +621,8 @@ def markdown_for(session: Session) -> str:
         f"- Sample rate: {session.sample_rate} Hz",
         f"- Channels: {session.channels}",
         f"- State: {session.state}",
+        f"- Exported: {now_iso()}",
+        f"- Application: {APP_VERSION} (build {APP_BUILD})",
         "",
         "# RECORDING",
         "",

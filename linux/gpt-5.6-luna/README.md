@@ -132,4 +132,5 @@ curl http://tamclaw:10000/api/capabilities
 - `/api/metrics` exposes aggregate active-session, file-queue, storage, and ASR diagnostics without transcript/audio content.
 - HTTP responses include baseline security headers; authentication is still required before untrusted/public exposure.
 - File transcription concurrency is bounded by `VT_MAX_CONCURRENT_FILE_JOBS` (default `2`) so CPU deployments do not start unbounded ASR work.
+- Markdown exports include generation time and application release/build provenance; secrets are not included.
 - HTTPS is enabled by default for microphone access. The generated development certificate is not publicly trusted; production deployments should replace it with a certificate trusted by the client.

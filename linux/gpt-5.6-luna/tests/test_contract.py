@@ -103,6 +103,7 @@ def test_markdown_export_contains_transcript_and_audio_reference():
     )
     output = markdown_for(session)
     assert "# RECORDING" in output
+    assert "Application: 0.1.0 (build 1)" in output
     assert "A test sentence." in output
     assert "session-1.pcm" in output
 

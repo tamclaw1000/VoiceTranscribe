@@ -1359,3 +1359,23 @@ Prevent multiple imported files from starting unbounded ASR work on CPU deployme
 - Added a process-local semaphore around file transcription workers.
 - Preserved queued and processing states for browser polling and metrics.
 - Updated architecture, README, checklist, and agent guide.
+
+## Phase 37 — Export provenance metadata
+
+**Release:** `0.2.0`
+**Build:** `31`
+**Git commit:** recorded after this phase commit
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Make Markdown exports self-describing while preserving the rule that secrets and operationally sensitive data do not enter exported records.
+
+### Delivered
+
+- Added export generation timestamp.
+- Added application release/build provenance to the DETAILS section.
+- Added contract coverage for export metadata.
+- Updated architecture, README, checklist, and agent guide.

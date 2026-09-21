@@ -385,6 +385,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Add integration coverage for metrics against a created session.
 - [x] Add baseline security response headers.
 - [x] Bound concurrent file transcription jobs.
+- [x] Include export generation and release/build provenance.
 
 
 

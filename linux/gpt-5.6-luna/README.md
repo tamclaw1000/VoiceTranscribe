@@ -2,7 +2,7 @@
 
 This directory contains the Linux implementation from `docs/linux/linux-implementation-plan.md`.
 
-Current release metadata: **version 0.2.0, build 14**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
+Current release metadata: **version 0.2.0, build 15**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
 
 ## Included
 
@@ -31,6 +31,7 @@ Current release metadata: **version 0.2.0, build 14**. The browser header and he
 - HTTPS-by-default Docker startup with a persistent development certificate for browser microphone access.
 - Explicit WebSocket ping intervals and clean disconnect handling for direct and Traefik deployments.
 - Accessible live notification surface for microphone, upload, transcription, deletion, and connection errors.
+- Negotiated microphone device, sample-rate, channel, and input-track diagnostics.
 
 The default deployment now uses `faster-whisper` for real local file and rolling-window live transcription. Model weights are downloaded into the persistent model volume on first use. Fake ASR remains available by setting `VT_ASR_ENGINE=fake` for deterministic development tests.
 
@@ -119,4 +120,5 @@ curl http://tamclaw:10000/api/capabilities
 - Playback is available for finalized imported originals; timestamped rows follow that playback. Raw live PCM still needs a finalized container for broad browser compatibility.
 - Request IDs improve diagnostics but are not an authentication or authorization mechanism.
 - The browser notification surface announces important success, warning, and error states, but it is not a replacement for authentication or server-side alerting.
+- If the selected microphone is unplugged or its permission is revoked during capture, the session is stopped and the browser displays a persistent diagnostic.
 - HTTPS is enabled by default for microphone access. The generated development certificate is not publicly trusted; production deployments should replace it with a certificate trusted by the client.

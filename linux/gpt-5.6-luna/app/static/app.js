@@ -11,6 +11,7 @@ let reconnectTimer = null;
 let reconnectAttempt = 0;
 let shouldReconnect = false;
 let notificationTimer = null;
+let captureStopping = false;
 
 function showNotification(text, kind = 'neutral', timeout = 5000) {
   const el = $('notification');
@@ -43,6 +44,16 @@ function logEvent(event) {
   const log = $('eventLog');
   const line = JSON.stringify(event);
   log.textContent = `${line}\n${log.textContent}`.slice(0, 12000);
+}
+
+function renderCaptureDetails(settings = null) {
+  const device = $('deviceSelect').selectedOptions[0];
+  $('deviceDetails').textContent = device?.value
+    ? `Microphone: ${device.textContent}`
+    : 'Microphone: unavailable';
+  if (settings) {
+    $('captureFormat').textContent = `Capture format: ${settings.sampleRate || 'unknown'} Hz · ${settings.channelCount || 'unknown'} channel${settings.channelCount === 1 ? '' : 's'}`;
+  }
 }
 
 function renderSession() {
@@ -305,6 +316,7 @@ function microphoneAvailabilityMessage() {
 async function setupMicrophone() {
   const unavailableMessage = microphoneAvailabilityMessage();
   if (unavailableMessage) throw new Error(unavailableMessage);
+  captureStopping = false;
   mediaStream = await navigator.mediaDevices.getUserMedia({
     audio: {
       deviceId: $('deviceSelect').value ? { exact: $('deviceSelect').value } : undefined,
@@ -314,6 +326,17 @@ async function setupMicrophone() {
       autoGainControl: false,
     },
   });
+  const [track] = mediaStream.getAudioTracks();
+  const settings = track?.getSettings?.() || {};
+  renderCaptureDetails(settings);
+  if (track) {
+    track.onended = () => {
+      if (captureStopping) return;
+      showNotification('Microphone input ended or permission was revoked. The session is stopping.', 'bad', 0);
+      setConnection('Microphone disconnected', 'bad');
+      if (session) stopSession();
+    };
+  }
   audioContext = new AudioContext();
   await audioContext.audioWorklet.addModule('/audio-worklet.js');
   sourceNode = audioContext.createMediaStreamSource(mediaStream);
@@ -337,6 +360,7 @@ async function setupMicrophone() {
 }
 
 function stopMicrophone() {
+  captureStopping = true;
   if (reconnectTimer) clearTimeout(reconnectTimer);
   if (workletNode) workletNode.disconnect();
   if (sourceNode) sourceNode.disconnect();
@@ -351,10 +375,12 @@ function stopMicrophone() {
 async function startSession() {
   $('startButton').disabled = true;
   try {
+    await setupMicrophone();
     const sampleRate = audioContext?.sampleRate || 48000;
+    const channels = mediaStream?.getAudioTracks()[0]?.getSettings?.().channelCount || 1;
     const response = await fetch('/api/sessions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source_name: $('sourceName').value || 'Browser microphone', sample_rate: sampleRate, channels: 1 }),
+      body: JSON.stringify({ source_name: $('sourceName').value || 'Browser microphone', sample_rate: sampleRate, channels }),
     });
     if (!response.ok) throw new Error(await response.text());
     session = await response.json();
@@ -363,7 +389,6 @@ async function startSession() {
     shouldReconnect = true;
     reconnectAttempt = 0;
     connectEvents();
-    await setupMicrophone();
     await fetch(`/api/sessions/${session.sessionId}/recording/start`, { method: 'POST' });
     await fetch(`/api/sessions/${session.sessionId}/transcription/start`, { method: 'POST' });
     renderSession();
@@ -427,6 +452,8 @@ async function loadDevices() {
       select.appendChild(option);
     });
     select.disabled = false;
+    select.addEventListener('change', () => renderCaptureDetails());
+    renderCaptureDetails();
   } catch {
     $('deviceSelect').innerHTML = '<option>Microphone permission unavailable</option>';
     showNotification('Microphone permission is needed before starting a session.', 'bad', 0);

@@ -36,7 +36,7 @@ Docker persistent volume: /data
 
 ### Browser client
 
-`app/static/index.html`, `styles.css`, and `app.js` provide the first web surface. The client owns browser permissions and browser-visible device selection. `audio-worklet.js` copies each input block, calculates level metrics, and sends the PCM block to the main thread. The client sends level messages and binary audio messages separately so visual feedback does not depend on ASR latency. A single `role=status` notification surface announces important success, warning, and error outcomes independently of the compact connection badge.
+`app/static/index.html`, `styles.css`, and `app.js` provide the first web surface. The client owns browser permissions and browser-visible device selection. `audio-worklet.js` copies each input block, calculates level metrics, and sends the PCM block to the main thread. The client sends level messages and binary audio messages separately so visual feedback does not depend on ASR latency. A single `role=status` notification surface announces important success, warning, and error outcomes independently of the compact connection badge. The capture panel displays the selected browser device and the actual `MediaTrackSettings` sample rate/channel count; the live input track's `ended` callback converts unplug/permission loss into a visible stop diagnostic.
 
 The client tracks `lastSequence` and reconnects the event WebSocket with `?after=<sequence>`. Duplicate or older events are ignored. Reconnect attempts use a bounded exponential backoff and do not create duplicate sockets. Uvicorn is configured with protocol-level ping/pong keepalive so the direct service and the Traefik HTTP upstream do not lose an otherwise idle upgraded connection. Durable event storage is a later phase.
 
@@ -129,13 +129,14 @@ HTTP failures use a stable envelope: `{ "error": { "code": "â€¦", "message": "â€
 21. Compose health checks `/api/health/live` using the active HTTP/TLS mode, and `stop_grace_period` gives Uvicorn time to finish shutdown handling.
 22. Uvicorn sends WebSocket ping frames every 15 seconds with a 30-second timeout by default; the browser reconnects after disconnect with bounded backoff, and the endpoint treats proxy/client disconnect messages as normal cleanup rather than server errors.
 23. Browser operations publish user-visible outcomes to an `aria-live` notification region; detailed server messages are read from the stable API error envelope while the header badge remains a concise connection indicator.
+24. Microphone setup negotiates the input before creating the server session, records the actual browser track settings in the session request, and stops the session when the input track ends unexpectedly.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `14`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `15`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`https://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.

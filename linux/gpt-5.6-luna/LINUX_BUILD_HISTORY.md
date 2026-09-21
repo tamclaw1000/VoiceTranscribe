@@ -776,3 +776,37 @@ Give users and assistive technology a consistent, visible notification surface f
 ### Limitations and next step
 
 - Notifications are client-side and do not replace authentication, server-side alerting, or a full browser end-to-end test suite.
+
+## Phase 21 — Microphone device and track diagnostics
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Make the live capture state truthful by showing the browser's selected input and negotiated format, and by handling microphone loss during an active session.
+
+### Delivered
+
+- Added selected microphone and availability text to the capture controls.
+- Captured and displayed the actual browser `MediaTrackSettings` sample rate and channel count.
+- Negotiated microphone capture before creating the server session so the session stores the actual format.
+- Added input-track termination handling for unplugged devices and revoked permissions.
+- Added persistent accessible diagnostics when the input track ends unexpectedly.
+- Bumped Linux metadata from build `14` to build `15` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- Local checklist section 6: display device name/availability/selection, capture negotiated sample rate/channel count, and handle input-track termination.
+
+### Verification
+
+- Python, JavaScript, shell, Compose, and diff checks passed.
+- Dockerized regression suite passed: `13 passed` with one existing Starlette deprecation warning.
+- Docker image rebuilt successfully.
+- Direct and public Traefik health endpoints report version `0.2.0`, build `15`.
+- Served public HTML contains the device and negotiated capture-format diagnostics.
+
+### Limitations and next step
+
+- Browser-level permission and physical device unplug automation remain unavailable in the current test suite.

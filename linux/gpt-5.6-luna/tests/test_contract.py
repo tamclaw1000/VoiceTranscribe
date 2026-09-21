@@ -15,6 +15,8 @@ def test_browser_shell_exposes_accessible_notification_surface():
     assert 'id="notification"' in response.text
     assert 'role="status"' in response.text
     assert 'aria-live="polite"' in response.text
+    assert 'id="deviceDetails"' in response.text
+    assert 'id="captureFormat"' in response.text
 
 
 def test_health_and_capabilities_expose_version_and_build():

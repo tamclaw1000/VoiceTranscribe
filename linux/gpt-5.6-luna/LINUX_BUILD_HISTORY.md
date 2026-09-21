@@ -2,42 +2,11 @@
 
 This file records each implementation phase for the Linux web version. Every completed implementation step must update this file and `LINUX_ARCHITECTURE.md` before the next step begins. The local `linux-implementation-plan.md` is the checklist for this working directory; mark an item complete only after implementation and verification.
 
-## Release/build and commit index
-
-All released Linux implementation phases in this history use release `0.2.0`. The table preserves the original phase numbering while recording the corresponding build and rewritten commit ID. Phase 0–7 were delivered together as the initial build-1 implementation; the Traefik-only checkpoint is recorded against build 11.
-
-| Phase | Release | Build | Git commit |
-|---:|---|---:|---|
-| 0–7 | 0.2.0 | 1 | `bf181ab` |
-| 8 | 0.2.0 | 2 | `879ff3a` |
-| 9 | 0.2.0 | 3 | `dae4642` |
-| 10 | 0.2.0 | 4 | `c0777f2` |
-| 11 | 0.2.0 | 5 | `3bc57a5` |
-| 12 | 0.2.0 | 6 | `60400ed` |
-| 13 | 0.2.0 | 7 | `442941f` |
-| 14 | 0.2.0 | 8 | `3b5fe55` |
-| 15 | 0.2.0 | 9 | `b4319b3` |
-| 16 | 0.2.0 | 10 | `ed8b306` |
-| 17 | 0.2.0 | 11 | `3123548` |
-| 17 (Traefik deployment checkpoint) | 0.2.0 | 11 | `ad0cf14` |
-| 18 | 0.2.0 | 12 | `ce70f8d` |
-| 19 | 0.2.0 | 13 | `cc766d2` |
-| 20 | 0.2.0 | 14 | `81d113d` |
-| 21 | 0.2.0 | 15 | `3943ef6` |
-| 22 | 0.2.0 | 16 | `46a4eef` |
-| 23 | 0.2.0 | 17 | `cbbefff` |
-| 24 | 0.2.0 | 18 | `a7b8353` |
-| 25 | 0.2.0 | 19 | `1951260` |
-| 26 | 0.2.0 | 20 | `4b60e7e` |
-| 27 | 0.2.0 | 21 | `7cf79a8` |
-| 28 | 0.2.0 | 22 | `111d10d` |
-| 29 | 0.2.0 | 23 | `3a71893` |
-| 30 | 0.2.0 | 24 | `9a54dde` |
-| 31 | 0.2.0 | 25 | `cc1bfe5` |
-| 32 | 0.2.0 | 26 | `e06e2b2` |
-
-
 ## Phase 0 — Design and implementation target
+
+**Release:** `0.2.0`
+**Build:** `1`
+**Git commit:** `bf181ab`
 
 **Status:** Complete
 
@@ -60,6 +29,10 @@ All released Linux implementation phases in this history use release `0.2.0`. Th
 **Reason:** This provides a runnable, testable end-to-end path without requiring model weights, GPU drivers, Linux audio socket permissions, or provider credentials before the session/event architecture is proven.
 
 ## Phase 1 — Dockerized vertical slice
+
+**Release:** `0.2.0`
+**Build:** `1`
+**Git commit:** `bf181ab`
 
 **Status:** Complete
 
@@ -112,6 +85,10 @@ Copy this template for every subsequent implementation step, then update `LINUX_
 ```markdown
 ## Phase N — Short name
 
+**Release:** `0.2.0`
+**Build:** `1`
+**Git commit:** `bf181ab`
+
 **Status:** Complete | In progress | Deferred
 **Date:** YYYY-MM-DD
 
@@ -149,6 +126,10 @@ For every implementation step:
 7. Do not mark an item complete based only on code inspection when it requires runtime verification.
 
 ## Phase 2 — File import and normalization
+
+**Release:** `0.2.0`
+**Build:** `1`
+**Git commit:** `bf181ab`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -192,6 +173,10 @@ Add a useful file-source path before integrating a real speech model: upload aud
 
 ## Phase 3 — Trusted-LAN browser deployment
 
+**Release:** `0.2.0`
+**Build:** `1`
+**Git commit:** `bf181ab`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -219,6 +204,10 @@ Make the browser-testable service reachable from the host name `tamclaw` on port
 - Use only a trusted network until the security phase adds authentication and HTTPS.
 
 ## Phase 4 — Optional faster-whisper file ASR
+
+**Release:** `0.2.0`
+**Build:** `1`
+**Git commit:** `bf181ab`
 
 **Status:** Complete for the adapter/profile; model-backed runtime verification pending
 **Date:** 2026-09-21
@@ -261,6 +250,10 @@ Add a real local ASR path without making the default browser-test deployment dow
 
 ## Phase 5 — Rolling-window live ASR
 
+**Release:** `0.2.0`
+**Build:** `1`
+**Git commit:** `bf181ab`
+
 **Status:** Complete for the worker path; model-backed inference pending
 **Date:** 2026-09-21
 
@@ -301,6 +294,10 @@ Extend the optional faster-whisper adapter from imported files to live microphon
 
 ## Phase 6 — Version and build metadata
 
+**Release:** `0.2.0`
+**Build:** `1`
+**Git commit:** `bf181ab`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -328,6 +325,10 @@ Add explicit Linux application version and build metadata that is consistent acr
 - Release version/build values are manually managed until a release automation process is added.
 
 ## Phase 7 — Durable SQLite metadata
+
+**Release:** `0.2.0`
+**Build:** `1`
+**Git commit:** `bf181ab`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -368,6 +369,10 @@ Keep completed session metadata and imported file-source metadata across contain
 
 ## Phase 8 — Enable live faster-whisper transcription
 
+**Release:** `0.2.0`
+**Build:** `2`
+**Git commit:** `879ff3a`
+
 **Status:** Complete; model-backed file warm-up verified, browser microphone session still requires manual acoustic verification
 **Date:** 2026-09-21
 
@@ -402,6 +407,10 @@ Make real local transcription the default service behavior instead of fake demo 
 - Next recommended step is manual browser speech verification followed by VAD/interim improvements.
 
 ## Phase 9 — Live ASR observability
+
+**Release:** `0.2.0`
+**Build:** `3`
+**Git commit:** `dae4642`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -439,6 +448,10 @@ The live-ASR observability iteration increments the Linux build number from `2` 
 
 ## Phase 10 — API error envelopes and request IDs
 
+**Release:** `0.2.0`
+**Build:** `4`
+**Git commit:** `c0777f2`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -471,6 +484,10 @@ Make backend failures consistently consumable by the browser and diagnosable by 
 - Next recommended step is to harden recording/file lifecycle behavior or add browser end-to-end coverage.
 
 ## Phase 11 — Explicit artifact deletion
+
+**Release:** `0.2.0`
+**Build:** `5`
+**Git commit:** `3bc57a5`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -508,6 +525,10 @@ Give users an explicit, safe way to remove imported files and completed sessions
 
 ## Phase 12 — File transcription result visibility
 
+**Release:** `0.2.0`
+**Build:** `6`
+**Git commit:** `60400ed`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -542,6 +563,10 @@ Make imported-file transcription visibly useful in the browser instead of showin
 
 ## Phase 13 — File job lifecycle states
 
+**Release:** `0.2.0`
+**Build:** `7`
+**Git commit:** `442941f`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -572,6 +597,10 @@ Expose meaningful file-transcription phases so users can tell whether the servic
 - Full browser end-to-end automation and playback remain open.
 
 ## Phase 14 — Imported-file playback
+
+**Release:** `0.2.0`
+**Build:** `8`
+**Git commit:** `3b5fe55`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -608,6 +637,10 @@ Allow users to listen to the imported source while reviewing its transcription i
 
 ## Phase 15 — Imported transcript playback following
 
+**Release:** `0.2.0`
+**Build:** `9`
+**Git commit:** `b4319b3`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -642,6 +675,10 @@ Connect imported transcript rows to the audio player so reviewing a transcriptio
 
 ## Phase 16 — Main-panel file review and visible playback highlight
 
+**Release:** `0.2.0`
+**Build:** `10`
+**Git commit:** `ed8b306`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -675,6 +712,11 @@ Make imported-file review a primary content experience rather than a cramped sid
 - Dedicated Summary, Recent Recordings, and Settings views remain future information-architecture work.
 
 ## Phase 17 — HTTPS microphone access
+
+**Release:** `0.2.0`
+**Build:** `11`
+**Git commit:** `3123548`
+**Traefik deployment checkpoint:** `ad0cf14`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -712,6 +754,10 @@ Make browser microphone capture usable from the requested non-localhost `tamclaw
 
 ## Phase 18 — Docker health and graceful shutdown
 
+**Release:** `0.2.0`
+**Build:** `12`
+**Git commit:** `ce70f8d`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -744,6 +790,10 @@ Give Docker and Traefik a reliable liveness signal and allow the Uvicorn process
 - Active WebSocket state is still process-local; durable job coordination remains deferred.
 
 ## Phase 19 — WebSocket proxy keepalive and reconnect hardening
+
+**Release:** `0.2.0`
+**Build:** `13`
+**Git commit:** `cc766d2`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -781,6 +831,10 @@ Keep the upgraded event connection healthy through the Traefik HTTP upstream and
 
 ## Phase 20 — Accessible browser notifications
 
+**Release:** `0.2.0`
+**Build:** `14`
+**Git commit:** `81d113d`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -813,6 +867,10 @@ Give users and assistive technology a consistent, visible notification surface f
 - Notifications are client-side and do not replace authentication, server-side alerting, or a full browser end-to-end test suite.
 
 ## Phase 21 — Microphone device and track diagnostics
+
+**Release:** `0.2.0`
+**Build:** `15`
+**Git commit:** `3943ef6`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -848,6 +906,10 @@ Make the live capture state truthful by showing the browser's selected input and
 
 ## Phase 22 — Retry failed file transcription
 
+**Release:** `0.2.0`
+**Build:** `16`
+**Git commit:** `46a4eef`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -881,6 +943,10 @@ Allow recoverable imported-file transcription failures to be retried without for
 - Retry is available only while the normalized artifact exists and does not add cancellation, backoff, or concurrent-job quotas.
 
 ## Phase 23 — Sequenced microphone audio frames
+
+**Release:** `0.2.0`
+**Build:** `17`
+**Git commit:** `cbbefff`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -919,6 +985,10 @@ Make the browser-to-server audio transport traceable by attaching frame sequence
 
 ## Phase 24 — Graceful audio-frame flush on stop
 
+**Release:** `0.2.0`
+**Build:** `18`
+**Git commit:** `a7b8353`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -953,6 +1023,10 @@ Prevent the browser from stopping a live session while recently captured PCM fra
 - The flush is bounded at 1.5 seconds; network loss can still leave an acknowledged-gap diagnostic.
 
 ## Phase 25 — Browser tab suspension diagnostics
+
+**Release:** `0.2.0`
+**Build:** `19`
+**Git commit:** `1951260`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -989,6 +1063,10 @@ Make browser backgrounding visible during live capture and recover the event con
 
 ## Phase 26 — Audio transport latency diagnostics
 
+**Release:** `0.2.0`
+**Build:** `20`
+**Git commit:** `4b60e7e`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -1023,6 +1101,10 @@ Expose the most recent browser-to-server audio acknowledgement latency so a user
 - Authentication, durable event storage, and browser end-to-end automation remain open.
 
 ## Phase 27 — Audio acknowledgement gap diagnostics
+
+**Release:** `0.2.0`
+**Build:** `21`
+**Git commit:** `7cf79a8`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -1060,6 +1142,10 @@ Make gaps in acknowledged audio-frame sequences visible so transport loss is not
 
 ## Phase 28 — Audio acknowledgement count
 
+**Release:** `0.2.0`
+**Build:** `22`
+**Git commit:** `111d10d`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -1083,6 +1169,10 @@ Expose the number of accepted audio acknowledgements so the existing latency and
 - Direct backend and public Traefik health endpoints report build `22`.
 
 ## Phase 29 — Independent capture uptime
+
+**Release:** `0.2.0`
+**Build:** `23`
+**Git commit:** `3a71893`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -1108,6 +1198,10 @@ Show how long browser capture has been active independently of transcription pro
 
 ## Phase 30 — Live event count
 
+**Release:** `0.2.0`
+**Build:** `24`
+**Git commit:** `9a54dde`
+
 **Status:** Complete
 **Date:** 2026-09-21
 
@@ -1131,6 +1225,10 @@ Make event-flow activity visible in the Capture panel without changing the WebSo
 - Direct backend health reports build `24`.
 
 ## Phase 31 — WebSocket reconnect count
+
+**Release:** `0.2.0`
+**Build:** `25`
+**Git commit:** `cc1bfe5`
 
 **Status:** Complete
 **Date:** 2026-09-21
@@ -1156,6 +1254,10 @@ Expose active-session WebSocket reconnect frequency while retaining bounded brow
 - Direct backend health reports build `25`.
 
 ## Phase 32 — Average transport latency
+
+**Release:** `0.2.0`
+**Build:** `26`
+**Git commit:** `e06e2b2`
 
 **Status:** Complete
 **Date:** 2026-09-21

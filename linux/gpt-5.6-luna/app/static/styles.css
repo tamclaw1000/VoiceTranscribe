@@ -30,6 +30,11 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .status.neutral { background: #2b333f; color: #c7d0dd; }
 .status.good { background: #164d39; color: #8cf0bd; }
 .status.bad { background: #5b2026; color: #ffb5b9; }
+.notification { position: fixed; z-index: 10; top: 1rem; left: 50%; transform: translateX(-50%); width: min(680px, calc(100vw - 2rem)); min-height: 2.5rem; display: flex; align-items: center; padding: .7rem 1rem; border: 1px solid #3a4351; border-radius: 8px; background: #202733; color: #edf1f7; box-shadow: 0 8px 30px rgb(0 0 0 / 30%); font-size: .85rem; }
+.notification:empty { display: none; }
+.notification.good { border-color: #287c5b; background: #164d39; color: #d5ffe7; }
+.notification.bad { border-color: #a13d47; background: #5b2026; color: #ffdfe1; }
+.notification.neutral { border-color: #53647c; background: #27344b; color: #d7e8ff; }
 .meter { height: 1rem; border-radius: 99px; background: #0c0f13; overflow: hidden; border: 1px solid #2a303a; }
 #meterFill { height: 100%; width: 0; background: linear-gradient(90deg, #4f7cff, #43e3a0); transition: width 80ms linear; }
 .metric-grid { display: grid; grid-template-columns: 1fr auto; gap: .4rem .8rem; font-size: .8rem; color: #99a3b3; }

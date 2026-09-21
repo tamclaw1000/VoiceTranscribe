@@ -9,6 +9,14 @@ from fastapi.testclient import TestClient
 from app.main import APP_BUILD, APP_VERSION, FileSource, Session, app, audio_path, load_persistent_state, markdown_for, persist_session, sessions
 
 
+def test_browser_shell_exposes_accessible_notification_surface():
+    response = TestClient(app).get("/")
+    assert response.status_code == 200
+    assert 'id="notification"' in response.text
+    assert 'role="status"' in response.text
+    assert 'aria-live="polite"' in response.text
+
+
 def test_health_and_capabilities_expose_version_and_build():
     client = TestClient(app)
     health = client.get("/api/health/ready")

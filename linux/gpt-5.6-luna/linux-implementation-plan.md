@@ -73,7 +73,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Add capability detection and unavailable-feature messaging.
 - [x] Add a responsive source/sidebar layout.
 - [ ] Add Live Transcript, Summary, Recent Recordings, and Settings views.
-- [ ] Add an accessible notification/error surface.
+- [x] Add an accessible notification/error surface.
 - [x] Add reconnecting WebSocket state with visible connection status.
 - [x] Add event sequence tracking and state-snapshot recovery.
 - [ ] Add a virtualized transcript list for long sessions.

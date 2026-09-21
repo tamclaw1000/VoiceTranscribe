@@ -10,11 +10,33 @@ let lastSequence = 0;
 let reconnectTimer = null;
 let reconnectAttempt = 0;
 let shouldReconnect = false;
+let notificationTimer = null;
 
-function setConnection(text, kind = 'neutral') {
+function showNotification(text, kind = 'neutral', timeout = 5000) {
+  const el = $('notification');
+  el.textContent = text;
+  el.className = `notification ${kind}`;
+  if (notificationTimer) clearTimeout(notificationTimer);
+  if (timeout > 0) {
+    notificationTimer = setTimeout(() => {
+      el.textContent = '';
+      el.className = 'notification neutral';
+      notificationTimer = null;
+    }, timeout);
+  }
+}
+
+function setConnection(text, kind = 'neutral', announce = false) {
   const el = $('connection');
   el.textContent = text;
   el.className = `status ${kind}`;
+  if (announce) showNotification(text, kind);
+}
+
+function errorMessage(response, fallback) {
+  return response.json()
+    .then((body) => body?.error?.message || fallback)
+    .catch(() => fallback);
 }
 
 function logEvent(event) {
@@ -104,6 +126,7 @@ function applyEvent(event) {
     case 'transcription.failed':
       session.asrStatus = 'failed';
       session.asrLastError = payload.error;
+      showNotification(`Transcription failed: ${payload.error || 'unknown error'}`, 'bad', 0);
       break;
     case 'audio.ack':
       $('audioBytes').textContent = formatBytes(payload.totalBytes);
@@ -208,17 +231,19 @@ async function uploadFile(file) {
 async function deleteFile(fileId) {
   const response = await fetch(`/api/files/${fileId}`, { method: 'DELETE' });
   if (!response.ok) {
-    setConnection(`File deletion failed: ${await response.text()}`, 'bad');
+    showNotification(`File deletion failed: ${await errorMessage(response, 'The file could not be deleted.')}`, 'bad', 0);
+    setConnection('File deletion failed', 'bad');
     return;
   }
   await refreshFiles();
-  setConnection('File deleted', 'good');
+  setConnection('File deleted', 'good', true);
 }
 
 async function transcribeFile(fileId) {
   const response = await fetch(`/api/files/${fileId}/transcribe`, { method: 'POST' });
   if (!response.ok) {
-    setConnection(`File transcription failed: ${await response.text()}`, 'bad');
+    showNotification(`File transcription failed: ${await errorMessage(response, 'The file could not be transcribed.')}`, 'bad', 0);
+    setConnection('File transcription failed', 'bad');
     return;
   }
   const poll = async () => {
@@ -227,7 +252,7 @@ async function transcribeFile(fileId) {
     if (file && ['queued', 'loading', 'transcribing', 'finalizing', 'normalizing'].includes(file.status)) {
       setTimeout(poll, 500);
     } else if (file?.status === 'completed') {
-      setConnection(`Transcription complete: ${(file.transcript || []).length} segment${file.transcript?.length === 1 ? '' : 's'}`, 'good');
+      setConnection(`Transcription complete: ${(file.transcript || []).length} segment${file.transcript?.length === 1 ? '' : 's'}`, 'good', true);
     }
   };
   await poll();
@@ -256,7 +281,7 @@ function connectEvents() {
       setConnection('Disconnected', 'neutral');
       return;
     }
-    setConnection('Reconnecting…', 'neutral');
+    setConnection('Reconnecting…', 'neutral', true);
     reconnectAttempt += 1;
     const delay = Math.min(10_000, 500 * (2 ** Math.min(reconnectAttempt - 1, 4)));
     reconnectTimer = setTimeout(() => {
@@ -264,7 +289,7 @@ function connectEvents() {
       connectEvents();
     }, delay);
   };
-  socket.onerror = () => setConnection('Connection error; retrying…', 'bad');
+  socket.onerror = () => setConnection('Connection error; retrying…', 'bad', true);
 }
 
 function sendJson(value) {
@@ -345,7 +370,8 @@ async function startSession() {
   } catch (error) {
     stopMicrophone();
     session = null;
-    setConnection(`Start failed: ${error.message}`, 'bad');
+    showNotification(`Start failed: ${error.message}`, 'bad', 0);
+    setConnection('Start failed', 'bad');
     renderSession();
   }
 }
@@ -384,7 +410,8 @@ async function loadDevices() {
   const unavailableMessage = microphoneAvailabilityMessage();
   if (unavailableMessage) {
     $('deviceSelect').innerHTML = `<option>${unavailableMessage}</option>`;
-    setConnection(unavailableMessage, 'bad');
+    showNotification(unavailableMessage, 'bad', 0);
+    setConnection('Microphone unavailable', 'bad');
     return;
   }
   try {
@@ -402,6 +429,7 @@ async function loadDevices() {
     select.disabled = false;
   } catch {
     $('deviceSelect').innerHTML = '<option>Microphone permission unavailable</option>';
+    showNotification('Microphone permission is needed before starting a session.', 'bad', 0);
     setConnection('Microphone permission needed', 'bad');
   }
 }
@@ -415,10 +443,12 @@ $('fileInput').addEventListener('change', async (event) => {
   if (!file) return;
   try {
     setConnection(`Uploading ${file.name}…`, 'neutral');
+    showNotification(`Uploading ${file.name}…`, 'neutral', 0);
     await uploadFile(file);
-    setConnection('File imported', 'good');
+    setConnection('File imported', 'good', true);
   } catch (error) {
-    setConnection(`Upload failed: ${error.message}`, 'bad');
+    showNotification(`Upload failed: ${error.message}`, 'bad', 0);
+    setConnection('Upload failed', 'bad');
   } finally {
     event.target.value = '';
   }

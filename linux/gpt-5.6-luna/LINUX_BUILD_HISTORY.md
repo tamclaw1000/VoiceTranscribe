@@ -743,3 +743,36 @@ Keep the upgraded event connection healthy through the Traefik HTTP upstream and
 
 - Authentication and session ownership remain open; the WebSocket is still unauthenticated.
 - Event replay remains process-local and is not suitable for multi-replica routing without shared event storage.
+
+## Phase 20 — Accessible browser notifications
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Give users and assistive technology a consistent, visible notification surface for important operation outcomes instead of relying only on the compact connection badge or transient browser behavior.
+
+### Delivered
+
+- Added an `aria-live` notification region to the main browser shell.
+- Added success, neutral, and persistent error notification styles.
+- Added user-facing notifications for microphone availability/permission errors, uploads, file deletion, file transcription, live transcription failures, and WebSocket reconnects.
+- Added stable API error-envelope parsing so operation failures display the server's safe message rather than raw response markup.
+- Bumped Linux metadata from build `13` to build `14` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- Local checklist section 5: accessible notification/error surface.
+
+### Verification
+
+- Python, JavaScript, shell, Compose, and diff checks passed.
+- Dockerized regression suite passed: `13 passed` with one existing Starlette deprecation warning.
+- Docker image rebuilt successfully.
+- Direct and public Traefik health endpoints report version `0.2.0`, build `14`.
+- Served public HTML contains the `aria-live` notification region.
+
+### Limitations and next step
+
+- Notifications are client-side and do not replace authentication, server-side alerting, or a full browser end-to-end test suite.

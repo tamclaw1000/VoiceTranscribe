@@ -1379,3 +1379,22 @@ Make Markdown exports self-describing while preserving the rule that secrets and
 - Added application release/build provenance to the DETAILS section.
 - Added contract coverage for export metadata.
 - Updated architecture, README, checklist, and agent guide.
+
+## Phase 38 — Live transcription occurrence identity
+
+**Release:** `0.2.0`
+**Build:** `32`
+**Git commit:** recorded after this phase commit
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Preserve sentence occurrence identity in live finalized transcript events so repeated text remains distinct.
+
+### Delivered
+
+- Fixed live fake-ASR segments to use monotonic `sentenceIndex` values.
+- Added regression coverage for two sequential live segments.
+- Updated architecture, README, checklist, and agent guide.

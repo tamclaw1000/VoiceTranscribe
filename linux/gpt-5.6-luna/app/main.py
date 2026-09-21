@@ -659,7 +659,7 @@ async def fake_finalize(session: Session, force: bool = False) -> None:
         offset = max(0.0, (session.transcript_index - 1) * 5.0)
         segment = {
             "segmentId": str(uuid.uuid4()),
-            "sentenceIndex": 0,
+            "sentenceIndex": session.transcript_index - 1,
             "text": f"Demo finalized sentence {session.transcript_index}.",
             "audioOffset": offset,
             "isFinal": True,

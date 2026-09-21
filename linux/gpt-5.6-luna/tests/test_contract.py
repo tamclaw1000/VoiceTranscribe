@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -6,7 +7,7 @@ os.environ["VT_DATA_DIR"] = str(Path(__file__).parent / "data")
 
 from fastapi.testclient import TestClient
 
-from app.main import APP_BUILD, APP_VERSION, FileSource, Session, app, audio_path, file_sources, load_persistent_state, markdown_for, persist_session, sessions
+from app.main import APP_BUILD, APP_VERSION, FileSource, Session, app, audio_path, fake_finalize, file_sources, load_persistent_state, markdown_for, persist_session, sessions
 
 
 def test_browser_shell_exposes_accessible_notification_surface():
@@ -226,6 +227,22 @@ def test_failed_file_transcription_can_be_requeued(tmp_path):
         if candidate.source_name == "retry.wav":
             sessions.pop(session_id, None)
     sessions.pop(previous.id, None)
+
+
+def test_fake_live_segments_keep_occurrence_indexes():
+    session = Session(
+        id="occurrence-session",
+        source_name="Occurrence test",
+        sample_rate=8000,
+        channels=1,
+        created_at="2026-09-21T00:00:00+00:00",
+        transcribing=True,
+        audio_bytes=8000 * 1 * 4 * 10,
+    )
+    sessions[session.id] = session
+    asyncio.run(fake_finalize(session))
+    assert [segment["sentenceIndex"] for segment in session.finalized_segments] == [0, 1]
+    sessions.pop(session.id, None)
 
 
 def test_session_delete_removes_recording_artifact_and_metadata():

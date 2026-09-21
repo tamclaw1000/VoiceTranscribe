@@ -570,3 +570,37 @@ Allow users to listen to the imported source while reviewing its transcription i
 
 - Live microphone recordings remain raw PCM and are not yet broadly browser-playable.
 - Transcript-row seeking/follow highlighting and authenticated playback remain open.
+
+## Phase 15 — Imported transcript playback following
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Connect imported transcript rows to the audio player so reviewing a transcription is time-aware rather than a static text display.
+
+### Delivered
+
+- Replaced the static file transcript text block with timestamped selectable rows.
+- Highlighted the row whose audio-relative offset contains the current player time.
+- Added row seeking without automatically starting playback.
+- Used `audioEndOffset` when available and the next segment offset as a fallback boundary.
+- Bumped Linux build metadata from `8` to `9` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- No new checklist item was marked complete; this phase extends the imported-file playback behavior already verified in Phase 14.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized tests passed.
+- Compose validation passed.
+- Served browser JavaScript includes active-row highlighting and non-autoplay row seeking.
+- Live service reports build `9` after rebuild and restart.
+
+### Limitations and next step
+
+- Live-recording transcript following is still deferred until recordings use a broadly playable finalized container and reliable wall-clock anchors.
+- Active-row auto-scroll, authenticated playback, and full browser E2E coverage remain open.

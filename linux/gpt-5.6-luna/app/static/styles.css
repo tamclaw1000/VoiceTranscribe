@@ -37,7 +37,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .file-source .name { font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-source .meta { color: #99a3b3; font-size: .7rem; }
 .file-source .file-player { width: 100%; height: 2rem; }
-.file-source .file-transcript { margin: 0; padding: .4rem; background: #101318; border-radius: 5px; color: #d7e8ff; font-size: .72rem; }
+.file-source .file-transcript { display: grid; gap: .2rem; margin: 0; padding: .4rem; background: #101318; border-radius: 5px; }
+.file-source .file-segment { text-align: left; padding: .25rem .35rem; border: 0; background: transparent; color: #d7e8ff; font-size: .72rem; font-weight: 400; }
+.file-source .file-segment:hover, .file-source .file-segment.active { background: #27344b; color: #fff; }
 .file-source button { padding: .35rem .5rem; font-size: .75rem; }
 .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 1px solid #2a303a; padding-bottom: .8rem; margin-bottom: .8rem; }
 .badge { background: #27344b; color: #a9c4ff; }

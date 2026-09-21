@@ -131,6 +131,35 @@ function formatDuration(seconds) {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
+function renderFileTranscript(container, player, segments) {
+  container.innerHTML = '';
+  if (!segments.length) {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  const rows = segments.map((segment, index) => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'file-segment';
+    row.textContent = `${Number(segment.audioOffset).toFixed(2)}s — ${segment.text}`;
+    row.dataset.start = String(Number(segment.audioOffset) || 0);
+    row.dataset.end = String(Number(segment.audioEndOffset) || Number(segments[index + 1]?.audioOffset) || Number.POSITIVE_INFINITY);
+    row.addEventListener('click', () => {
+      player.currentTime = Number(row.dataset.start);
+    });
+    container.appendChild(row);
+    return row;
+  });
+  player.addEventListener('timeupdate', () => {
+    const current = player.currentTime;
+    rows.forEach((row) => {
+      const active = current >= Number(row.dataset.start) && current < Number(row.dataset.end);
+      row.classList.toggle('active', active);
+    });
+  });
+}
+
 function renderFileSources(files) {
   const container = $('fileSources');
   container.innerHTML = '';
@@ -142,16 +171,14 @@ function renderFileSources(files) {
     const card = document.createElement('div');
     card.className = 'file-source';
     const status = file.error || `${file.status} · ${Math.round(file.progress * 100)}%`;
-    const transcriptText = (file.transcript || []).map((segment) => `${Number(segment.audioOffset).toFixed(2)}s — ${segment.text}`).join('\\n');
-    card.innerHTML = `<strong class="name" title=""></strong><span class="meta"></span><span class="meta status-text"></span><audio class="file-player" controls preload="metadata"></audio><pre class="file-transcript"></pre><div class="button-row"><button class="secondary" ${file.status !== 'ready' ? 'disabled' : ''}>Transcribe file</button><button class="secondary delete-file">Delete</button></div>`;
+    card.innerHTML = `<strong class="name" title=""></strong><span class="meta"></span><span class="meta status-text"></span><audio class="file-player" controls preload="metadata"></audio><div class="file-transcript"></div><div class="button-row"><button class="secondary" ${file.status !== 'ready' ? 'disabled' : ''}>Transcribe file</button><button class="secondary delete-file">Delete</button></div>`;
     card.querySelector('.name').textContent = file.name;
     card.querySelector('.name').title = file.name;
     card.querySelector('.meta').textContent = `${formatDuration(file.duration)} · ${formatBytes(file.sizeBytes)} · ${file.format}`;
     card.querySelector('.status-text').textContent = status;
     const player = card.querySelector('.file-player');
     player.src = file.audioUrl;
-    card.querySelector('.file-transcript').textContent = transcriptText;
-    card.querySelector('.file-transcript').hidden = !transcriptText;
+    renderFileTranscript(card.querySelector('.file-transcript'), player, file.transcript || []);
     card.querySelector('button').addEventListener('click', () => transcribeFile(file.id));
     card.querySelector('.delete-file').addEventListener('click', () => deleteFile(file.id));
     container.appendChild(card);

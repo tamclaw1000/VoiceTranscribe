@@ -535,3 +535,38 @@ Expose meaningful file-transcription phases so users can tell whether the servic
 
 - Progress remains phase-based rather than a precise model-level denominator during loading or decoding.
 - Full browser end-to-end automation and playback remain open.
+
+## Phase 14 — Imported-file playback
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Allow users to listen to the imported source while reviewing its transcription instead of treating transcription as a text-only result.
+
+### Delivered
+
+- Added `GET /api/files/{file_id}/audio` for finalized imported originals.
+- Returned the original media MIME type and filename through `FileResponse`.
+- Added native browser play/pause, scrubber, elapsed-time, and duration controls to each file card.
+- Exposed the file audio URL in file-source snapshots.
+- Kept original playback media separate from mono 16 kHz normalized ASR artifacts.
+- Bumped Linux build metadata from `7` to `8` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- Local checklist section 10: playback is available when the imported source is finalized/readable.
+- Local checklist section 12: native play/pause, scrubber, elapsed-time, and duration controls.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized file-import test verifies the audio endpoint and MIME type.
+- Docker build and Compose validation passed.
+- Live service reports build `8` after rebuild and restart.
+
+### Limitations and next step
+
+- Live microphone recordings remain raw PCM and are not yet broadly browser-playable.
+- Transcript-row seeking/follow highlighting and authenticated playback remain open.

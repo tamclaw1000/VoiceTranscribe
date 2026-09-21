@@ -2,7 +2,7 @@
 
 This directory contains the Linux implementation from `docs/linux/linux-implementation-plan.md`.
 
-Current release metadata: **version 0.2.0, build 7**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
+Current release metadata: **version 0.2.0, build 8**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
 
 ## Included
 
@@ -25,6 +25,7 @@ Current release metadata: **version 0.2.0, build 7**. The browser header and hea
 - SQLite metadata persistence for completed sessions and imported file sources.
 - Session and imported-file deletion with data-volume artifact cleanup.
 - File-transcription status polling and transcript results displayed directly in the file card.
+- Native browser playback controls for each imported original audio file.
 
 The default deployment now uses `faster-whisper` for real local file and rolling-window live transcription. Model weights are downloaded into the persistent model volume on first use. Fake ASR remains available by setting `VT_ASR_ENGINE=fake` for deterministic development tests.
 
@@ -100,5 +101,6 @@ curl http://tamclaw:10000/api/capabilities
 - Authentication is not included. The service is currently unauthenticated; only expose it on a trusted network until authentication and HTTPS are implemented.
 - Deletion is explicit and refuses active recording/transcription jobs; retention automation is not yet implemented.
 - File transcription is asynchronous; the browser shows queued/loading/transcribing/finalizing/completed/failed status and finalized segment text when available.
+- Playback is available for finalized imported originals; raw live PCM still needs a finalized container for broad browser compatibility.
 - Request IDs improve diagnostics but are not an authentication or authorization mechanism.
 - The browser must use HTTPS, or localhost, for microphone access.

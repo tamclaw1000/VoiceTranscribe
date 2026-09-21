@@ -155,7 +155,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Report progress only when a reliable denominator exists.
 - [x] Preserve engine-reported word or segment audio offsets.
 - [ ] Ensure file processing timestamps are never used as audio positions.
-- [ ] Allow playback before or after export only when the source file is finalized and readable.
+- [x] Allow playback before or after export only when the source file is finalized and readable.
 - [ ] Add retry behavior for recoverable model or worker failures.
 - [ ] Add concurrent-job limits and per-user quotas.
 - [ ] Test files that finish decoding before transcription and AI work finish.
@@ -181,7 +181,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 ## 12. Playback and transcript following
 
 - [x] Add authenticated range-capable audio playback.
-- [ ] Add play/pause, scrubber, elapsed time, and duration.
+- [x] Add play/pause, scrubber, elapsed time, and duration.
 - [ ] Define playback timeline rows shared by the transcript and player.
 - [ ] Use recording wall-clock anchors when the service recorded the audio in real time.
 - [ ] Use engine-reported audio offsets for imported files.

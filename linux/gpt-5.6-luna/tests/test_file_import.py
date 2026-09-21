@@ -72,4 +72,8 @@ def test_upload_endpoint_creates_normalized_file_source(tmp_path):
     assert payload["status"] == "ready"
     assert payload["sampleRate"] == 8000
     assert payload["id"]
+    assert payload["audioUrl"] == f"/api/files/{payload['id']}/audio"
     assert payload["duration"] is not None
+    audio_response = TestClient(app).get(payload["audioUrl"])
+    assert audio_response.status_code == 200
+    assert audio_response.headers["content-type"] in {"audio/wav", "audio/x-wav"}

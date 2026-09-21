@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
 import os
 import struct
 import sqlite3
@@ -84,6 +85,7 @@ class FileSource:
             "progress": self.progress,
             "error": self.error,
             "sessionId": self.session_id,
+            "audioUrl": f"/api/files/{self.id}/audio",
             "transcript": linked_session.finalized_segments if linked_session else [],
         }
 
@@ -837,6 +839,17 @@ async def file_snapshot(file_id: str) -> dict[str, Any]:
     if source is None:
         raise HTTPException(status_code=404, detail="File source not found")
     return source.snapshot()
+
+
+@app.get("/api/files/{file_id}/audio")
+async def file_audio(file_id: str) -> FileResponse:
+    source = file_sources.get(file_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="File source not found")
+    if not source.original_path.exists():
+        raise HTTPException(status_code=404, detail="Original audio artifact is unavailable")
+    media_type = mimetypes.guess_type(source.original_name)[0] or "application/octet-stream"
+    return FileResponse(source.original_path, media_type=media_type, filename=source.original_name)
 
 
 @app.delete("/api/files/{file_id}")

@@ -143,11 +143,13 @@ function renderFileSources(files) {
     card.className = 'file-source';
     const status = file.error || `${file.status} · ${Math.round(file.progress * 100)}%`;
     const transcriptText = (file.transcript || []).map((segment) => `${Number(segment.audioOffset).toFixed(2)}s — ${segment.text}`).join('\\n');
-    card.innerHTML = `<strong class="name" title=""></strong><span class="meta"></span><span class="meta status-text"></span><pre class="file-transcript"></pre><div class="button-row"><button class="secondary" ${file.status !== 'ready' ? 'disabled' : ''}>Transcribe file</button><button class="secondary delete-file">Delete</button></div>`;
+    card.innerHTML = `<strong class="name" title=""></strong><span class="meta"></span><span class="meta status-text"></span><audio class="file-player" controls preload="metadata"></audio><pre class="file-transcript"></pre><div class="button-row"><button class="secondary" ${file.status !== 'ready' ? 'disabled' : ''}>Transcribe file</button><button class="secondary delete-file">Delete</button></div>`;
     card.querySelector('.name').textContent = file.name;
     card.querySelector('.name').title = file.name;
     card.querySelector('.meta').textContent = `${formatDuration(file.duration)} · ${formatBytes(file.sizeBytes)} · ${file.format}`;
     card.querySelector('.status-text').textContent = status;
+    const player = card.querySelector('.file-player');
+    player.src = file.audioUrl;
     card.querySelector('.file-transcript').textContent = transcriptText;
     card.querySelector('.file-transcript').hidden = !transcriptText;
     card.querySelector('button').addEventListener('click', () => transcribeFile(file.id));

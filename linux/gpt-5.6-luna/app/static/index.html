@@ -33,12 +33,6 @@
         <button id="exportButton" class="secondary" disabled>Export Markdown</button>
       </div>
 
-      <h2>File Sources</h2>
-      <label class="file-picker">Import audio
-        <input id="fileInput" type="file" accept="audio/*,.wav,.m4a,.mp3,.flac,.ogg,.webm,.mp4,.avi,.mov">
-      </label>
-      <div id="fileSources" class="file-sources"><p class="muted">No files imported.</p></div>
-
       <h2>Capture</h2>
       <div class="meter"><div id="meterFill"></div></div>
       <div class="metric-grid">
@@ -52,6 +46,19 @@
     </aside>
 
     <section class="panel transcript-panel">
+      <section class="file-library" aria-labelledby="fileSourcesHeading">
+        <div class="panel-heading">
+          <div>
+            <h2 id="fileSourcesHeading">Imported Files</h2>
+            <p class="muted">Review audio, playback, and transcript alignment here.</p>
+          </div>
+          <label class="file-picker">Import audio
+            <input id="fileInput" type="file" accept="audio/*,.wav,.m4a,.mp3,.flac,.ogg,.webm,.mp4,.avi,.mov">
+          </label>
+        </div>
+        <div id="fileSources" class="file-sources"><p class="muted">No files imported.</p></div>
+      </section>
+
       <div class="panel-heading">
         <div>
           <h2>Live Transcript</h2>

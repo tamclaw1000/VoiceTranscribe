@@ -123,13 +123,14 @@ HTTP failures use a stable envelope: `{ "error": { "code": "â€¦", "message": "â€
 16. File transcription is queued before its background task starts; the worker persists `loading`, `transcribing`, and `finalizing` transitions before `completed` or `failed`, while the browser polls those states and renders finalized segments in the file card.
 17. Imported originals are served through `GET /api/files/{file_id}/audio`; the browser uses native audio controls for playback and the original artifact remains separate from normalized ASR audio.
 18. Imported transcript rows use engine-reported audio offsets; playback `timeupdate` highlights the active row, and row clicks seek without starting playback.
+19. Imported-file review is rendered in the main content panel; the sidebar is reserved for session controls, capture state, and capabilities.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `9`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `10`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`http://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.
@@ -147,6 +148,7 @@ The following interfaces should be added without changing the browser session/ev
 - Asynchronous diarization and session-only voice identity.
 - Summary, AI Prompt, and Jev coordinators.
 - Playable finalized container artifacts and playback timeline follow for live PCM recordings; imported-original playback and row following are now available.
+- Browser information architecture still needs dedicated Summary, Recent Recordings, and Settings views.
 - Authentication, HTTPS/reverse proxy, retention, and secret management remain deferred and are required before untrusted/LAN-wide exposure.
 - Optional PipeWire host-capture helper.
 - GPU-specific worker profile.

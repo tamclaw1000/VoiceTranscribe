@@ -2,7 +2,7 @@
 
 This directory contains the Linux implementation from `docs/linux/linux-implementation-plan.md`.
 
-Current release metadata: **version 0.2.0, build 9**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
+Current release metadata: **version 0.2.0, build 10**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
 
 ## Included
 
@@ -27,6 +27,7 @@ Current release metadata: **version 0.2.0, build 9**. The browser header and hea
 - File-transcription status polling and transcript results displayed directly in the file card.
 - Native browser playback controls for each imported original audio file.
 - Timestamped imported transcript rows that highlight during playback and seek without autoplay when clicked.
+- Main-panel imported-file review layout, separate from session controls and capture meters.
 
 The default deployment now uses `faster-whisper` for real local file and rolling-window live transcription. Model weights are downloaded into the persistent model volume on first use. Fake ASR remains available by setting `VT_ASR_ENGINE=fake` for deterministic development tests.
 

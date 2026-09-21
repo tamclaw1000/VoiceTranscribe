@@ -604,3 +604,37 @@ Connect imported transcript rows to the audio player so reviewing a transcriptio
 
 - Live-recording transcript following is still deferred until recordings use a broadly playable finalized container and reliable wall-clock anchors.
 - Active-row auto-scroll, authenticated playback, and full browser E2E coverage remain open.
+
+## Phase 16 — Main-panel file review and visible playback highlight
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Make imported-file review a primary content experience rather than a cramped sidebar utility, and make the active playback row unmistakable.
+
+### Delivered
+
+- Moved Imported Files, playback, and file transcript review into the main content panel.
+- Kept session controls, microphone selection, meters, and capability status in the sidebar.
+- Added immediate and metadata-load active-row evaluation in addition to `timeupdate` handling.
+- Increased active-row visual contrast with a blue background and inset accent.
+- Bumped Linux build metadata from `9` to `10` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- No new checklist item was marked complete; this phase corrects layout and visibility of already-implemented playback behavior.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized tests passed.
+- Served HTML places Imported Files in the main panel.
+- Served JavaScript contains `timeupdate`, `loadedmetadata`, and immediate active-row evaluation.
+- Live service reports build `10` after rebuild and restart.
+
+### Limitations and next step
+
+- The live session transcript remains the primary main-panel view beneath the imported-file review area.
+- Dedicated Summary, Recent Recordings, and Settings views remain future information-architecture work.

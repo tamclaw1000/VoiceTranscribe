@@ -151,13 +151,16 @@ function renderFileTranscript(container, player, segments) {
     container.appendChild(row);
     return row;
   });
-  player.addEventListener('timeupdate', () => {
+  const updateActiveRow = () => {
     const current = player.currentTime;
     rows.forEach((row) => {
       const active = current >= Number(row.dataset.start) && current < Number(row.dataset.end);
       row.classList.toggle('active', active);
     });
-  });
+  };
+  player.addEventListener('timeupdate', updateActiveRow);
+  player.addEventListener('loadedmetadata', updateActiveRow);
+  updateActiveRow();
 }
 
 function renderFileSources(files) {

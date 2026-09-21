@@ -15,6 +15,9 @@ h2 { font-size: 1rem; margin-bottom: 1rem; }
 .panel { border: 1px solid #2a303a; border-radius: 12px; background: #171b22; padding: 1rem; }
 .controls { display: flex; flex-direction: column; gap: .8rem; align-self: start; }
 .controls h2:not(:first-child) { margin-top: 1rem; }
+.file-library { margin-bottom: 1.2rem; }
+.file-library .panel-heading { align-items: end; }
+.file-library .file-picker { min-width: 180px; }
 label { display: grid; gap: .4rem; color: #aeb8c7; font-size: .85rem; }
 input, select, button { font: inherit; border-radius: 7px; border: 1px solid #3a4351; padding: .55rem .65rem; color: inherit; background: #101318; }
 input[type="file"] { width: 100%; padding: .4rem; font-size: .75rem; }
@@ -39,7 +42,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .file-source .file-player { width: 100%; height: 2rem; }
 .file-source .file-transcript { display: grid; gap: .2rem; margin: 0; padding: .4rem; background: #101318; border-radius: 5px; }
 .file-source .file-segment { text-align: left; padding: .25rem .35rem; border: 0; background: transparent; color: #d7e8ff; font-size: .72rem; font-weight: 400; }
-.file-source .file-segment:hover, .file-source .file-segment.active { background: #27344b; color: #fff; }
+.file-source .file-segment:hover, .file-source .file-segment.active { background: #3567b8; color: #fff; box-shadow: inset 3px 0 #7fa8ff; }
 .file-source button { padding: .35rem .5rem; font-size: .75rem; }
 .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 1px solid #2a303a; padding-bottom: .8rem; margin-bottom: .8rem; }
 .badge { background: #27344b; color: #a9c4ff; }

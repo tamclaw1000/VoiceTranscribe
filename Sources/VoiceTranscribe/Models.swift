@@ -77,6 +77,12 @@ struct TranscriptSegment: Identifiable, Equatable {
     var voiceID: String?
     var voiceName: String?
     var voiceConfidence: Float?
+    /// Position in the audio this text was spoken, when the engine reported one: measured from the
+    /// start of the audio the transcriber was fed, which for an imported file is the start of that
+    /// file. This is the audio's own timeline, not the clock, so it maps a transcript onto imported
+    /// audio exactly (see `TranscriptPlaybackTimeline`). Nil for rows nothing measured, such as the
+    /// error line a failed transcription produces.
+    var audioOffset: TimeInterval?
 
     var speakerLabel: String? {
         let name = speakerName?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -112,7 +118,8 @@ struct TranscriptSegment: Identifiable, Equatable {
         speakerName: String? = nil,
         voiceID: String? = nil,
         voiceName: String? = nil,
-        voiceConfidence: Float? = nil
+        voiceConfidence: Float? = nil,
+        audioOffset: TimeInterval? = nil
     ) {
         self.id = id
         self.text = text
@@ -124,6 +131,184 @@ struct TranscriptSegment: Identifiable, Equatable {
         self.voiceID = voiceID
         self.voiceName = voiceName
         self.voiceConfidence = voiceConfidence
+        self.audioOffset = audioOffset
+    }
+}
+
+// MARK: - Playback Follow
+
+/// The audio the transcript pane can play back, together with the wall-clock instant that
+/// corresponds to the start of that file.
+///
+/// There are two ways a transcript row can be placed in the audio, and a target may offer either:
+///
+/// - `anchorDate`, for a recording this app made. `RecordingService` writes every captured buffer
+///   as it arrives from `startDate`, so the file's timeline and the clock advance together and
+///   `timestamp - anchorDate` is a row's position in the file.
+/// - Each row's own `audioOffset`, reported by the engine, for an imported file. There is no
+///   anchor to be had — such a file is fed to the recognizer far faster than real time, so its
+///   rows' `timestamp`s are processing time rather than audio time (`REQUIREMENTS.md` §7) — but
+///   the engine's audio time ranges are the file's real timeline, so the transcript still maps
+///   onto it exactly.
+///
+/// `anchorDate` wins when both are available, because it is the one derived from the file on disk.
+/// A target may end up followable through neither route if its rows carry neither.
+struct TranscriptAudioTarget: Equatable {
+    let url: URL
+    let label: String
+    let duration: TimeInterval?
+    /// Wall-clock time equal to audio offset zero, or `nil` when the transcript's timestamps
+    /// are not tied to the audio's timeline (an imported file, whose rows carry `audioOffset`
+    /// instead).
+    let anchorDate: Date?
+}
+
+/// What the playback bar needs to render: enough to draw the control and the playhead without
+/// reaching back into the services.
+struct TranscriptPlaybackState: Equatable {
+    let label: String?
+    let duration: TimeInterval
+    let currentTime: TimeInterval
+    let isPlaying: Bool
+    /// False for audio whose timeline the transcript cannot be mapped onto (imported files).
+    let canFollow: Bool
+    /// The transcript row the playhead is currently inside, when following is possible.
+    let activeRowID: String?
+    let error: String?
+
+    var isAvailable: Bool {
+        label != nil
+    }
+
+    /// Whether the transcript's times should read as positions in the audio rather than as clock
+    /// times. Playback owns the timeline while it is engaged — playing, or parked somewhere after
+    /// a scrub — so the times match the playhead the pane is following. Before that, and for audio
+    /// the transcript cannot be mapped onto, the session's clock time is the meaningful one.
+    var isShowingAudioTime: Bool {
+        canFollow && (isPlaying || currentTime > 0)
+    }
+
+    static let unavailable = TranscriptPlaybackState(
+        label: nil,
+        duration: 0,
+        currentTime: 0,
+        isPlaying: false,
+        canFollow: false,
+        activeRowID: nil,
+        error: nil
+    )
+}
+
+/// Maps a position in the associated audio to the transcript item spoken then, and back.
+///
+/// Rows are exactly the items the transcript pane shows — finalized segments and pause
+/// markers — so the row identifiers this produces are the ones the pane scrolls to. Each row's
+/// window runs from its own offset to the next row's, which means a playhead landing in a gap
+/// (silence, or audio captured while transcription was paused) keeps the earlier row active
+/// instead of flickering between neighbours.
+///
+/// A row's offset comes from the wall-clock anchor when there is one (a recording, where the file
+/// was written in real time), and otherwise from the engine's own `audioOffset` (an imported file,
+/// where that is the position in the file). Rows with neither cannot be placed and are left out,
+/// so a jump can never point at a made-up position.
+struct TranscriptPlaybackTimeline {
+    struct Row: Equatable {
+        let id: String
+        /// Position in the associated audio where this row starts.
+        let offset: TimeInterval
+        /// Position where the next row starts, when there is one.
+        let endOffset: TimeInterval?
+    }
+
+    let rows: [Row]
+    let audioDuration: TimeInterval?
+
+    /// - Parameters:
+    ///   - segments: finalized transcript rows, in the order the coordinator holds them.
+    ///   - pauseSpans: spans where transcription was paused; the audio still contains them.
+    ///   - anchorDate: wall-clock time equal to audio offset zero.
+    init?(
+        segments: [TranscriptSegment],
+        pauseSpans: [TranscriptionPauseSpan],
+        anchorDate: Date?,
+        audioDuration: TimeInterval? = nil
+    ) {
+        var entries: [(id: String, offset: TimeInterval)] = segments.compactMap { segment in
+            Self.offset(
+                timestamp: segment.timestamp,
+                audioOffset: segment.audioOffset,
+                anchorDate: anchorDate
+            ).map { (Self.rowID(forSegmentID: segment.id), $0) }
+        }
+        // A pause span carries only a wall-clock instant, so it can be placed when there is an
+        // anchor and left out when there is not (an imported file, where pausing is not what
+        // produced the audio anyway).
+        if let anchorDate {
+            entries.append(contentsOf: pauseSpans.map {
+                (Self.rowID(forPauseSpanID: $0.id), $0.startedAt.timeIntervalSince(anchorDate))
+            })
+        }
+
+        // Keep only rows this audio can contain: a segment stamped before the anchor (a
+        // transcript that started before the recording did) has no position in this file.
+        let ordered = entries
+            .filter { $0.offset >= 0 }
+            .sorted { $0.offset < $1.offset }
+        guard !ordered.isEmpty else {
+            return nil
+        }
+
+        self.rows = ordered.enumerated().map { index, entry in
+            Row(
+                id: entry.id,
+                offset: entry.offset,
+                endOffset: index + 1 < ordered.count ? ordered[index + 1].offset : nil
+            )
+        }
+        self.audioDuration = audioDuration
+    }
+
+    /// Where a row sits in this audio, or nil when nothing places it there.
+    ///
+    /// The anchor is checked first: it is derived from the file itself, whereas an `audioOffset`
+    /// measures from the start of what the transcriber was fed, which for a live session may have
+    /// begun before the recording did.
+    private static func offset(
+        timestamp: Date,
+        audioOffset: TimeInterval?,
+        anchorDate: Date?
+    ) -> TimeInterval? {
+        if let anchorDate {
+            return timestamp.timeIntervalSince(anchorDate)
+        }
+        return audioOffset
+    }
+
+    /// The row covering `offset`, or the last row before it when `offset` falls in a gap.
+    func rowID(atOffset offset: TimeInterval) -> String? {
+        guard offset >= 0 else {
+            return nil
+        }
+        var match: String?
+        for row in rows where row.offset <= offset {
+            match = row.id
+        }
+        return match
+    }
+
+    func offset(forRowID id: String) -> TimeInterval? {
+        rows.first { $0.id == id }?.offset
+    }
+
+    /// Row identifiers shared with the transcript pane, so a row the timeline names is a row
+    /// the pane can scroll to. Built here rather than at either call site so the two cannot
+    /// drift apart.
+    static func rowID(forSegmentID id: UUID) -> String {
+        "segment-\(id.uuidString)"
+    }
+
+    static func rowID(forPauseSpanID id: UUID) -> String {
+        "pause-\(id.uuidString)"
     }
 }
 

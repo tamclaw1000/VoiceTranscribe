@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Combine
+import Speech
 import Testing
 @testable import VoiceTranscribe
 
@@ -999,7 +1000,16 @@ import Testing
         batchPrompts: true
     )
 
-    try? await Task.sleep(nanoseconds: 80_000_000)
+    // Wait for the work rather than for the clock: the coordinator finishes the batch on its
+    // own task, and the suite runs tests in parallel, so a fixed sleep here only measures how
+    // much spare capacity the machine had. A fixed 80ms budget made this the one test in the
+    // suite that failed intermittently under load.
+    await waitUntil { coordinator.items.allSatisfy { item in
+        if case .completed = item.state {
+            return true
+        }
+        return false
+    } }
 
     let snapshot = await probe.snapshot()
     #expect(snapshot.singleCalls == 0)
@@ -1012,6 +1022,26 @@ import Testing
         }
         return false
     })
+}
+
+/// Polls `condition` until it holds or `timeout` elapses.
+///
+/// Tests in this file that assert on work a background task performs use fixed `Task.sleep`
+/// budgets, which pass or fail according to how much spare capacity the machine had while the
+/// suite ran its tests in parallel. Waiting for the condition is what those assertions actually
+/// mean; this is the reliable form of the same wait.
+@MainActor
+private func waitUntil(
+    timeout: Duration = .seconds(2),
+    _ condition: () -> Bool
+) async {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if condition() {
+            return
+        }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
 }
 
 @MainActor
@@ -1902,6 +1932,346 @@ private func voiceEntry(
     let unmerged = export(merging: false)
     #expect(unmerged.contains("| 0:00 | 0:03 | Dana | 0.80 |"))
     #expect(unmerged.contains("| 0:03 | 0:06 | Dana | 0.60 |"))
+}
+
+// MARK: - Playback follow
+
+@Test func playbackTimelineMapsAudioPositionToTheRowSpokenThen() {
+    let anchor = Date(timeIntervalSince1970: 1_779_971_597.0)
+    let first = TranscriptSegment(
+        text: "one",
+        timestamp: anchor.addingTimeInterval(0.5),
+        isFinal: true
+    )
+    let second = TranscriptSegment(
+        text: "two",
+        timestamp: anchor.addingTimeInterval(4.0),
+        isFinal: true
+    )
+
+    let timeline = TranscriptPlaybackTimeline(
+        segments: [first, second],
+        pauseSpans: [],
+        anchorDate: anchor
+    )
+
+    let unwrapped = try! #require(timeline)
+    #expect(unwrapped.rows.map(\.offset) == [0.5, 4.0])
+    // Before the first row there is nothing to show.
+    #expect(unwrapped.rowID(atOffset: 0) == nil)
+    #expect(unwrapped.rowID(atOffset: 0.5) == TranscriptPlaybackTimeline.rowID(forSegmentID: first.id))
+    #expect(unwrapped.rowID(atOffset: 3.9) == TranscriptPlaybackTimeline.rowID(forSegmentID: first.id))
+    #expect(unwrapped.rowID(atOffset: 4.0) == TranscriptPlaybackTimeline.rowID(forSegmentID: second.id))
+    // Past the last row the last row stays active, so the highlight never disappears.
+    #expect(unwrapped.rowID(atOffset: 900) == TranscriptPlaybackTimeline.rowID(forSegmentID: second.id))
+    // Round-trips, which is what click-to-seek relies on.
+    #expect(unwrapped.offset(forRowID: TranscriptPlaybackTimeline.rowID(forSegmentID: second.id)) == 4.0)
+}
+
+@Test func playbackTimelineOrdersPauseMarkersAmongSegments() {
+    let anchor = Date(timeIntervalSince1970: 1_779_971_597.0)
+    let before = TranscriptSegment(text: "before", timestamp: anchor, isFinal: true)
+    let after = TranscriptSegment(text: "after", timestamp: anchor.addingTimeInterval(30), isFinal: true)
+    let span = TranscriptionPauseSpan(
+        startedAt: anchor.addingTimeInterval(10),
+        endedAt: anchor.addingTimeInterval(25)
+    )
+
+    let timeline = try! #require(TranscriptPlaybackTimeline(
+        segments: [before, after],
+        pauseSpans: [span],
+        anchorDate: anchor
+    ))
+
+    #expect(timeline.rows.map(\.offset) == [0, 10, 30])
+    #expect(timeline.rowID(atOffset: 12) == TranscriptPlaybackTimeline.rowID(forPauseSpanID: span.id))
+    #expect(timeline.rowID(atOffset: 29) == TranscriptPlaybackTimeline.rowID(forPauseSpanID: span.id))
+    #expect(timeline.rows[0].endOffset == 10)
+    #expect(timeline.rows[2].endOffset == nil)
+}
+
+@Test func playbackTimelineDropsRowsThisAudioCannotContain() {
+    let anchor = Date(timeIntervalSince1970: 1_779_971_597.0)
+    // A transcript that began before the recording did has rows with no position in the file.
+    let early = TranscriptSegment(text: "early", timestamp: anchor.addingTimeInterval(-5), isFinal: true)
+    let kept = TranscriptSegment(text: "kept", timestamp: anchor.addingTimeInterval(2), isFinal: true)
+
+    let timeline = try! #require(TranscriptPlaybackTimeline(
+        segments: [early, kept],
+        pauseSpans: [],
+        anchorDate: anchor
+    ))
+
+    #expect(timeline.rows.count == 1)
+    #expect(timeline.rows[0].id == TranscriptPlaybackTimeline.rowID(forSegmentID: kept.id))
+}
+
+@Test func playbackTimelineIsNilWhenNoRowFitsTheAudio() {
+    let anchor = Date(timeIntervalSince1970: 1_779_971_597.0)
+    let early = TranscriptSegment(text: "early", timestamp: anchor.addingTimeInterval(-1), isFinal: true)
+
+    #expect(TranscriptPlaybackTimeline(segments: [early], pauseSpans: [], anchorDate: anchor) == nil)
+    #expect(TranscriptPlaybackTimeline(segments: [], pauseSpans: [], anchorDate: anchor) == nil)
+}
+
+@Test func playbackTimelinePlacesImportedRowsByTheirAudioOffsets() {
+    // An imported file has no anchor, and its rows' timestamps are the moments the recognizer
+    // returned them, which say nothing about the audio. The engine's audio offsets do, so the
+    // transcript maps onto the file and can follow playback.
+    let first = TranscriptSegment(text: "one", isFinal: true, audioOffset: 3.0)
+    let second = TranscriptSegment(text: "two", isFinal: true, audioOffset: 7.5)
+
+    let timeline = try! #require(TranscriptPlaybackTimeline(
+        segments: [first, second],
+        pauseSpans: [],
+        anchorDate: nil
+    ))
+
+    #expect(timeline.rows.map(\.offset) == [3.0, 7.5])
+    #expect(timeline.rowID(atOffset: 3) == TranscriptPlaybackTimeline.rowID(forSegmentID: first.id))
+    #expect(timeline.rowID(atOffset: 4) == TranscriptPlaybackTimeline.rowID(forSegmentID: first.id))
+    #expect(timeline.rowID(atOffset: 9) == TranscriptPlaybackTimeline.rowID(forSegmentID: second.id))
+    // Round-trips, which is what click-to-seek on an imported file relies on.
+    #expect(timeline.offset(forRowID: TranscriptPlaybackTimeline.rowID(forSegmentID: second.id)) == 7.5)
+}
+
+@Test func playbackTimelinePrefersTheAnchorOverAudioOffsets() {
+    // In a live session the analyzer's clock can start before the recording file does, so an
+    // offset measured from it disagrees with the file. The anchor comes from the file itself.
+    let anchor = Date(timeIntervalSince1970: 1_779_971_597.0)
+    let segment = TranscriptSegment(
+        text: "one",
+        timestamp: anchor.addingTimeInterval(12),
+        isFinal: true,
+        audioOffset: 4.0
+    )
+
+    let timeline = try! #require(TranscriptPlaybackTimeline(
+        segments: [segment],
+        pauseSpans: [],
+        anchorDate: anchor
+    ))
+
+    #expect(timeline.rows.map(\.offset) == [12.0])
+}
+
+@Test func playbackTimelineLeavesOutRowsNothingCanPlace() {
+    // A row the engine gave no time range for — an error line, say — is dropped rather than
+    // guessed at, and the rows that can be placed still map.
+    let placed = TranscriptSegment(text: "placed", isFinal: true, audioOffset: 2.0)
+    let unplaced = TranscriptSegment(text: "unplaced", isFinal: true)
+
+    let timeline = try! #require(TranscriptPlaybackTimeline(
+        segments: [placed, unplaced],
+        pauseSpans: [],
+        anchorDate: nil
+    ))
+
+    #expect(timeline.rows.count == 1)
+    #expect(timeline.rows[0].offset == 2.0)
+    // With nothing placeable at all there is no timeline, so the pane says so instead of
+    // offering a follow that would point nowhere.
+    #expect(TranscriptPlaybackTimeline(segments: [unplaced], pauseSpans: [], anchorDate: nil) == nil)
+}
+
+/// Requires a real file *and* a speech-authorized process:
+/// `VOICETRANSCRIBE_SAMPLE=/path/to/audio.wav swift test --filter engineReportsAudioOffsets`.
+///
+/// Following an imported file rests entirely on the engine reporting audio time ranges, and that
+/// is an assumption about the Speech framework rather than about this code, so it is pinned
+/// against a real file instead of a reading of the API.
+///
+/// Skipped both when the variable is unset and when the process is not authorized for speech
+/// recognition — as `swift test` is not, having no bundle to carry the usage description. The
+/// offset behavior was confirmed on `samples/star-trek-first-120s.wav` from an authorized host:
+/// every result carried a time range, the first line at 3.00s and the last at 117.84s.
+@Test func engineReportsAudioOffsetsForImportedAudio() async throws {
+    guard let path = ProcessInfo.processInfo.environment["VOICETRANSCRIBE_SAMPLE"],
+          SFSpeechRecognizer.authorizationStatus() == .authorized else {
+        return
+    }
+    let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
+    let duration = Double(file.length) / file.processingFormat.sampleRate
+    let sink = SegmentSink()
+
+    let service = AppleSpeechTranscriptionService(locale: Locale(identifier: "en-US"))
+    try await service.start { segment in sink.append(segment) }
+
+    let chunk: AVAudioFrameCount = 4096
+    while true {
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: chunk) else {
+            break
+        }
+        try file.read(into: buffer)
+        if buffer.frameLength == 0 {
+            break
+        }
+        service.append(buffer)
+    }
+
+    // Let the recognizer drain the audio it was handed.
+    try await Task.sleep(nanoseconds: 6_000_000_000)
+    service.stop()
+
+    let offsets = sink.snapshot().filter(\.isFinal).compactMap(\.audioOffset)
+    #expect(!offsets.isEmpty, "the engine reported no audio offsets, so an imported file could not be followed")
+    #expect(offsets.allSatisfy { $0 >= 0 && $0 <= duration + 1 })
+    // Rows are ordered in the audio, so the offsets rise as the file plays.
+    #expect(offsets == offsets.sorted())
+}
+
+/// Collects segments from the transcriber's callback, which arrives off the main thread.
+private final class SegmentSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var segments: [TranscriptSegment] = []
+
+    func append(_ segment: TranscriptSegment) {
+        lock.lock()
+        segments.append(segment)
+        lock.unlock()
+    }
+
+    func snapshot() -> [TranscriptSegment] {
+        lock.lock()
+        defer { lock.unlock() }
+        return segments
+    }
+}
+
+@Test func playbackTimelineRowIDsMatchTheTranscriptPane() {
+    let segmentID = UUID()
+    let pauseID = UUID()
+
+    // The pane builds its `ForEach` ids through these helpers, so a row the timeline names is
+    // a row the pane can actually scroll to.
+    #expect(TranscriptPlaybackTimeline.rowID(forSegmentID: segmentID) == "segment-\(segmentID.uuidString)")
+    #expect(TranscriptPlaybackTimeline.rowID(forPauseSpanID: pauseID) == "pause-\(pauseID.uuidString)")
+    #expect(TranscriptPlaybackState.unavailable.isAvailable == false)
+}
+
+@MainActor
+@Test func audioPlaybackLoadsFinalizedAudioAndSeeks() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("vt-playback-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let url = try makeSilentAudioFile(
+        named: "playback.wav",
+        seconds: 0.5,
+        in: directory
+    )
+
+    let service = AudioPlaybackService()
+    #expect(service.load(url: url))
+    #expect(service.hasAudio)
+    #expect(abs(service.duration - 0.5) < 0.05)
+    #expect(service.lastError == nil)
+
+    service.seek(to: 0.25)
+    #expect(abs(service.currentTime - 0.25) < 0.01)
+
+    // Seeking past the end clamps rather than throwing the playhead out of the file.
+    service.seek(to: 99)
+    #expect(service.currentTime <= service.duration + 0.01)
+
+    service.unload()
+    #expect(service.hasAudio == false)
+    #expect(service.url == nil)
+}
+
+@MainActor
+@Test func audioPlaybackRejectsAnUnfinalizedM4AHeader() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("vt-playback-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    // The shape of an `.m4a` that was opened for writing but never finalized: an `ftyp` box
+    // and nothing else. No `moov` means no decoder can read it, which is why a recording that
+    // is still in progress cannot be played back (and why the pane only offers finished ones).
+    var header: [UInt8] = [0x00, 0x00, 0x00, 0x1C]
+    header.append(contentsOf: Array("ftypM4A ".utf8))
+    header.append(contentsOf: [UInt8](repeating: 0, count: 28 - header.count))
+    #expect(header.count == 28)
+
+    let url = directory.appendingPathComponent("unfinalized.m4a")
+    try Data(header).write(to: url)
+
+    let service = AudioPlaybackService()
+    #expect(service.load(url: url) == false)
+    #expect(service.hasAudio == false)
+    #expect(service.lastError != nil)
+}
+
+@Test func playbackStateShowsAudioTimeOnlyWhilePlaybackIsEngaged() {
+    func state(
+        label: String? = "recording.m4a",
+        currentTime: TimeInterval = 0,
+        isPlaying: Bool = false,
+        canFollow: Bool = true
+    ) -> TranscriptPlaybackState {
+        TranscriptPlaybackState(
+            label: label,
+            duration: 60,
+            currentTime: currentTime,
+            isPlaying: isPlaying,
+            canFollow: canFollow,
+            activeRowID: nil,
+            error: nil
+        )
+    }
+
+    // Nothing playable at all: the timestamp column stays clock time.
+    #expect(state(label: nil).isShowingAudioTime == false)
+    // Imported audio has no mapping onto the transcript, so it also keeps clock time.
+    #expect(state(canFollow: false).isShowingAudioTime == false)
+    #expect(state(isPlaying: true, canFollow: false).isShowingAudioTime == false)
+    // Playback loaded but untouched: still clock time, so a recording that is merely finished does
+    // not silently relabel every row in the transcript.
+    #expect(state().isShowingAudioTime == false)
+    // Playing, or parked somewhere after a scrub, the column reads as positions in the audio.
+    #expect(state(isPlaying: true).isShowingAudioTime)
+    #expect(state(currentTime: 5).isShowingAudioTime)
+}
+
+@MainActor
+@Test func audioPlaybackKeepsASeekMadeBeforeTheFileWasOpened() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("vt-playback-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let url = try makeSilentAudioFile(named: "pending.wav", seconds: 0.5, in: directory)
+
+    let service = AudioPlaybackService()
+    // The file is opened lazily, so a scrubber drag can arrive before it is open. Dropping that
+    // position is what made scrubbing look inert until playback had been started once, and it
+    // also left the transcript following a playhead that had not actually moved.
+    service.seek(to: 0.3)
+    #expect(service.hasAudio == false)
+
+    #expect(service.load(url: url))
+    #expect(abs(service.currentTime - 0.3) < 0.01)
+
+    // Once the position has been applied to a real player, seeking is ordinary, and stopping
+    // rewinds to the start rather than holding the old playhead.
+    service.seek(to: 0.4)
+    #expect(abs(service.currentTime - 0.4) < 0.01)
+    service.stop()
+    #expect(service.currentTime == 0)
+}
+
+/// Writes a short silent WAV so playback can be exercised without any audio hardware input.
+private func makeSilentAudioFile(named name: String, seconds: Double, in directory: URL) throws -> URL {
+    let url = directory.appendingPathComponent(name)
+    let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1))
+    let file = try AVAudioFile(forWriting: url, settings: format.settings)
+    let frames = AVAudioFrameCount(16_000 * seconds)
+    let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames))
+    buffer.frameLength = frames
+    try file.write(from: buffer)
+    return url
 }
 
 private struct BatchProbeJevService: JevService {

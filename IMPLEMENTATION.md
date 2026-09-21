@@ -2159,3 +2159,85 @@ Small additions folded into the same v2.4.41 branch/release rather than a separa
 - [x] Bump `CFBundleShortVersionString` to `2.4.45`.
 - [x] Bump `CFBundleVersion` to `88`.
 - [ ] Not visually confirmed: the existing-name menu, the lock glyph with its disabled field, and the merge checkbox have not been seen in a running app.
+
+## 110. v2.4.46. Audio Playback And Transcript Follow
+
+### 110a. Playing The Transcript's Own Audio
+
+- [x] Added `AudioPlaybackService.swift` (new file), an `AVAudioPlayer`-backed service with `load(url:)`, `play()`, `pause()`, `toggle()`, `stop()`, `seek(to:)`, `unload()`, publishing `url`, `duration`, `currentTime`, `isPlaying`, and `lastError`.
+- [x] The playhead is republished every 100ms while playing (timer added in `.common` run-loop mode, so it keeps advancing while the user drags the scrubber) and `syncPosition()` only publishes when the position actually moved.
+- [x] The file is opened lazily on first use rather than when the target appears, so a finished recording costs nothing until it is listened to.
+- [x] Playback finishes through `AVAudioPlayerDelegate` (`audioPlayerDidFinishPlaying` / `audioPlayerDecodeErrorDidOccur`) hopping back to the main actor; pressing play at the very end rewinds first, so a finished file does not look like a dead button.
+- [x] Decode failures are reported in the user's terms ("This audio format cannot be played back here.") instead of AVFoundation's "The operation couldn't be completed", since `AVAudioPlayer` also refuses formats it cannot decode (FLAC, for one).
+- [x] Only finalized files are playable: an in-progress `.m4a` has no `moov` atom yet, so `AVAudioPlayer` refuses it — the same reason `afinfo` rejects a truncated `.m4a`. Playback is therefore offered for completed recordings and imported files, never the file currently being written.
+
+### 110b. The Transcript Follows The Playhead
+
+- [x] Added `TranscriptAudioTarget` (the playable audio plus the wall-clock instant equal to audio offset zero) and `TranscriptPlaybackTimeline` to `Models.swift`.
+- [x] `TranscriptPlaybackTimeline` is pure and value-typed: it builds one row per transcript item (finalized segments and pause markers), each spanning from its own offset to the next row's, and answers `rowID(atOffset:)` (the row spoken at that position, holding the earlier row when the playhead is in a gap) and `offset(forRowID:)` (for click-to-seek). The row ids come from the same helpers the pane builds its `ForEach` ids from, so a row the timeline names is a row the pane can scroll to, and the two schemes cannot drift.
+- [x] The anchor is `RecordingSession.startDate` for a recording this app made: `RecordingService` opens the file at that instant and writes every captured buffer in real time, so a row's `timestamp - startDate` is its position in the file. Rows stamped before the anchor (a transcript that started before the recording did) are dropped, since the audio cannot contain them.
+- [x] `AppModel` owns the target (`transcriptAudioTarget`), set when a recording is finalized and when an imported file's transcription starts, and cleared when a fresh live session starts. Changing the target unloads playback, because the previous playhead means nothing against a different file.
+- [x] Added `AppModel.transcriptPlaybackTimeline`, `playbackFollowRowID`, `transcriptPlaybackState`, `toggleTranscriptPlayback()`, `seekTranscriptPlayback(toOffset:)`, `seekTranscriptPlayback(toRowID:)`, and `stopTranscriptPlayback()`.
+- [x] While the playhead is inside audio the transcript can be mapped onto, the pane scrolls to that row (centered) and highlights its timestamp; clicking a timestamp jumps the audio there and plays from it, so a click means "read this passage" rather than a silent reposition.
+- [x] Bottom-scrolling is suppressed while following, so fresh live text cannot drag the pane away from the playhead it is supposed to be showing.
+
+### 110c. Where Follow Is Deliberately Off — SUPERSEDED by 110g
+
+- [x] ~~Imported files play but do not follow.~~ An imported file is fed to the recognizer as fast as it can be read, so each row's `timestamp` is the moment Apple Speech returned it — processing time, not its position in the file (`REQUIREMENTS.md` §7). The pane says so rather than following a fabricated position, and timestamps are inert there so a click cannot point at the wrong place.
+- [x] **Superseded in 110g.** The reasoning above is about the row's `timestamp`, and it is correct — but it was mistaken for a statement about the whole row. The engine reports each result's position on the audio's own timeline, so imported files can be followed exactly after all. The guess that this would need "the analyzer's own result time ranges" was right; treating it as a TODO instead of testing it is what left the feature broken for the only case it was being tried on.
+
+### 110d. Tests, Fixes, And Version
+
+- [x] Added tests: the timeline maps a position to the row spoken then (including before the first row and past the last), pause markers sort between segments with correct windows, rows the audio cannot contain are dropped, the timeline is nil when no row fits the audio, and the row ids match the pane's scheme.
+- [x] Added `audioPlaybackLoadsFinalizedAudioAndSeeks` (loads a generated WAV, checks duration, seeks, checks the end clamp, unloads) and `audioPlaybackRejectsAnUnfinalizedM4AHeader` (writes the 28-byte `ftyp`-only stub and asserts it cannot be loaded), pinning the "only finalized files" rule.
+- [x] Fixed a pre-existing flaky test this branch's added parallel load exposed: `aiPromptCoordinatorBatchesPromptQuestionsWhenEnabled` slept a fixed 80ms and asserted the work was done, so it failed roughly one run in four. It now waits for the condition (`waitUntil`, 2s budget).
+- [x] Verify `swift test` passes (85 tests; run repeatedly to confirm the flake is gone).
+- [x] Verify `./scripts/build.sh` succeeds end to end.
+- [x] Bump `CFBundleShortVersionString` to `2.4.46`.
+- [x] Bump `CFBundleVersion` to `89`.
+- [x] Verified outside the suite: a real 20s WAV (`samples/star-trek-first-20s.wav`) loads at the correct duration, seeks to 12.5s, and `play()` starts the playhead advancing in real time.
+- [ ] Not visually confirmed: the playback bar, the playhead highlight, the centered follow scroll, and click-a-timestamp-to-play have not been seen in a running app.
+
+### 110e. Scrubbing, And Timestamps As Buttons
+
+- [x] **Dragging the scrubber did nothing until playback had been started once.** The file is opened lazily, and `AudioPlaybackService.seek` returned early while no file was open — but only the play and jump-to-row paths ever opened it, so a scrub before the first press of play moved nothing and the transcript stayed put. Opened files are now handled by one `AppModel.ensureTranscriptPlaybackLoaded()` used by playing, scrubbing, and jump-to-row, so no entry point can forget it again.
+- [x] Scrubbing only repositions and never starts playback, so dragging through a recording can be used to review the transcript silently. The transcript follows the new position because the follow reads the playhead, and a scrub past the last transcribed row holds that last row rather than inventing a location — "update the transcript to that location if it has been processed".
+- [x] Added `AudioPlaybackService`'s pending seek: a position requested before any file is open is remembered and applied when one opens, so the order of "open" and "position this playhead" can no longer drop the position. `load` rewinds through a private `rewind()` rather than `stop()`, because `stop()` clears the queued position on purpose (an explicit stop means "back to the start").
+- [x] Timestamps are now visibly buttons rather than plain-looking text that accepted clicks: `TranscriptTimestampButton` carries a small play glyph, a tinted rounded background, a border, and press feedback, with the playhead's row taking the accent tint — so the jump control and the follow highlight are the same piece of UI. The style lives in `Views.swift` next to `SpeakerLabelButtonStyle`.
+- [x] Added test `audioPlaybackKeepsASeekMadeBeforeTheFileWasOpened`, which pins the pending-seek guarantee (and would have caught the ordering bug where `load` cleared it by calling `stop`).
+- [x] Verify `swift test` passes (86 tests; run repeatedly) and `./scripts/build.sh` succeeds. Version stays `2.4.46` / `89` — this is the same unreleased branch, not a new release.
+
+### 110f. The Timestamp Column Reads As Positions During Playback
+
+- [x] The transcript's time column showed the session clock time (when the line was transcribed) even while the audio played, so the times on screen did not correspond to the scrubber, the playhead, or the highlighted row. While playback is engaged, every row now shows its **position in the audio** instead.
+- [x] Added `TranscriptPlaybackState.isShowingAudioTime` (`canFollow && (isPlaying || currentTime > 0)`) as the single rule: playback owns the column once it is playing or parked somewhere after a scrub, and the column reverts to clock time when playback is at the start or the audio cannot be mapped onto the transcript (imported files), so a merely-finished recording does not silently relabel the whole transcript.
+- [x] The panel takes `playbackTimeline` and resolves each row's offset through the same `TranscriptPlaybackTimeline` that drives the highlight, so the time shown and the row highlighted cannot disagree. Rows with no position in the audio (an interim line) fall back to clock time rather than showing a made-up point.
+- [x] The column heading switches with it — **Playback** instead of **Timestamp** — with a tooltip naming what the column is showing, since two different scales in one column would otherwise read as a bug.
+- [x] Pause markers report their own time in whichever clock the column is using ("Paused 0:35 at 3:12" during playback), so "at" never disagrees with the timestamps beside it.
+- [x] Added test `playbackStateShowsAudioTimeOnlyWhilePlaybackIsEngaged`, pinning all five cases: nothing playable, imported audio (including while playing), loaded-but-untouched, playing, and parked after a scrub.
+- [x] Verify `swift test` passes (87 tests; run repeatedly) and `./scripts/build.sh` succeeds.
+
+### 110g. Imported Audio Follows After All — The Feature Never Worked On It
+
+The report was blunt: *none* of the three playback behaviors worked. Scrubbing moved nothing in the transcript, clicking a line did not move playback, and the times stayed on the clock. All three at once pointed at one cause rather than three bugs, and the app's own trace named it:
+
+```
+{"placement":"anchor","file":"..."}   // 110g onward
+{"canFollow":"false","event":"playback.target","file":"star-trek-first-120s"}
+```
+
+The session's single `playback.target` event was for an **imported file**, and its target was marked non-followable. Every one of the three symptoms follows from that one decision: with no timeline, there is no row to scroll to, no row to highlight, no timestamp worth making clickable, and nothing to relabel the time column with. `transcriptAudioTarget.anchorDate` was `nil` for imported audio by design (`110c`), so `transcriptPlaybackTimeline` returned `nil` and every downstream feature switched itself off correctly and silently.
+
+- [x] **Root cause: the feature was only ever wired to one of its two inputs.** Follow was anchored to a wall-clock instant, which exists only when `RecordingService` wrote the file in real time. An imported file has no such instant — but that is a fact about the row's *timestamp*, and it was wrongly generalized into a fact about the row. Each row also carries the engine's own placement of the text on the audio's timeline, which needs no anchor at all.
+- [x] **Verified the engine's behavior before building on it**, rather than trusting a reading of the API (the same mistake, in the same shape, that produced the `@AppStorage` retraction in `fix/settings-publishing`). A standalone probe ran the real recognizer over `samples/star-trek-first-120s.wav` with `attributeOptions: [.audioTimeRange]`: **408/408 results carried a time range**, the first line ("Captain's Log, Stardate 42402.7.") at **3.00s** and the last ("I'm the owner and operator of this craft.") at **117.84s** in a 120s file. The analyzer is fed with a cumulative `bufferStartTime` from zero, so that axis is the file's own timeline.
+- [x] `AppleSpeechTranscriptionService` now requests `.audioTimeRange` and stamps each `TranscriptSegment` with `audioOffset`, the earliest position its text covers. Earliest, because a row's window runs on to the next row's start, which is how the rows divide the audio between them.
+- [x] `TranscriptPlaybackTimeline` places a row by the anchor when the audio has one (derived from the file itself, and so authoritative for a recording) and otherwise by the row's `audioOffset`. `anchorDate` became optional and `TranscriptAudioTarget.canFollowTranscript` was removed — it was a property of the file, and followability is a property of whether the transcript's rows can be placed on that file.
+- [x] `TranscriptPlaybackState.canFollow` is now derived from the timeline's existence, so the switch that turns following, highlighting, jumping, and the time column on and off is one expression in one place instead of a target flag consulted in four.
+- [x] Rows nothing can place are left out rather than guessed at — an error line, or an interim line with no offset yet — so a jump still cannot point at a made-up position. Pause markers carry only a wall-clock instant, so they are placed when there is an anchor and omitted otherwise.
+- [x] The pane's \"cannot follow\" note was reworded: it is no longer about imported files (which follow now) but about the real remaining case, a transcript with no line that can be placed in the audio.
+- [x] Added tests: imported rows placed by their audio offsets (including click-to-seek round-tripping through them), the anchor preferred over an offset when both exist, unplaceable rows dropped, and no timeline at all when nothing can be placed.
+- [x] Added `engineReportsAudioOffsetsForImportedAudio`, gated on `VOICETRANSCRIBE_SAMPLE` **and** speech authorization, because following an imported file rests on the Speech framework rather than on this code and that should be pinned against a real file. It skips under `swift test`, which has no bundle to carry the usage description; the probe above is the evidence for now.
+- [x] Verify `swift test` passes (91 tests, 87 → 91) and `./scripts/build.sh` succeeds, packaged `2.4.46` / `89` — the same unreleased branch, so no version bump.
+- [ ] Not visually confirmed: the bar, the highlight, the centered follow scroll, and click-to-play. The math they rest on is tested; the rendering is not, and this is the third release in this branch to ship that way.
+
+**The lesson worth keeping.** Three symptoms read as three bugs and were one; the trace log answered it in a single line, which is cheaper than reading code. And the specific error was scoping a limitation to the whole row when it only held for one of the row's two clocks — with a TODO that said exactly the right fix ("the analyzer's own result time ranges") sitting unread next to a feature that did not work.

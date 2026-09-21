@@ -41,7 +41,10 @@ final class AppleSpeechTranscriptionService: TranscriptionService {
             locale: locale,
             transcriptionOptions: [],
             reportingOptions: [.volatileResults],
-            attributeOptions: []
+            // Ask for the audio time of each result. The analyzer's timeline is the audio we fed
+            // it, starting at zero, so for an imported file these ranges are positions in that
+            // file — what lets its transcript follow playback instead of being stuck on clock time.
+            attributeOptions: [.audioTimeRange]
         )
         self.transcriber = transcriber
         try await ensureModelInstalled(for: locale, transcriber: transcriber)
@@ -67,7 +70,8 @@ final class AppleSpeechTranscriptionService: TranscriptionService {
                     onSegment(TranscriptSegment(
                         text: String(result.text.characters),
                         isFinal: result.isFinal,
-                        confidence: nil
+                        confidence: nil,
+                        audioOffset: Self.audioOffset(of: result)
                     ))
                 }
             } catch {
@@ -147,6 +151,32 @@ final class AppleSpeechTranscriptionService: TranscriptionService {
 
         self.analyzer = nil
         transcriber = nil
+    }
+
+    /// The earliest position in the fed audio that a result covers, or nil when the engine gave no
+    /// time range for it. Measured from the start of the audio the analyzer was fed, so on an
+    /// imported file it is that row's position in the file.
+    ///
+    /// Earliest rather than a per-run list: a row's window runs on to the next row's start, which
+    /// is how the transcript's rows divide the audio between them, so the figure that matters is
+    /// where the row begins.
+    private static func audioOffset(of result: SpeechTranscriber.Result) -> TimeInterval? {
+        var earliest: TimeInterval?
+        for run in result.text.runs {
+            guard let range = run.audioTimeRange, range.isValid, !range.isEmpty else {
+                continue
+            }
+            let seconds = CMTimeGetSeconds(range.start)
+            guard seconds.isFinite, seconds >= 0 else {
+                continue
+            }
+            if let current = earliest {
+                earliest = min(current, seconds)
+            } else {
+                earliest = seconds
+            }
+        }
+        return earliest
     }
 
     private func ensureModelInstalled(for locale: Locale, transcriber: SpeechTranscriber) async throws {

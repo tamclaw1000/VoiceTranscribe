@@ -242,6 +242,8 @@ struct ContentView: View {
                     isTranscribing: appModel.transcription.isTranscribing,
                     isPaused: appModel.transcription.isPaused,
                     pauseSpans: appModel.transcription.pauseSpans,
+                    playback: appModel.transcriptPlaybackState,
+                    playbackTimeline: appModel.transcriptPlaybackTimeline,
                     autoScrollToBottom: $appModel.settings.autoScrollTranscript,
                     hasTranscriptText: !appModel.transcription.transcriptText
                         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -256,7 +258,10 @@ struct ContentView: View {
                     onResetAllSpeakerNames: appModel.resetAllSpeakerNames,
                     onSaveToFile: appModel.saveTranscriptToFile,
                     onExportMarkdown: appModel.saveTranscriptMarkdownToFile,
-                    onCopyText: appModel.copyTranscriptText
+                    onCopyText: appModel.copyTranscriptText,
+                    onTogglePlayback: appModel.toggleTranscriptPlayback,
+                    onSeekPlayback: appModel.seekTranscriptPlayback(toOffset:),
+                    onSeekToRow: appModel.seekTranscriptPlayback(toRowID:)
                 )
                 .tabItem {
                     Label("Live Transcript", systemImage: "text.alignleft")
@@ -1228,12 +1233,15 @@ private enum TranscriptTimelineItem: Identifiable {
     case segment(TranscriptSegment)
     case pause(TranscriptionPauseSpan)
 
+    /// Built through `TranscriptPlaybackTimeline` so the ids the playback follow scrolls to are
+    /// by construction the ids the pane renders, rather than two string schemes kept in step by
+    /// hand.
     var id: String {
         switch self {
         case .segment(let segment):
-            return "segment-\(segment.id.uuidString)"
+            return TranscriptPlaybackTimeline.rowID(forSegmentID: segment.id)
         case .pause(let span):
-            return "pause-\(span.id.uuidString)"
+            return TranscriptPlaybackTimeline.rowID(forPauseSpanID: span.id)
         }
     }
 }
@@ -1261,6 +1269,11 @@ private struct TranscriptAIPromptPanel: View {
     let isTranscribing: Bool
     let isPaused: Bool
     let pauseSpans: [TranscriptionPauseSpan]
+    /// Playback of the audio this transcript belongs to, and the row the playhead is in.
+    let playback: TranscriptPlaybackState
+    /// Where each row sits in that audio, so the timestamp column can show positions instead of
+    /// clock times while playback is engaged.
+    let playbackTimeline: TranscriptPlaybackTimeline?
     @Binding var autoScrollToBottom: Bool
     let hasTranscriptText: Bool
     let onCycleSpeaker: (UUID) -> Void
@@ -1274,6 +1287,10 @@ private struct TranscriptAIPromptPanel: View {
     let onSaveToFile: () -> Void
     let onExportMarkdown: () -> Void
     let onCopyText: () -> Void
+    let onTogglePlayback: () -> Void
+    let onSeekPlayback: (TimeInterval) -> Void
+    /// Jumps the audio to a transcript row the user clicked.
+    let onSeekToRow: (String) -> Void
 
     @State private var isVoiceIdentificationPaneExpanded = false
 
@@ -1326,6 +1343,10 @@ private struct TranscriptAIPromptPanel: View {
                     .frame(width: 260)
             }
 
+            if playback.isAvailable {
+                playbackBar
+            }
+
             HStack(spacing: 8) {
                 Image(systemName: "person.wave.2.fill")
                     .foregroundStyle(currentSpeakerColor)
@@ -1359,13 +1380,87 @@ private struct TranscriptAIPromptPanel: View {
         .padding()
     }
 
+    /// Playback of the transcript's own audio. While it follows, the pane scrolls with the
+    /// playhead instead of chasing the newest text, which is why the follow toggle and the
+    /// auto-scroll toggle can look like they disagree — they answer different questions.
+    private var playbackBar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Button {
+                    onTogglePlayback()
+                } label: {
+                    Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                        .frame(width: 14)
+                }
+                .buttonStyle(.borderless)
+                .help(playback.isPlaying
+                    ? "Pause playback of this session's audio"
+                    : "Play this session's audio")
+                .accessibilityLabel(playback.isPlaying ? "Pause audio" : "Play audio")
+
+                Text(Self.durationText(playback.currentTime))
+                    .font(.caption.monospacedDigit())
+                    .frame(width: 44, alignment: .trailing)
+
+                Slider(
+                    value: Binding(
+                        get: { min(playback.currentTime, max(playback.duration, 0.01)) },
+                        set: { onSeekPlayback($0) }
+                    ),
+                    in: 0...max(playback.duration, 0.01)
+                )
+                .disabled(playback.duration <= 0)
+                .accessibilityLabel("Playback position")
+                .accessibilityValue(
+                    "\(Self.durationText(playback.currentTime)) of \(Self.durationText(playback.duration))"
+                )
+
+                Text(Self.durationText(playback.duration))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, alignment: .leading)
+
+                if let label = playback.label {
+                    Text(label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            if let error = playback.error {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            } else if !playback.canFollow {
+                Text("No transcript line can be placed in this audio, so nothing follows.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .help("Following needs each line's position in the audio. A recording gets it from the moment the file began; an imported file gets it from the position the recognizer reports for each line. Until some lines report one, the pane cannot say which line is playing.")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Audio playback")
+    }
+
     private var transcriptTable: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
                     GridRow {
-                        Text("Timestamp")
+                        // The column shows positions once playback owns the timeline, so its
+                        // heading has to say which of the two it is showing.
+                        Text(playback.isShowingAudioTime ? "Playback" : "Timestamp")
                             .frame(width: 76, alignment: .leading)
+                            .help(playback.isShowingAudioTime
+                                ? "Positions in this session's audio while playback is engaged"
+                                : "Clock time this line was transcribed")
                         Text("Speaker")
                             .frame(width: 150, alignment: .leading)
                         Text("Text")
@@ -1395,7 +1490,9 @@ private struct TranscriptAIPromptPanel: View {
                                     fallbackSpeakerLabel: currentSpeakerLabel,
                                     aiPrompts: aiPrompts(for: segment),
                                     jevItems: jevResults(for: segment),
-                                    isInterim: false
+                                    isInterim: false,
+                                    rowID: item.id,
+                                    isPlayheadActive: playback.activeRowID == item.id
                                 )
                             case .pause(let span):
                                 pauseMarkerRow(span)
@@ -1408,7 +1505,9 @@ private struct TranscriptAIPromptPanel: View {
                                 fallbackSpeakerLabel: currentSpeakerLabel,
                                 aiPrompts: [],
                                 jevItems: [],
-                                isInterim: true
+                                isInterim: true,
+                                rowID: nil,
+                                isPlayheadActive: false
                             )
                         }
                     }
@@ -1429,6 +1528,17 @@ private struct TranscriptAIPromptPanel: View {
             }
             .onChange(of: pauseSpans.count) { _, _ in
                 scrollToBottom(proxy)
+            }
+            // While the playhead is moving through audio the transcript can be mapped onto,
+            // the pane follows it. This is the "skip to that portion of the audio" behavior:
+            // the reader lands on the passage being played rather than at the newest text.
+            .onChange(of: playback.activeRowID) { _, rowID in
+                guard playback.canFollow, let rowID else {
+                    return
+                }
+                withAnimation(.easeOut(duration: 0.16)) {
+                    proxy.scrollTo(rowID, anchor: .center)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1555,7 +1665,42 @@ private struct TranscriptAIPromptPanel: View {
         return items
     }
 
+    /// The timestamp doubles as the jump target: clicking it starts playback at that row. It is
+    /// inert when the transcript cannot be mapped onto the audio, so a click can never point at
+    /// the wrong place. It also carries the row's scroll identity, which is how the follow
+    /// brings it on screen.
     @ViewBuilder
+    private func timestampCell(
+        for date: Date,
+        audioOffset: TimeInterval?,
+        rowID: String?,
+        isPlayheadActive: Bool
+    ) -> some View {
+        let text = timestampText(for: date, audioOffset: audioOffset)
+
+        if let rowID, playback.canFollow {
+            TranscriptTimestampButton(
+                text: text,
+                isPlayheadActive: isPlayheadActive
+            ) {
+                onSeekToRow(rowID)
+            }
+            .id(rowID)
+        } else {
+            Text(text)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(isPlayheadActive ? Color.primary : Color.secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 3)
+                .padding(.vertical, 1)
+                .background(
+                    isPlayheadActive ? Color.accentColor.opacity(0.22) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 4)
+                )
+                .frame(width: 76, alignment: .leading)
+        }
+    }
+
     private func pauseMarkerRow(_ span: TranscriptionPauseSpan) -> some View {
         GridRow {
             HStack(spacing: 8) {
@@ -1575,11 +1720,18 @@ private struct TranscriptAIPromptPanel: View {
             )
             .gridCellColumns(3)
         }
+        .id(TranscriptPlaybackTimeline.rowID(forPauseSpanID: span.id))
         .accessibilityLabel("Transcription paused")
     }
 
     private func pauseMarkerText(_ span: TranscriptionPauseSpan) -> String {
-        let start = span.startedAt.formatted(date: .omitted, time: .standard)
+        // The marker reports its own time in whichever clock the column is using, so "at" cannot
+        // disagree with the timestamps beside it during playback.
+        let rowID = TranscriptPlaybackTimeline.rowID(forPauseSpanID: span.id)
+        let start = timestampText(
+            for: span.startedAt,
+            audioOffset: playbackTimeline?.offset(forRowID: rowID)
+        )
         guard let duration = span.duration else {
             return "Paused at \(start)"
         }
@@ -1598,15 +1750,19 @@ private struct TranscriptAIPromptPanel: View {
         fallbackSpeakerLabel: String?,
         aiPrompts: [AIPromptItem],
         jevItems: [JevResultItem],
-        isInterim: Bool
+        isInterim: Bool,
+        rowID: String?,
+        isPlayheadActive: Bool
     ) -> some View {
         let speakerID = segment.speakerID ?? fallbackSpeakerID
         let speakerLabel = segment.speakerLabel ?? fallbackSpeakerLabel
         GridRow(alignment: .top) {
-            Text(timestampText(for: segment.timestamp))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 76, alignment: .leading)
+            timestampCell(
+                for: segment.timestamp,
+                audioOffset: rowID.flatMap { playbackTimeline?.offset(forRowID: $0) },
+                rowID: rowID,
+                isPlayheadActive: isPlayheadActive
+            )
 
             Menu {
                 // Deduplicated by canonical speaker, so two combos the user named the same
@@ -1788,8 +1944,21 @@ private struct TranscriptAIPromptPanel: View {
         Self.timestampFormatter.string(from: date)
     }
 
+    /// The time a row displays. While playback is engaged this is the row's position in the audio,
+    /// which is the time the playhead, the scrubber, and the highlight are all talking about;
+    /// otherwise it stays the clock time the line was transcribed. A row with no position in the
+    /// audio falls back to clock time even during playback, so it cannot show a made-up point.
+    private func timestampText(for date: Date, audioOffset: TimeInterval?) -> String {
+        if playback.isShowingAudioTime, let audioOffset {
+            return Self.durationText(audioOffset)
+        }
+        return timestampText(for: date)
+    }
+
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        guard autoScrollToBottom else {
+        // While following playback the pane belongs to the playhead: letting new live text drag
+        // it back to the bottom would fight the follow and make the highlight unreachable.
+        guard autoScrollToBottom, playback.activeRowID == nil else {
             return
         }
 
@@ -2041,6 +2210,60 @@ private struct VoiceIdentificationRow: View, Equatable {
             parts.append(String(format: "%.1fs", item.totalDuration))
         }
         return parts.isEmpty ? item.displayName : parts.joined(separator: " - ")
+    }
+}
+
+/// The transcript row's timestamp, doubling as a playback control.
+///
+/// It is a real button rather than text that merely accepts clicks, because the whole point is to
+/// be discoverable: a plain-looking timestamp gives no sign that it can be used to play the audio
+/// from that line. The playhead's row carries the accent tint, so the button and the follow
+/// highlight are the same piece of UI.
+private struct TranscriptTimestampButton: View {
+    let text: String
+    let isPlayheadActive: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(isPlayheadActive ? Color.accentColor : Color.secondary)
+                Text(text)
+                    .font(.caption.monospacedDigit())
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(width: 76, alignment: .leading)
+        }
+        .buttonStyle(TranscriptTimestampButtonStyle(isPlayheadActive: isPlayheadActive))
+        .help("Play the audio from this line")
+        .accessibilityLabel("Play the audio from \(text)")
+        .accessibilityHint("Plays this session's audio starting at this line.")
+    }
+}
+
+private struct TranscriptTimestampButtonStyle: ButtonStyle {
+    let isPlayheadActive: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let tint: Color = isPlayheadActive ? .accentColor : .secondary
+        return configuration.label
+            .foregroundStyle(isPlayheadActive ? Color.primary : Color.secondary)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(
+                tint.opacity(isPlayheadActive ? 0.22 : (configuration.isPressed ? 0.18 : 0.07)),
+                in: RoundedRectangle(cornerRadius: 4)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(tint.opacity(isPlayheadActive ? 0.45 : 0.20))
+            )
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+            .contentShape(RoundedRectangle(cornerRadius: 4))
     }
 }
 

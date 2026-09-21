@@ -18,6 +18,7 @@ def test_browser_shell_exposes_accessible_notification_surface():
     assert 'id="deviceDetails"' in response.text
     assert 'id="captureFormat"' in response.text
     assert 'id="audioTransportLatency"' in response.text
+    assert 'id="audioAverageLatency"' in response.text
     assert 'id="audioAckCount"' in response.text
     assert 'id="captureUptime"' in response.text
     assert 'id="eventCount"' in response.text
@@ -29,6 +30,7 @@ def test_browser_shell_exposes_accessible_notification_surface():
     assert "visibilitychange" in browser_script
     assert "Tab inactive; capture may be delayed" in browser_script
     assert "audioTransportLatency" in browser_script
+    assert "audioAverageLatency" in browser_script
     assert "droppedAudioFrames" in browser_script
     assert "audioAckCount" in browser_script
     assert "captureStartedAt" in browser_script

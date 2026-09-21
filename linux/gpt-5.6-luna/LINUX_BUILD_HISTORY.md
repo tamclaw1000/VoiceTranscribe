@@ -1120,3 +1120,28 @@ Expose active-session WebSocket reconnect frequency while retaining bounded brow
 - Compose configuration passed.
 - Docker image rebuilt and restarted.
 - Direct backend health reports build `25`.
+
+## Phase 32 — Average transport latency
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Complement the latest acknowledgement latency with a session-local average for easier diagnosis of sustained transport delay.
+
+### Delivered
+
+- Added an Avg latency metric to the browser Capture panel.
+- Accumulated acknowledgement samples and reset the average for each session.
+- Documented that the metric is a browser-side diagnostic estimate.
+- Updated tests, checklist, architecture, README, and agent guide.
+- Bumped Linux metadata from build `25` to build `26`.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized contract tests passed.
+- Compose configuration passed.
+- Docker image rebuilt and restarted.
+- Direct backend health reports build `26`.

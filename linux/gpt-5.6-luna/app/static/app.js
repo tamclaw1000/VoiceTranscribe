@@ -19,6 +19,8 @@ let audioAckCount = 0;
 let captureStartedAt = 0;
 let eventCount = 0;
 let reconnectCount = 0;
+let latencySamples = 0;
+let latencyTotalMs = 0;
 let pageHidden = document.hidden;
 
 function showNotification(text, kind = 'neutral', timeout = 5000) {
@@ -157,6 +159,9 @@ function applyEvent(event) {
       if (Number.isFinite(capturedAt)) {
         const latencyMs = Math.max(0, Date.now() - capturedAt);
         $('audioTransportLatency').textContent = `${latencyMs} ms`;
+        latencySamples += 1;
+        latencyTotalMs += latencyMs;
+        $('audioAverageLatency').textContent = `${Math.round(latencyTotalMs / latencySamples)} ms`;
       }
       if (Number.isFinite(Number(payload.frameSequence))) {
         const frameSequence = Number(payload.frameSequence);
@@ -442,7 +447,10 @@ async function startSession() {
     captureStartedAt = Date.now();
     eventCount = 0;
     reconnectCount = 0;
+    latencySamples = 0;
+    latencyTotalMs = 0;
     $('eventCount').textContent = '0';
+    $('audioAverageLatency').textContent = '—';
     $('reconnectCount').textContent = '0';
     $('audioAckCount').textContent = '0';
     renderCaptureUptime();

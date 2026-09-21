@@ -380,6 +380,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Show independent live capture uptime.
 - [x] Count rendered live event messages for transport diagnostics.
 - [x] Count active-session WebSocket reconnects.
+- [x] Show session-local average audio acknowledgement latency.
 
 
 

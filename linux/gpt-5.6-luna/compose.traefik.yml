@@ -1,0 +1,6 @@
+services:
+  voice-transcribe:
+    environment:
+      # Traefik terminates HTTPS at the public edge.
+      # Keep the host-published upstream on HTTP to avoid self-signed backend TLS verification.
+      VT_HTTPS: "false"

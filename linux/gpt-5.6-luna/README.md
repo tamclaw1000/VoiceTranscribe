@@ -2,11 +2,11 @@
 
 This directory contains the Linux implementation from `docs/linux/linux-implementation-plan.md`.
 
-Current release metadata: **version 0.1.0, build 1**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
+Current release metadata: **version 0.2.0, build 2**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
 
 ## Included
 
-- Docker Compose CPU deployment.
+- Docker Compose CPU deployment with faster-whisper live ASR enabled.
 - Browser microphone permission and device selection.
 - AudioWorklet RMS/peak/clipping metering.
 - WebSocket audio frame transport.
@@ -21,8 +21,9 @@ Current release metadata: **version 0.1.0, build 1**. The browser header and hea
 - Session Markdown export.
 - Health, readiness, capabilities, session, recording, and transcription endpoints.
 - Explicit version/build metadata in Docker, APIs, and the browser header.
+- SQLite metadata persistence for completed sessions and imported file sources.
 
-The fake adapter is intentional. It makes the default vertical slice testable without downloading model weights. An optional `faster-whisper` profile is available for real local file transcription.
+The default deployment now uses `faster-whisper` for real local file and rolling-window live transcription. Model weights are downloaded into the persistent model volume on first use. Fake ASR remains available by setting `VT_ASR_ENGINE=fake` for deterministic development tests.
 
 ## Run with Docker
 
@@ -42,22 +43,30 @@ docker compose -f compose.yml down
 
 Add `-v` only when intentionally deleting the stored audio volume.
 
-## Optional faster-whisper ASR profile
+## Optional fake-ASR development mode
 
-The default service uses fake ASR. To build and run the real local file-ASR profile:
+The production/test deployment uses faster-whisper. To use deterministic fake output without model downloads:
+
+```sh
+VT_ASR_ENGINE=fake docker compose -f compose.yml up -d --build
+```
+
+## faster-whisper ASR profile
+
+The default service now uses the real local ASR path:
 
 ```sh
 docker compose -f compose.yml -f compose.asr.yml build
 docker compose -f compose.yml -f compose.asr.yml up -d
 ```
 
-The profile defaults to the `small.en` model with `int8` compute. Override the model before starting if needed:
+The service defaults to the `small.en` model with `int8` compute. Override the model before starting if needed:
 
 ```sh
 VT_ASR_MODEL=base.en docker compose -f compose.yml -f compose.asr.yml up -d
 ```
 
-The model is downloaded on first file transcription and stored in the `voice-transcribe-models` volume. Browser microphone transcription remains on the fake adapter until a live rolling-window worker is implemented.
+The model is downloaded on first file transcription and stored in the `voice-transcribe-models` volume. Browser microphone transcription uses the rolling-window worker. The first request downloads the selected model if it is not already in the model volume.
 
 ## Run locally
 
@@ -80,10 +89,10 @@ curl http://tamclaw:10000/api/capabilities
 
 ## Current limitations
 
-- Default live and file sessions use fake ASR and do not recognize speech. The optional faster-whisper profile performs real file transcription.
+- The fake-ASR mode is opt-in for deterministic tests. The default service uses faster-whisper and requires model download on first use.
 - Diarization, voice identity, AI Prompts, and Jev are capability-disabled.
 - Raw microphone PCM is stored for the first slice; a production build needs a finalized playable container and format metadata.
-- File transcription currently emits demo text after FFmpeg normalization; it does not recognize the uploaded speech.
-- The current event store is in memory and is intended for a single process. Redis/PostgreSQL/object storage belong to later deployment profiles.
+- File transcription uses faster-whisper by default and downloads the configured model on first use.
+- Live event replay and active WebSocket state remain in memory for one process. SQLite preserves completed session/file metadata; Redis/PostgreSQL belong to later deployment profiles.
 - Authentication is not included. The service is currently unauthenticated; only expose it on a trusted network until authentication and HTTPS are implemented.
 - The browser must use HTTPS, or localhost, for microphone access.

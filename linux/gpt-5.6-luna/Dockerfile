@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VT_DATA_DIR=/data
 
 WORKDIR /app
-ARG INSTALL_ASR=false
+ARG INSTALL_ASR=true
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*

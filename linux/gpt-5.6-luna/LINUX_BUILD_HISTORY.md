@@ -291,4 +291,77 @@ Add explicit Linux application version and build metadata that is consistent acr
 ### Limitations and next step
 
 - Release version/build values are manually managed until a release automation process is added.
+
+## Phase 7 — Durable SQLite metadata
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Keep completed session metadata and imported file-source metadata across container restarts without introducing PostgreSQL or Redis into the single-user profile.
+
+### Delivered
+
+- Added `/data/voice-transcribe.sqlite3` initialization with session and file-source tables.
+- Persisted session lifecycle state and finalized transcript rows.
+- Persisted file paths, media metadata, normalization status, progress, errors, and linked transcription sessions.
+- Reloaded completed sessions and file sources at process startup.
+- Converted interrupted `normalizing`/`transcribing` file states to an explicit restart failure instead of falsely resuming them.
+- Kept active WebSocket clients, event replay buffers, and live capture state process-local.
+- Added a persistence reload contract test.
+
+### Checklist items completed
+
+- Local checklist section 2: local persistent-data directory and backup expectations.
+- Local checklist section 15: session metadata repository and SQLite-backed metadata.
+- Local checklist section 16: persistent `/data` volume now contains metadata as well as artifacts.
+
+### Verification
+
+- Python syntax checks passed.
+- Default Dockerized pytest passed: `7 passed` with one Starlette deprecation warning.
+- Compose profiles validate successfully.
+- A container restart test preserved a created session through the SQLite volume.
+- Default service remains available at `http://tamclaw:10000/`.
+
+### Limitations and next step
+
+- Active recording and WebSocket clients do not survive a process restart.
+- Event replay history is still in memory and is not reconstructed from SQLite.
+- There is no migration framework or PostgreSQL profile yet.
+
+## Phase 8 — Enable live faster-whisper transcription
+
+**Status:** Complete; model-backed file warm-up verified, browser microphone session still requires manual acoustic verification
+**Date:** 2026-09-21
+
+### Goal
+
+Make real local transcription the default service behavior instead of fake demo output.
+
+### Delivered
+
+- Changed the default Docker image to install faster-whisper.
+- Changed the default Compose service to use `VT_ASR_ENGINE=faster-whisper`.
+- Added the persistent model-cache volume to the default deployment.
+- Bumped Linux metadata to version `0.2.0`, build `2`.
+- Kept `VT_ASR_ENGINE=fake` as an explicit deterministic development override.
+- Updated README, local AGENTS, architecture, and runtime status messaging.
+- Preserved ten-second rolling-window live ASR and final partial-window draining.
+
+### Verification
+
+- Default image built successfully with faster-whisper.
+- Service restarted at `http://tamclaw:10000/`.
+- `/api/health/ready` reports `version: 0.2.0`, `build: 2`, `asrEngine: faster-whisper`, `asrAvailable: true`.
+- A one-second WAV fixture was uploaded and completed through the real model-backed file transcription API, warming the `small.en` model successfully.
+- Default Dockerized test suite remains available with deterministic fake mode when no ASR environment override is set.
+
+### Limitations and next step
+
+- Live microphone recognition through the browser has not been manually confirmed with spoken audio in this session.
+- The first live result is emitted after a ten-second window; interim decoder text is not yet shown.
+- Model download, CPU usage, and transcription latency should be measured on the target host.
+- Next recommended step is manual browser speech verification followed by VAD/interim improvements.
 - Live results are finalized window segments; interim decoder text, VAD-driven boundaries, and model-backed performance metrics remain open.

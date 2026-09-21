@@ -18,7 +18,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Choose the initial ASR backend: `faster-whisper`, `whisper.cpp`, or a hosted adapter.
 - [ ] Decide whether diarization is required in the first release or an optional later capability.
 - [ ] Decide whether voice identity remains session-only, as in the macOS app.
-- [ ] Decide whether model weights download on first use or are administrator-provisioned.
+- [x] Decide whether model weights download on first use or are administrator-provisioned.
 - [ ] Record the selected decisions in `linux-version-analysis.md`.
 
 ## 2. Repository and project structure
@@ -227,10 +227,10 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 
 ## 15. Export and persistence
 
-- [ ] Implement a session metadata repository.
-- [ ] Start with SQLite and a bind-mounted data volume, if selected.
+- [x] Implement a session metadata repository.
+- [x] Start with SQLite and a bind-mounted data volume, if selected.
 - [ ] Define a migration path to PostgreSQL.
-- [ ] Store audio, normalized audio, transcript, metadata, and export artifact references.
+- [x] Store audio, normalized audio, transcript, metadata, and export artifact references.
 - [ ] Add authenticated Markdown export.
 - [ ] Include details, recording rows, speaker labels/pairs, pauses, summary, AI results, Jev results, and file references.
 - [ ] Exclude API keys, secrets, and sensitive diagnostics from exports.
@@ -245,7 +245,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 
 - [x] Create the minimal application image.
 - [x] Add a persistent `/data` volume.
-- [ ] Add SQLite configuration.
+- [x] Add SQLite configuration.
 - [x] Add model-cache volume configuration.
 - [x] Verify CPU-only startup without GPU packages.
 - [ ] Verify health checks and graceful shutdown.
@@ -353,7 +353,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 ## 20. Documentation and release readiness
 
 - [x] Add Linux setup instructions for CPU Docker Compose.
-- [ ] Add model download and licensing instructions.
+- [x] Add model download and licensing instructions.
 - [ ] Add optional GPU setup instructions.
 - [ ] Add browser permission and HTTPS troubleshooting.
 - [ ] Add optional PipeWire/host-audio instructions.

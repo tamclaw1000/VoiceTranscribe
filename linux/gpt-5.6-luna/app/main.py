@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import struct
+import sqlite3
 import subprocess
 import threading
 import time
@@ -25,6 +26,7 @@ DATA_DIR = Path(os.environ.get("VT_DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 FILES_DIR = DATA_DIR / "files"
 FILES_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = DATA_DIR / "voice-transcribe.sqlite3"
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_UPLOAD_BYTES = int(os.environ.get("VT_MAX_UPLOAD_BYTES", str(500 * 1024 * 1024)))
 SUPPORTED_EXTENSIONS = {"wav", "m4a", "mp3", "flac", "ogg", "webm", "mp4", "avi", "mov"}
@@ -126,6 +128,153 @@ sessions: dict[str, Session] = {}
 file_sources: dict[str, FileSource] = {}
 
 
+def initialize_database() -> None:
+    with sqlite3.connect(DB_PATH) as database:
+        database.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                source_name TEXT NOT NULL,
+                sample_rate INTEGER NOT NULL,
+                channels INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                state TEXT NOT NULL,
+                recording INTEGER NOT NULL,
+                transcribing INTEGER NOT NULL,
+                paused INTEGER NOT NULL,
+                transcript_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS file_sources (
+                id TEXT PRIMARY KEY,
+                original_name TEXT NOT NULL,
+                original_path TEXT NOT NULL,
+                normalized_path TEXT,
+                size_bytes INTEGER NOT NULL,
+                duration REAL,
+                sample_rate INTEGER,
+                channels INTEGER,
+                format_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                progress REAL NOT NULL,
+                error TEXT,
+                session_id TEXT,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+
+
+def persist_session(session: Session) -> None:
+    snapshot = session.snapshot()
+    with sqlite3.connect(DB_PATH) as database:
+        database.execute(
+            """
+            INSERT INTO sessions (
+                id, source_name, sample_rate, channels, created_at, state,
+                recording, transcribing, paused, transcript_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                source_name=excluded.source_name,
+                sample_rate=excluded.sample_rate,
+                channels=excluded.channels,
+                state=excluded.state,
+                recording=excluded.recording,
+                transcribing=excluded.transcribing,
+                paused=excluded.paused,
+                transcript_json=excluded.transcript_json,
+                updated_at=excluded.updated_at
+            """,
+            (
+                session.id,
+                session.source_name,
+                session.sample_rate,
+                session.channels,
+                session.created_at,
+                session.state,
+                int(session.recording),
+                int(session.transcribing),
+                int(session.paused),
+                json.dumps(snapshot["transcript"]),
+                now_iso(),
+            ),
+        )
+
+
+def persist_file_source(source: FileSource) -> None:
+    with sqlite3.connect(DB_PATH) as database:
+        database.execute(
+            """
+            INSERT INTO file_sources (
+                id, original_name, original_path, normalized_path, size_bytes,
+                duration, sample_rate, channels, format_name, status, progress,
+                error, session_id, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                normalized_path=excluded.normalized_path,
+                status=excluded.status,
+                progress=excluded.progress,
+                error=excluded.error,
+                session_id=excluded.session_id,
+                updated_at=excluded.updated_at
+            """,
+            (
+                source.id,
+                source.original_name,
+                str(source.original_path),
+                str(source.normalized_path) if source.normalized_path else None,
+                source.size_bytes,
+                source.duration,
+                source.sample_rate,
+                source.channels,
+                source.format_name,
+                source.status,
+                source.progress,
+                source.error,
+                source.session_id,
+                now_iso(),
+            ),
+        )
+
+
+def load_persistent_state() -> None:
+    with sqlite3.connect(DB_PATH) as database:
+        for row in database.execute(
+            "SELECT id, source_name, sample_rate, channels, created_at, state, recording, transcribing, paused, transcript_json FROM sessions"
+        ):
+            session = Session(
+                id=row[0], source_name=row[1], sample_rate=row[2], channels=row[3],
+                created_at=row[4], state=row[5], recording=False,
+                transcribing=False, paused=False,
+            )
+            session.finalized_segments = json.loads(row[9])
+            session.transcript_index = len(session.finalized_segments)
+            sessions[session.id] = session
+        for row in database.execute(
+            "SELECT id, original_name, original_path, normalized_path, size_bytes, duration, sample_rate, channels, format_name, status, progress, error, session_id FROM file_sources"
+        ):
+            original_path = Path(row[2])
+            normalized_path = Path(row[3]) if row[3] else None
+            if not original_path.exists():
+                continue
+            status = row[9]
+            error = row[11]
+            if status in {"normalizing", "transcribing"}:
+                status = "failed"
+                error = "Processing was interrupted by a service restart"
+            source = FileSource(
+                id=row[0], original_name=row[1], original_path=original_path,
+                normalized_path=normalized_path, size_bytes=row[4], duration=row[5],
+                sample_rate=row[6], channels=row[7], format_name=row[8],
+                status=status, progress=row[10], error=error, session_id=row[12],
+            )
+            file_sources[source.id] = source
+
+
+initialize_database()
+load_persistent_state()
+
+
 async def publish(session: Session, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     async with session.lock:
         event = {
@@ -209,11 +358,13 @@ def normalize_media(source: FileSource) -> None:
     source.normalized_path = output
     source.status = "ready"
     source.progress = 1.0
+    persist_file_source(source)
 
 
 async def normalize_media_async(source: FileSource) -> None:
     source.status = "normalizing"
     source.progress = 0.1
+    persist_file_source(source)
     await asyncio.to_thread(normalize_media, source)
 
 
@@ -230,6 +381,8 @@ def create_file_session(source: FileSource) -> Session:
     )
     sessions[session_id] = session
     source.session_id = session_id
+    persist_session(session)
+    persist_file_source(source)
     return session
 
 
@@ -312,6 +465,7 @@ async def process_live_asr(session: Session, force: bool = False) -> None:
             session.transcript_index += 1
             segment["sentenceIndex"] = session.transcript_index - 1
             session.finalized_segments.append(segment)
+            persist_session(session)
             await publish(session, "transcript.segment.final", segment)
     finally:
         path.unlink(missing_ok=True)
@@ -373,19 +527,25 @@ async def transcribe_file(source: FileSource) -> None:
         for index, segment in enumerate(segments):
             session.transcript_index += 1
             session.finalized_segments.append(segment)
+            persist_session(session)
             await publish(session, "transcript.segment.final", segment)
             source.progress = min(1.0, (index + 1) / max(1, len(segments)))
+        persist_file_source(source)
     except Exception as error:
         session.transcribing = False
         session.state = "failed"
         source.status = "failed"
         source.error = str(error)
+        persist_session(session)
+        persist_file_source(source)
         await publish(session, "transcription.failed", {"error": source.error})
         return
     session.transcribing = False
     session.state = "completed"
     source.status = "completed"
     source.progress = 1.0
+    persist_session(session)
+    persist_file_source(source)
     await publish(session, "transcription.completed", {"segments": len(session.finalized_segments), "engine": ASR_ENGINE})
 
 
@@ -442,6 +602,7 @@ async def fake_finalize(session: Session, force: bool = False) -> None:
             "speaker": None,
         }
         session.finalized_segments.append(segment)
+        persist_session(session)
         await publish(session, "transcript.segment.final", segment)
         if force:
             break
@@ -454,6 +615,7 @@ async def start_recording(session: Session) -> None:
     session.recording = True
     session.recording_started_at = time.monotonic()
     session.state = "recording"
+    persist_session(session)
     await publish(session, "recording.started", {"path": audio_path(session).name})
 
 
@@ -468,6 +630,7 @@ async def stop_recording(session: Session) -> None:
     if not session.transcribing:
         session.state = "completed"
     duration = time.monotonic() - (session.recording_started_at or time.monotonic())
+    persist_session(session)
     await publish(session, "recording.finalized", {
         "path": audio_path(session).name,
         "duration": duration,
@@ -529,6 +692,7 @@ async def create_session(request: SessionCreate) -> dict[str, Any]:
         created_at=now_iso(),
     )
     sessions[session_id] = session
+    persist_session(session)
     await publish(session, "session.created", session.snapshot())
     return session.snapshot()
 
@@ -565,11 +729,13 @@ async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
         format_name=codec or extension.upper(),
     )
     file_sources[file_id] = source
+    persist_file_source(source)
     try:
         await normalize_media_async(source)
     except RuntimeError as error:
         source.status = "failed"
         source.error = str(error)
+        persist_file_source(source)
         raise HTTPException(status_code=422, detail=source.error)
     return source.snapshot()
 
@@ -630,6 +796,7 @@ async def transcription_start(session_id: str, _: SessionCommand | None = None) 
     session.transcribing = True
     session.paused = False
     session.state = "recording" if session.recording else "transcribing"
+    persist_session(session)
     await publish(session, "transcription.started", {"engine": ASR_ENGINE, "model": ASR_MODEL if ASR_ENGINE == "faster-whisper" else "demo"})
     return session.snapshot()
 
@@ -639,6 +806,7 @@ async def transcription_pause(session_id: str, _: SessionCommand | None = None) 
     session = get_session(session_id)
     if session.transcribing:
         session.paused = True
+        persist_session(session)
         await publish(session, "transcription.paused", {})
     return session.snapshot()
 
@@ -648,6 +816,7 @@ async def transcription_resume(session_id: str, _: SessionCommand | None = None)
     session = get_session(session_id)
     if session.transcribing:
         session.paused = False
+        persist_session(session)
         await publish(session, "transcription.resumed", {})
     return session.snapshot()
 
@@ -662,6 +831,7 @@ async def transcription_stop(session_id: str, _: SessionCommand | None = None) -
     session.transcribing = False
     session.paused = False
     session.state = "recording" if session.recording else "completed"
+    persist_session(session)
     await publish(session, "transcription.completed", {"segments": len(session.finalized_segments)})
     return session.snapshot()
 

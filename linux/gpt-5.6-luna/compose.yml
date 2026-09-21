@@ -5,12 +5,16 @@ services:
       - "${VT_BIND_ADDRESS:-0.0.0.0}:${VT_PORT:-10000}:8000"
     environment:
       VT_DATA_DIR: /data
-      VT_VERSION: ${VT_VERSION:-0.1.0}
-      VT_BUILD: ${VT_BUILD:-1}
-      VT_FAKE_ASR: "true"
+      VT_VERSION: ${VT_VERSION:-0.2.0}
+      VT_BUILD: ${VT_BUILD:-2}
+      VT_ASR_ENGINE: faster-whisper
+      VT_ASR_MODEL: ${VT_ASR_MODEL:-small.en}
+      VT_ASR_COMPUTE_TYPE: ${VT_ASR_COMPUTE_TYPE:-int8}
     volumes:
       - voice-transcribe-data:/data
+      - voice-transcribe-models:/data/models
     restart: unless-stopped
 
 volumes:
   voice-transcribe-data:
+  voice-transcribe-models:

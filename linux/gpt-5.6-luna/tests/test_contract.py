@@ -5,7 +5,7 @@ os.environ["VT_DATA_DIR"] = str(Path(__file__).parent / "data")
 
 from fastapi.testclient import TestClient
 
-from app.main import APP_BUILD, APP_VERSION, Session, app, markdown_for
+from app.main import APP_BUILD, APP_VERSION, Session, app, load_persistent_state, markdown_for, persist_session, sessions
 
 
 def test_health_and_capabilities_expose_version_and_build():
@@ -16,6 +16,23 @@ def test_health_and_capabilities_expose_version_and_build():
     assert health.json()["build"] == APP_BUILD
     assert capabilities.json()["version"] == APP_VERSION
     assert capabilities.json()["build"] == APP_BUILD
+
+
+def test_completed_session_metadata_survives_state_reload():
+    session = Session(
+        id="persistent-session",
+        source_name="Saved microphone",
+        sample_rate=16000,
+        channels=1,
+        created_at="2026-09-21T00:00:00+00:00",
+        state="completed",
+        finalized_segments=[{"segmentId": "segment-1", "text": "Saved.", "audioOffset": 0.0}],
+    )
+    persist_session(session)
+    sessions.pop(session.id, None)
+    load_persistent_state()
+    assert sessions[session.id].source_name == "Saved microphone"
+    assert sessions[session.id].finalized_segments[0]["text"] == "Saved."
 
 
 def test_markdown_export_contains_transcript_and_audio_reference():

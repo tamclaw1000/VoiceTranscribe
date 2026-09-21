@@ -12,8 +12,8 @@ The current deployment is:
 - Static browser client with AudioWorklet capture.
 - Docker Compose CPU profile.
 - Trusted-LAN binding at `http://tamclaw:10000/`.
-- Fake ASR by default.
-- Optional faster-whisper file and rolling-window live ASR profile.
+- Faster-whisper file and rolling-window live ASR by default.
+- Fake ASR is an opt-in deterministic development mode.
 - No authentication or HTTPS yet.
 
 ## Required process for every implementation step
@@ -45,8 +45,8 @@ The current deployment is:
 
 ## Version and build metadata
 
-- Current version: `0.1.0`.
-- Current build: `1`.
+- Current version: `0.2.0`.
+- Current build: `2`.
 - Runtime configuration names are `VT_VERSION` and `VT_BUILD`.
 - The values must appear consistently in:
   - `compose.yml` defaults.
@@ -67,7 +67,7 @@ Run from this directory:
 docker compose -f compose.yml up -d --build
 ```
 
-It must remain fake-ASR by default so the browser path is fast and does not download model weights. Verify:
+It uses faster-whisper by default and may download model weights on first use. For deterministic development checks, set `VT_ASR_ENGINE=fake`. Verify:
 
 ```sh
 curl --fail http://tamclaw:10000/api/health/live
@@ -84,7 +84,7 @@ docker compose -f compose.yml -f compose.asr.yml build
 docker compose -f compose.yml -f compose.asr.yml up -d
 ```
 
-The profile uses `VT_ASR_ENGINE=faster-whisper`, downloads its selected model on first use, and stores model data in the model-cache volume. Model-backed verification must be recorded separately from default-profile verification.
+The model cache is stored in the `voice-transcribe-models` volume. Override `VT_ASR_MODEL` or `VT_ASR_COMPUTE_TYPE` for hardware-specific tuning. Model-backed verification must be recorded with the selected model and runtime.
 
 ## Verification requirements
 

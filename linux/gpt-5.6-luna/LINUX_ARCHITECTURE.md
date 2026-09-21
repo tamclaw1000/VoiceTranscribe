@@ -4,7 +4,7 @@ This is the living architecture record for the Linux web implementation in `linu
 
 ## Current scope
 
-The current build is a single-user, trusted-LAN Docker Compose vertical slice. It accepts browser microphone audio and uploaded audio files, records live PCM, normalizes imported media through FFmpeg, publishes live events, exports Markdown, and has optional faster-whisper file and rolling-window live ASR paths. The default deployment remains deterministic fake ASR; advanced per-sentence features are deferred.
+The current build is a single-user, trusted-LAN Docker Compose deployment. It accepts browser microphone audio and uploaded audio files, records live PCM, normalizes imported media through FFmpeg, publishes live events, exports Markdown, and uses faster-whisper file and rolling-window live ASR by default. Fake ASR is an opt-in deterministic development mode; advanced per-sentence features are deferred.
 
 ## Runtime topology
 
@@ -21,10 +21,10 @@ Browser
 FastAPI / Uvicorn container
   ├─ HTTP session, file, and lifecycle API
   ├─ WebSocket event/audio endpoint
-  ├─ in-memory Session and FileSource registries
+  ├─ in-memory Session and FileSource registries backed by SQLite metadata
   ├─ recording writer → /data/<session-id>.pcm
   ├─ FFmpeg probe/normalizer → /data/files/<file-id>-16k-mono.wav
-  ├─ Fake live/file ASR adapters
+  ├─ configurable fake/faster-whisper ASR adapters
   ├─ bounded event replay list
   └─ Markdown export
        │
@@ -51,6 +51,8 @@ The client tracks `lastSequence` and reconnects the event WebSocket with `?after
 The WebSocket path selects fake finalization by default or an optional rolling-window faster-whisper worker. File transcription uses the same lazy model loader. Both paths preserve the session/event contract; the live worker processes ten-second windows and emits audio-relative offsets.
 
 ### Session state
+
+SQLite metadata is stored at `/data/voice-transcribe.sqlite3`. Completed session snapshots and imported file-source metadata are written as state changes and reloaded on process startup. Active capture connections and WebSocket replay events are intentionally not restored; interrupted in-progress work is reported as failed or idle rather than falsely resumed.
 
 Each session contains:
 
@@ -114,12 +116,12 @@ Current event families include:
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
-- Storage: Docker volume mounted at `/data`.
-- Application metadata: version `0.1.0`, build `1`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
+- Application metadata: version `0.2.0`, build `2`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`http://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
-- Default runtime mode: CPU, fake ASR, single process.
-- Optional runtime mode: `compose.asr.yml`, faster-whisper, lazy model download, single process.
+- Default runtime mode: CPU, faster-whisper, single process, lazy model download.
+- Optional development mode: `VT_ASR_ENGINE=fake` for deterministic output without model weights.
 - No host PipeWire/PulseAudio/ALSA access.
 - No authentication or HTTPS; this deployment must remain on a trusted network until the security phase is implemented.
 
@@ -128,7 +130,7 @@ Current event families include:
 The following interfaces should be added without changing the browser session/event model:
 
 - Improved live ASR segmentation, interim text, VAD tuning, and durable job execution.
-- Durable session repository using SQLite first, then PostgreSQL if needed.
+- PostgreSQL migration for multi-user/durable deployments; the current SQLite metadata repository is implemented.
 - Redis-backed job/event coordination for long-running work.
 - Asynchronous diarization and session-only voice identity.
 - Summary, AI Prompt, and Jev coordinators.

@@ -18,6 +18,7 @@ let droppedAudioFrames = 0;
 let audioAckCount = 0;
 let captureStartedAt = 0;
 let eventCount = 0;
+let reconnectCount = 0;
 let pageHidden = document.hidden;
 
 function showNotification(text, kind = 'neutral', timeout = 5000) {
@@ -318,6 +319,10 @@ function connectEvents() {
   };
   socket.onclose = () => {
     socket = null;
+    if (shouldReconnect) {
+      reconnectCount += 1;
+      $('reconnectCount').textContent = String(reconnectCount);
+    }
     if (!shouldReconnect) {
       setConnection('Disconnected', 'neutral');
       return;
@@ -436,7 +441,9 @@ async function startSession() {
     audioAckCount = 0;
     captureStartedAt = Date.now();
     eventCount = 0;
+    reconnectCount = 0;
     $('eventCount').textContent = '0';
+    $('reconnectCount').textContent = '0';
     $('audioAckCount').textContent = '0';
     renderCaptureUptime();
     $('audioDroppedFrames').textContent = '0';

@@ -1095,3 +1095,28 @@ Make event-flow activity visible in the Capture panel without changing the WebSo
 - Compose configuration passed.
 - Docker image rebuilt and restarted.
 - Direct backend health reports build `24`.
+
+## Phase 31 — WebSocket reconnect count
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Expose active-session WebSocket reconnect frequency while retaining bounded browser recovery.
+
+### Delivered
+
+- Added a Reconnects metric to the browser Capture panel.
+- Incremented it only for closures during an active reconnecting session.
+- Reset it for each new session.
+- Updated tests, checklist, architecture, README, and agent guide.
+- Bumped Linux metadata from build `24` to build `25`.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized contract tests passed.
+- Compose configuration passed.
+- Docker image rebuilt and restarted.
+- Direct backend health reports build `25`.

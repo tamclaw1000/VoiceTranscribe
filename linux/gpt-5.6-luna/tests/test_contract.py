@@ -21,6 +21,7 @@ def test_browser_shell_exposes_accessible_notification_surface():
     assert 'id="audioAckCount"' in response.text
     assert 'id="captureUptime"' in response.text
     assert 'id="eventCount"' in response.text
+    assert 'id="reconnectCount"' in response.text
     assert 'id="audioDroppedFrames"' in response.text
     browser_script = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text()
     assert "waitForAudioFlush" in browser_script
@@ -32,6 +33,7 @@ def test_browser_shell_exposes_accessible_notification_surface():
     assert "audioAckCount" in browser_script
     assert "captureStartedAt" in browser_script
     assert "eventCount" in browser_script
+    assert "reconnectCount" in browser_script
 
 
 def test_health_and_capabilities_expose_version_and_build():

@@ -379,6 +379,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Expose acknowledged audio-frame count beside transport diagnostics.
 - [x] Show independent live capture uptime.
 - [x] Count rendered live event messages for transport diagnostics.
+- [x] Count active-session WebSocket reconnects.
 
 
 

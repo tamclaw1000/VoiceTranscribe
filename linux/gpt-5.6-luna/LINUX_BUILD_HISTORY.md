@@ -844,3 +844,40 @@ Allow recoverable imported-file transcription failures to be retried without for
 ### Limitations and next step
 
 - Retry is available only while the normalized artifact exists and does not add cancellation, backoff, or concurrent-job quotas.
+
+## Phase 23 — Sequenced microphone audio frames
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Make the browser-to-server audio transport traceable by attaching frame sequence numbers and capture timestamps while preserving the existing binary PCM payload path.
+
+### Delivered
+
+- Added a client-side monotonic audio-frame sequence reset for each session.
+- Added `client.audio.frame` JSON metadata before each binary PCM block.
+- Added server pairing of frame metadata with the next binary audio message.
+- Added frame sequence and capture timestamp fields to `audio.ack` responses.
+- Added WebSocket contract coverage for frame ordering and metadata acknowledgement.
+- Bumped Linux metadata from build `16` to build `17` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- Local checklist section 6: sequence numbers and timestamps on audio frames.
+- Local checklist section 19: WebSocket frame-order and reconnect recovery test coverage.
+
+### Verification
+
+- Python, JavaScript, shell, Compose, and diff checks passed.
+- Dockerized regression suite passed: `14 passed` with one existing Starlette deprecation warning.
+- Docker image rebuilt successfully.
+- Direct and public Traefik health endpoints report version `0.2.0`, build `17`.
+- Public browser JavaScript contains the sequenced `client.audio.frame` envelope.
+- Direct and public Traefik WebSocket smoke checks acknowledged frame sequence and capture timestamp metadata.
+
+### Limitations and next step
+
+- Frame metadata is diagnostic and is not persisted or authenticated.
+- The browser still sends binary PCM only while the WebSocket is open; pending-frame flushing remains a later lifecycle improvement.

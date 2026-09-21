@@ -2,7 +2,7 @@
 
 This directory contains the Linux implementation from `docs/linux/linux-implementation-plan.md`.
 
-Current release metadata: **version 0.2.0, build 16**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
+Current release metadata: **version 0.2.0, build 17**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
 
 ## Included
 
@@ -33,6 +33,7 @@ Current release metadata: **version 0.2.0, build 16**. The browser header and he
 - Accessible live notification surface for microphone, upload, transcription, deletion, and connection errors.
 - Negotiated microphone device, sample-rate, channel, and input-track diagnostics.
 - Retry controls for failed imported-file transcription jobs without re-uploading the source.
+- Sequenced and timestamped microphone audio frames with server acknowledgements.
 
 The default deployment now uses `faster-whisper` for real local file and rolling-window live transcription. Model weights are downloaded into the persistent model volume on first use. Fake ASR remains available by setting `VT_ASR_ENGINE=fake` for deterministic development tests.
 
@@ -122,4 +123,5 @@ curl http://tamclaw:10000/api/capabilities
 - Request IDs improve diagnostics but are not an authentication or authorization mechanism.
 - The browser notification surface announces important success, warning, and error states, but it is not a replacement for authentication or server-side alerting.
 - If the selected microphone is unplugged or its permission is revoked during capture, the session is stopped and the browser displays a persistent diagnostic.
+- Audio-frame sequence/timestamp values are transport diagnostics only; they are not authentication or authorization controls.
 - HTTPS is enabled by default for microphone access. The generated development certificate is not publicly trusted; production deployments should replace it with a certificate trusted by the client.

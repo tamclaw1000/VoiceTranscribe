@@ -12,6 +12,7 @@ let reconnectAttempt = 0;
 let shouldReconnect = false;
 let notificationTimer = null;
 let captureStopping = false;
+let audioFrameSequence = 0;
 
 function showNotification(text, kind = 'neutral', timeout = 5000) {
   const el = $('notification');
@@ -348,6 +349,8 @@ async function setupMicrophone() {
     updateLevel(data.rms, data.peak, data.clipping);
     sendJson({ type: 'client.level', rms: data.rms, peak: data.peak, clipping: data.clipping });
     if (socket?.readyState === WebSocket.OPEN && session?.recording) {
+      audioFrameSequence += 1;
+      sendJson({ type: 'client.audio.frame', frameSequence: audioFrameSequence, capturedAt: Date.now() });
       socket.send(data.samples.buffer);
     }
   };
@@ -387,6 +390,7 @@ async function startSession() {
     if (!response.ok) throw new Error(await response.text());
     session = await response.json();
     lastSequence = 0;
+    audioFrameSequence = 0;
     $('transcript').innerHTML = '';
     shouldReconnect = true;
     reconnectAttempt = 0;

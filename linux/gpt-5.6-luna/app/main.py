@@ -1005,6 +1005,7 @@ async def events_socket(websocket: WebSocket, session_id: str, after: int = Quer
         replay = [event for event in session.events if event["sequence"] > after]
     for event in replay:
         await websocket.send_json(event)
+    pending_audio_frame: dict[str, Any] | None = None
     try:
         while True:
             message = await websocket.receive()
@@ -1012,6 +1013,8 @@ async def events_socket(websocket: WebSocket, session_id: str, after: int = Quer
                 break
             if message.get("bytes") is not None:
                 audio = message["bytes"]
+                frame = pending_audio_frame or {}
+                pending_audio_frame = None
                 if session.recording and session.audio_file is not None:
                     session.audio_file.write(audio)
                 session.audio_bytes += len(audio)
@@ -1029,14 +1032,24 @@ async def events_socket(websocket: WebSocket, session_id: str, after: int = Quer
                     "sessionId": session.id,
                     "sequence": session.next_sequence - 1,
                     "occurredAt": now_iso(),
-                    "payload": {"bytes": len(audio), "totalBytes": session.audio_bytes},
+                    "payload": {
+                        "bytes": len(audio),
+                        "totalBytes": session.audio_bytes,
+                        "frameSequence": frame.get("frameSequence"),
+                        "capturedAt": frame.get("capturedAt"),
+                    },
                 })
             elif message.get("text"):
                 try:
                     command = json.loads(message["text"])
                 except json.JSONDecodeError:
                     continue
-                if command.get("type") == "client.level":
+                if command.get("type") == "client.audio.frame":
+                    pending_audio_frame = {
+                        "frameSequence": int(command.get("frameSequence", 0)),
+                        "capturedAt": command.get("capturedAt"),
+                    }
+                elif command.get("type") == "client.level":
                     await publish(session, "audio.level", {
                         "rms": float(command.get("rms", 0)),
                         "peak": float(command.get("peak", 0)),

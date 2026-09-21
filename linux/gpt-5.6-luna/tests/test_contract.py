@@ -134,6 +134,12 @@ def test_websocket_reconnect_replays_events_and_cleans_up_disconnect():
         level_event = websocket.receive_json()
         assert level_event["type"] == "audio.level"
         assert level_event["payload"]["peak"] == 0.5
+        websocket.send_text(json.dumps({"type": "client.audio.frame", "frameSequence": 7, "capturedAt": 1726920000000}))
+        websocket.send_bytes(b"\x00\x00\x00\x00")
+        audio_ack = websocket.receive_json()
+        assert audio_ack["type"] == "audio.ack"
+        assert audio_ack["payload"]["frameSequence"] == 7
+        assert audio_ack["payload"]["capturedAt"] == 1726920000000
         websocket.close()
 
     assert not sessions[session_id].clients

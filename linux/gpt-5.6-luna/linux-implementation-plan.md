@@ -90,7 +90,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Calculate client-side RMS, peak, and clipping indicators.
 - [x] Capture actual negotiated sample rate and channel count.
 - [ ] Convert or resample frames as required by the transport contract.
-- [ ] Add sequence numbers and timestamps to audio frames.
+- [x] Add sequence numbers and timestamps to audio frames.
 - [ ] Stream frames over an authenticated WebSocket.
 - [ ] Flush pending frames before stopping a session.
 - [x] Handle browser tab suspension, device unplug, and input-track termination.
@@ -326,7 +326,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 
 ### Integration tests
 
-- [ ] Test WebSocket frame order and reconnect recovery.
+- [x] Test WebSocket frame order and reconnect recovery.
 - [ ] Test browser-format normalization.
 - [ ] Test recording while ASR is slow or unavailable.
 - [ ] Test finalization after client disconnect.

@@ -275,7 +275,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [ ] Add PostgreSQL configuration.
 - [ ] Add Redis and worker configuration.
 - [ ] Add object-storage configuration.
-- [ ] Add reverse proxy and HTTPS configuration.
+- [x] Add reverse proxy and HTTPS configuration.
 - [ ] Add authentication and session ownership.
 - [ ] Add per-user limits, quotas, and retention.
 - [ ] Verify WebSocket routing and reconnect behavior across replicas.

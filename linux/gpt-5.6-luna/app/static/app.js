@@ -8,6 +8,7 @@ let sourceNode = null;
 let workletNode = null;
 let lastSequence = 0;
 let reconnectTimer = null;
+let reconnectAttempt = 0;
 let shouldReconnect = false;
 
 function setConnection(text, kind = 'neutral') {
@@ -233,24 +234,37 @@ async function transcribeFile(fileId) {
 }
 
 function connectEvents() {
-  if (!session) return;
+  if (!session || !shouldReconnect || socket?.readyState === WebSocket.CONNECTING || socket?.readyState === WebSocket.OPEN) return;
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
   socket = new WebSocket(`${protocol}://${location.host}/api/sessions/${session.sessionId}/events?after=${lastSequence}`);
   socket.binaryType = 'arraybuffer';
-  socket.onopen = () => setConnection('Connected', 'good');
+  socket.onopen = () => {
+    reconnectAttempt = 0;
+    setConnection('Connected', 'good');
+  };
   socket.onmessage = (message) => {
-    if (typeof message.data === 'string') applyEvent(JSON.parse(message.data));
+    if (typeof message.data !== 'string') return;
+    try {
+      applyEvent(JSON.parse(message.data));
+    } catch {
+      setConnection('Invalid event from server', 'bad');
+    }
   };
   socket.onclose = () => {
     socket = null;
-    if (shouldReconnect) {
-      setConnection('Reconnecting…', 'neutral');
-      reconnectTimer = setTimeout(connectEvents, 1000);
-    } else {
+    if (!shouldReconnect) {
       setConnection('Disconnected', 'neutral');
+      return;
     }
+    setConnection('Reconnecting…', 'neutral');
+    reconnectAttempt += 1;
+    const delay = Math.min(10_000, 500 * (2 ** Math.min(reconnectAttempt - 1, 4)));
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connectEvents();
+    }, delay);
   };
-  socket.onerror = () => setConnection('Connection error', 'bad');
+  socket.onerror = () => setConnection('Connection error; retrying…', 'bad');
 }
 
 function sendJson(value) {
@@ -322,6 +336,7 @@ async function startSession() {
     lastSequence = 0;
     $('transcript').innerHTML = '';
     shouldReconnect = true;
+    reconnectAttempt = 0;
     connectEvents();
     await setupMicrophone();
     await fetch(`/api/sessions/${session.sessionId}/recording/start`, { method: 'POST' });

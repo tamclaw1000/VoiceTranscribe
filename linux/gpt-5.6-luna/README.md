@@ -2,14 +2,14 @@
 
 This directory contains the Linux implementation from `docs/linux/linux-implementation-plan.md`.
 
-Current release metadata: **version 0.2.0, build 12**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
+Current release metadata: **version 0.2.0, build 13**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
 
 ## Included
 
 - Docker Compose CPU deployment with faster-whisper live ASR enabled.
 - Browser microphone permission and device selection.
 - AudioWorklet RMS/peak/clipping metering.
-- WebSocket audio frame transport.
+- WebSocket audio frame transport with Uvicorn protocol keepalive and reconnect replay.
 - Session and reconnect-safe event envelopes.
 - Independent recording and transcription state.
 - Raw PCM recording in the Docker data volume.
@@ -29,6 +29,7 @@ Current release metadata: **version 0.2.0, build 12**. The browser header and he
 - Timestamped imported transcript rows that highlight during playback and seek without autoplay when clicked.
 - Main-panel imported-file review layout, separate from session controls and capture meters.
 - HTTPS-by-default Docker startup with a persistent development certificate for browser microphone access.
+- Explicit WebSocket ping intervals and clean disconnect handling for direct and Traefik deployments.
 
 The default deployment now uses `faster-whisper` for real local file and rolling-window live transcription. Model weights are downloaded into the persistent model volume on first use. Fake ASR remains available by setting `VT_ASR_ENGINE=fake` for deterministic development tests.
 
@@ -50,7 +51,7 @@ When using the shared Traefik reverse proxy, run:
 docker compose -f compose.yml -f compose.traefik.yml up -d --build
 ```
 
-This keeps the public URL on HTTPS while using HTTP for the private host-gateway upstream. The Compose service also reports Docker health from `/api/health/live` and allows a 30-second graceful stop window.
+This keeps the public URL on HTTPS while using HTTP for the private host-gateway upstream. The Compose service also reports Docker health from `/api/health/live`, allows a 30-second graceful stop window, and keeps WebSocket connections alive with configurable `VT_WS_PING_INTERVAL` and `VT_WS_PING_TIMEOUT` values.
 
 Stop the service with:
 
@@ -110,8 +111,8 @@ curl http://tamclaw:10000/api/capabilities
 - Diarization, voice identity, AI Prompts, and Jev are capability-disabled.
 - Raw microphone PCM is stored for the first slice; a production build needs a finalized playable container and format metadata.
 - File transcription uses faster-whisper by default and downloads the configured model on first use.
-- Live event replay and active WebSocket state remain in memory for one process. SQLite preserves completed session/file metadata; Redis/PostgreSQL belong to later deployment profiles.
-- Authentication is not included. The service is currently unauthenticated; only expose it on a trusted network until authentication and HTTPS are implemented.
+- Live event replay and active WebSocket state remain in memory for one process. SQLite preserves completed session/file metadata; Redis/PostgreSQL belong to later deployment profiles. The browser reconnects with its last sequence, while Uvicorn protocol pings keep an idle proxy route open.
+- Authentication is not included. The service is currently unauthenticated; only expose it on a trusted network until authentication is implemented.
 - Deletion is explicit and refuses active recording/transcription jobs; retention automation is not yet implemented.
 - File transcription is asynchronous; the browser shows queued/loading/transcribing/finalizing/completed/failed status and finalized segment text when available.
 - Playback is available for finalized imported originals; timestamped rows follow that playback. Raw live PCM still needs a finalized container for broad browser compatibility.

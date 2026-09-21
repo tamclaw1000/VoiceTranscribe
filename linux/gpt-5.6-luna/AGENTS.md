@@ -11,10 +11,10 @@ The current deployment is:
 - FastAPI/Uvicorn backend.
 - Static browser client with AudioWorklet capture.
 - Docker Compose CPU profile.
-- Trusted-LAN binding at `http://tamclaw:10000/`.
+- Trusted-LAN binding at `https://tamclaw:10000/` by default; Traefik can terminate public HTTPS and use an HTTP upstream.
 - Faster-whisper file and rolling-window live ASR by default.
 - Fake ASR is an opt-in deterministic development mode.
-- No authentication or HTTPS yet.
+- No authentication; HTTPS is provided by the default development certificate or by the shared Traefik edge.
 
 ## Required process for every implementation step
 
@@ -46,7 +46,7 @@ The current deployment is:
 ## Version and build metadata
 
 - Current version: `0.2.0`.
-- Current build: `12`.
+- Current build: `13`.
 - Runtime configuration names are `VT_VERSION` and `VT_BUILD`.
 - The values must appear consistently in:
   - `compose.yml` defaults.
@@ -76,7 +76,7 @@ curl --fail http://tamclaw:10000/api/health/ready
 curl --fail http://tamclaw:10000/api/capabilities
 ```
 
-The service is intentionally exposed on all interfaces at port `10000` for the current trusted-LAN setup. Do not expose it to an untrusted network until authentication and HTTPS are implemented.
+The service is intentionally exposed on all interfaces at port `10000` for the current trusted-LAN setup. The default service uses HTTPS; behind Traefik, use `compose.traefik.yml` so Traefik terminates public HTTPS and forwards HTTP to the host port. Do not expose it to an untrusted network until authentication is implemented.
 
 ### Optional faster-whisper profile
 

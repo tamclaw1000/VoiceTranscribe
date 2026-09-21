@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -109,6 +110,29 @@ def test_file_snapshot_exposes_linked_transcript():
     )
     assert source.snapshot()["transcript"][0]["text"] == "Recognized text."
     sessions.pop(session.id, None)
+
+
+def test_websocket_reconnect_replays_events_and_cleans_up_disconnect():
+    client = TestClient(app)
+    created = client.post("/api/sessions", json={"source_name": "WebSocket test"}).json()
+    session_id = created["sessionId"]
+
+    with client.websocket_connect(f"/api/sessions/{session_id}/events?after=0") as websocket:
+        created_event = websocket.receive_json()
+        assert created_event["type"] == "session.created"
+        websocket.send_text(json.dumps({"type": "client.level", "rms": 0.25, "peak": 0.5}))
+        level_event = websocket.receive_json()
+        assert level_event["type"] == "audio.level"
+        assert level_event["payload"]["peak"] == 0.5
+        websocket.close()
+
+    assert not sessions[session_id].clients
+    with client.websocket_connect(f"/api/sessions/{session_id}/events?after={created_event['sequence']}") as websocket:
+        replayed_event = websocket.receive_json()
+        assert replayed_event["sequence"] == level_event["sequence"]
+        assert replayed_event["type"] == "audio.level"
+
+    sessions.pop(session_id, None)
 
 
 def test_session_delete_removes_recording_artifact_and_metadata():

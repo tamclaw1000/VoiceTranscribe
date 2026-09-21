@@ -707,3 +707,39 @@ Give Docker and Traefik a reliable liveness signal and allow the Uvicorn process
 
 - The healthcheck verifies process liveness, not model readiness or end-to-end WebSocket capture.
 - Active WebSocket state is still process-local; durable job coordination remains deferred.
+
+## Phase 19 — WebSocket proxy keepalive and reconnect hardening
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Keep the upgraded event connection healthy through the Traefik HTTP upstream and make browser reconnects deterministic after a proxy, network, or server disconnect.
+
+### Delivered
+
+- Added Uvicorn WebSocket ping interval and timeout configuration through `VT_WS_PING_INTERVAL` and `VT_WS_PING_TIMEOUT`.
+- Added normal handling for WebSocket disconnect messages so expected proxy/client closes do not produce ASGI tracebacks.
+- Added bounded exponential browser reconnect backoff and duplicate-connection guards.
+- Added a contract test covering event replay after reconnect and client cleanup.
+- Bumped Linux metadata from build `12` to build `13` while keeping version `0.2.0`.
+- Documented the Traefik HTTP-upstream keepalive behavior and current authentication limitation.
+
+### Checklist items completed
+
+- Local checklist section 16: reverse proxy and HTTPS configuration.
+
+### Verification
+
+- Python, JavaScript, shell, Compose, and diff checks passed.
+- Docker image rebuilt successfully.
+- Dockerized regression suite passed: `12 passed` with one existing Starlette deprecation warning.
+- Direct HTTP-upstream and public Traefik health endpoints report version `0.2.0`, build `13`.
+- WebSocket contract replay test passed; public route remained reachable through the Traefik HTTP upstream after rebuild.
+- The prior disconnect traceback no longer appears in the rebuilt service logs.
+
+### Limitations and next step
+
+- Authentication and session ownership remain open; the WebSocket is still unauthenticated.
+- Event replay remains process-local and is not suitable for multi-replica routing without shared event storage.

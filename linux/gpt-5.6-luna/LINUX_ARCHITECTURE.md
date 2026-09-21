@@ -38,7 +38,7 @@ Docker persistent volume: /data
 
 `app/static/index.html`, `styles.css`, and `app.js` provide the first web surface. The client owns browser permissions and browser-visible device selection. `audio-worklet.js` copies each input block, calculates level metrics, and sends the PCM block to the main thread. The client sends level messages and binary audio messages separately so visual feedback does not depend on ASR latency.
 
-The client tracks `lastSequence` and reconnects the event WebSocket with `?after=<sequence>`. Duplicate or older events are ignored. This is the first version of reconnect-safe event delivery; durable event storage is a later phase.
+The client tracks `lastSequence` and reconnects the event WebSocket with `?after=<sequence>`. Duplicate or older events are ignored. Reconnect attempts use a bounded exponential backoff and do not create duplicate sockets. Uvicorn is configured with protocol-level ping/pong keepalive so the direct service and the Traefik HTTP upstream do not lose an otherwise idle upgraded connection. Durable event storage is a later phase.
 
 ### FastAPI application
 
@@ -98,6 +98,7 @@ Current event families include:
 - `asr.window.started`
 - `asr.window.completed`
 - `transcription.failed` with live ASR scope
+- `connection.keepalive` is reserved for future application-level diagnostics; transport keepalive currently uses WebSocket ping/pong frames and does not consume event sequence numbers.
 
 Deletion endpoints are `DELETE /api/files/{file_id}` and `DELETE /api/sessions/{session_id}`. They remove SQLite metadata and artifacts below `/data`; deletion is rejected while recording or transcription is active. A file deletion also removes its linked completed/failed transcription session.
 
@@ -126,13 +127,14 @@ HTTP failures use a stable envelope: `{ "error": { "code": "â€¦", "message": "â€
 19. Imported-file review is rendered in the main content panel; the sidebar is reserved for session controls, capture state, and capabilities.
 20. The container starts Uvicorn with a persistent development TLS certificate by default so non-localhost browsers can expose `getUserMedia`; `VT_HTTPS=false` is retained for HTTP-only diagnostics.
 21. Compose health checks `/api/health/live` using the active HTTP/TLS mode, and `stop_grace_period` gives Uvicorn time to finish shutdown handling.
+22. Uvicorn sends WebSocket ping frames every 15 seconds with a 30-second timeout by default; the browser reconnects after disconnect with bounded backoff, and the endpoint treats proxy/client disconnect messages as normal cleanup rather than server errors.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `12`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `13`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`https://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.
@@ -151,7 +153,7 @@ The following interfaces should be added without changing the browser session/ev
 - Summary, AI Prompt, and Jev coordinators.
 - Playable finalized container artifacts and playback timeline follow for live PCM recordings; imported-original playback and row following are now available.
 - Browser information architecture still needs dedicated Summary, Recent Recordings, and Settings views.
-- Authentication, HTTPS/reverse proxy, retention, and secret management remain deferred and are required before untrusted/LAN-wide exposure.
+- Authentication, retention, and secret management remain deferred and are required before untrusted/public exposure; the Traefik HTTPS edge and HTTP upstream override are implemented for the current trusted deployment.
 - Optional PipeWire host-capture helper.
 - GPU-specific worker profile.
 

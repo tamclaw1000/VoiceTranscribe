@@ -1003,6 +1003,8 @@ async def events_socket(websocket: WebSocket, session_id: str, after: int = Quer
     try:
         while True:
             message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
             if message.get("bytes") is not None:
                 audio = message["bytes"]
                 if session.recording and session.audio_file is not None:
@@ -1036,6 +1038,8 @@ async def events_socket(websocket: WebSocket, session_id: str, after: int = Quer
                         "clipping": bool(command.get("clipping", False)),
                     })
     except WebSocketDisconnect:
+        pass
+    finally:
         async with session.lock:
             session.clients.discard(websocket)
 

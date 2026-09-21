@@ -14,8 +14,12 @@ if [ "${VT_HTTPS:-true}" = "true" ]; then
       -addext "subjectAltName=DNS:$tls_host,DNS:localhost,IP:127.0.0.1"
   fi
   exec uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+    --ws-ping-interval "${VT_WS_PING_INTERVAL:-15}" \
+    --ws-ping-timeout "${VT_WS_PING_TIMEOUT:-30}" \
     --ssl-keyfile "$tls_dir/server.key" \
     --ssl-certfile "$tls_dir/server.crt"
 fi
 
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+  --ws-ping-interval "${VT_WS_PING_INTERVAL:-15}" \
+  --ws-ping-timeout "${VT_WS_PING_TIMEOUT:-30}"

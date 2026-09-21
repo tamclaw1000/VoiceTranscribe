@@ -381,6 +381,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Count rendered live event messages for transport diagnostics.
 - [x] Count active-session WebSocket reconnects.
 - [x] Show session-local average audio acknowledgement latency.
+- [x] Expose aggregate server-side session, queue, storage, and ASR metrics.
 
 
 

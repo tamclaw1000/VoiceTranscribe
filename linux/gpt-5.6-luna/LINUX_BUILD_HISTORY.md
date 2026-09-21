@@ -1281,3 +1281,21 @@ Complement the latest acknowledgement latency with a session-local average for e
 - Compose configuration passed.
 - Docker image rebuilt and restarted.
 - Direct backend health reports build `26`.
+
+## Phase 33 — Server-side observability endpoint
+
+**Release:** `0.2.0`
+**Build:** `27`
+**Git commit:** recorded after this phase commit
+
+**Status:** In progress
+
+### Goal
+
+Expose operational counters for active sessions, queued file work, storage usage, and ASR configuration without returning transcript or audio content.
+
+### Delivered
+
+- Added `GET /api/metrics`.
+- Added aggregate session, file-queue, storage-byte, and ASR diagnostics.
+- Added contract coverage and updated deployment, architecture, README, and checklist metadata.

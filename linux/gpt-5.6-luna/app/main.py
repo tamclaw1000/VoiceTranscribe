@@ -729,6 +729,21 @@ async def validation_exception_handler(request: Request, _: RequestValidationErr
     return error_response(request, 422, "validation_error", "Request validation failed")
 
 
+@app.get("/api/metrics")
+async def metrics() -> dict[str, Any]:
+    queue_depth = sum(source.status in {"queued", "loading", "normalizing", "transcribing", "finalizing"} for source in file_sources.values())
+    active_sessions = sum(session.recording or session.transcribing for session in sessions.values())
+    storage_bytes = sum(path.stat().st_size for path in FILES_DIR.rglob("*") if path.is_file())
+    return {
+        "version": APP_VERSION,
+        "build": APP_BUILD,
+        "sessions": {"total": len(sessions), "active": active_sessions},
+        "files": {"total": len(file_sources), "processing": queue_depth},
+        "storage": {"bytes": storage_bytes},
+        "asr": {"engine": ASR_ENGINE, "model": ASR_MODEL if ASR_ENGINE == "faster-whisper" else "demo"},
+    }
+
+
 @app.get("/api/health/live")
 async def health_live() -> dict[str, str]:
     return {"status": "ok"}

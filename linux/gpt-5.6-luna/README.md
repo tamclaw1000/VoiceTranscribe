@@ -129,4 +129,5 @@ curl http://tamclaw:10000/api/capabilities
 - Backgrounding the capture tab produces a visible warning; return the tab to the foreground to restore the event connection promptly and avoid browser throttling delays.
 - The Capture panel displays the most recent client-to-server audio acknowledgement latency using the existing frame timestamp contract.
 - The Capture panel counts observed gaps in acknowledged audio-frame sequence numbers and total acknowledgements, shows capture uptime, counts rendered events, records reconnects, and shows average acknowledgement latency so transport loss or stalled processing is visible instead of silent.
+- `/api/metrics` exposes aggregate active-session, file-queue, storage, and ASR diagnostics without transcript/audio content.
 - HTTPS is enabled by default for microphone access. The generated development certificate is not publicly trusted; production deployments should replace it with a certificate trusted by the client.

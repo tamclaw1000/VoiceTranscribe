@@ -140,13 +140,14 @@ HTTP failures use a stable envelope: `{ "error": { "code": "â€¦", "message": "â€
 32. The browser counts rendered server events per live session, providing a lightweight indication of event-flow activity without changing the event contract.
 33. Reconnects are counted locally when an active session's WebSocket closes, making proxy instability visible while preserving the bounded reconnect behavior.
 34. The browser maintains a session-local average of client-observed acknowledgement latency alongside the latest sample; both remain diagnostic estimates based on browser and server clocks.
+35. The `/api/metrics` endpoint exposes aggregate active-session, file-queue, storage, and ASR diagnostics without exposing transcript or audio content.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `26`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `27`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`https://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.

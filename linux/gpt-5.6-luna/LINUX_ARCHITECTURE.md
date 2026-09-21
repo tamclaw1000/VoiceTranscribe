@@ -131,13 +131,14 @@ HTTP failures use a stable envelope: `{ "error": { "code": "â€¦", "message": "â€
 23. Browser operations publish user-visible outcomes to an `aria-live` notification region; detailed server messages are read from the stable API error envelope while the header badge remains a concise connection indicator.
 24. Microphone setup negotiates the input before creating the server session, records the actual browser track settings in the session request, and stops the session when the input track ends unexpectedly.
 25. Audio frame metadata is deliberately separate from the PCM binary payload so the existing low-copy audio path remains intact; the server pairs the ordered JSON metadata with the next binary WebSocket message and acknowledges both values.
+26. Stop first disconnects the browser capture graph, then waits up to 1.5 seconds for acknowledged frame sequences before sending transcription/recording stop commands; any remaining gap is reported to the user.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `17`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `18`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`https://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.

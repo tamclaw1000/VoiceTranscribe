@@ -881,3 +881,38 @@ Make the browser-to-server audio transport traceable by attaching frame sequence
 
 - Frame metadata is diagnostic and is not persisted or authenticated.
 - The browser still sends binary PCM only while the WebSocket is open; pending-frame flushing remains a later lifecycle improvement.
+
+## Phase 24 — Graceful audio-frame flush on stop
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Prevent the browser from stopping a live session while recently captured PCM frames are still in flight, and make any transport loss visible to the user.
+
+### Delivered
+
+- Tracked the highest acknowledged audio-frame sequence in the browser.
+- Added a bounded flush wait after capture stops and before transcription/recording stop commands are sent.
+- Added a persistent notification when the flush timeout leaves frames unacknowledged.
+- Ensured `audio.ack` messages are processed even when their transport sequence matches an already-seen event sequence.
+- Added the stop-flush behavior to the documented transport lifecycle.
+- Bumped Linux metadata from build `17` to build `18` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- Local checklist section 6: flush pending frames before stopping a session.
+
+### Verification
+
+- Python, JavaScript, shell, Compose, and diff checks passed.
+- Dockerized regression suite passed: `14 passed` with one existing Starlette deprecation warning.
+- Docker image rebuilt successfully.
+- Direct and public Traefik health endpoints report version `0.2.0`, build `18`.
+- Served public browser JavaScript contains the bounded `waitForAudioFlush` lifecycle.
+- Audio acknowledgement contract remains covered by the WebSocket integration test.
+
+### Limitations and next step
+
+- The flush is bounded at 1.5 seconds; network loss can still leave an acknowledged-gap diagnostic.

@@ -92,7 +92,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [ ] Convert or resample frames as required by the transport contract.
 - [x] Add sequence numbers and timestamps to audio frames.
 - [ ] Stream frames over an authenticated WebSocket.
-- [ ] Flush pending frames before stopping a session.
+- [x] Flush pending frames before stopping a session.
 - [x] Handle browser tab suspension, device unplug, and input-track termination.
 - [ ] Add a browser fake-audio test source for deterministic tests.
 - [x] Document HTTPS requirements for non-localhost microphone capture.

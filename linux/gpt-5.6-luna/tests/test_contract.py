@@ -17,6 +17,9 @@ def test_browser_shell_exposes_accessible_notification_surface():
     assert 'aria-live="polite"' in response.text
     assert 'id="deviceDetails"' in response.text
     assert 'id="captureFormat"' in response.text
+    browser_script = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text()
+    assert "waitForAudioFlush" in browser_script
+    assert "lastAckedAudioFrame" in browser_script
 
 
 def test_health_and_capabilities_expose_version_and_build():

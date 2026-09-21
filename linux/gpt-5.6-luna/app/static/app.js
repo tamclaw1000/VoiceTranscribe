@@ -13,6 +13,7 @@ let shouldReconnect = false;
 let notificationTimer = null;
 let captureStopping = false;
 let audioFrameSequence = 0;
+let lastAckedAudioFrame = 0;
 
 function showNotification(text, kind = 'neutral', timeout = 5000) {
   const el = $('notification');
@@ -86,7 +87,7 @@ function renderSegment(segment) {
 }
 
 function applyEvent(event) {
-  if (event.sequence && event.sequence <= lastSequence) return;
+  if (event.type !== 'audio.ack' && event.sequence && event.sequence <= lastSequence) return;
   if (event.sequence) lastSequence = event.sequence;
   logEvent(event);
   const payload = event.payload || {};
@@ -142,6 +143,9 @@ function applyEvent(event) {
       break;
     case 'audio.ack':
       $('audioBytes').textContent = formatBytes(payload.totalBytes);
+      if (Number.isFinite(Number(payload.frameSequence))) {
+        lastAckedAudioFrame = Math.max(lastAckedAudioFrame, Number(payload.frameSequence));
+      }
       break;
   }
   renderSession();
@@ -391,6 +395,7 @@ async function startSession() {
     session = await response.json();
     lastSequence = 0;
     audioFrameSequence = 0;
+    lastAckedAudioFrame = 0;
     $('transcript').innerHTML = '';
     shouldReconnect = true;
     reconnectAttempt = 0;
@@ -407,12 +412,24 @@ async function startSession() {
   }
 }
 
+async function waitForAudioFlush(timeout = 1500) {
+  const deadline = Date.now() + timeout;
+  while (socket?.readyState === WebSocket.OPEN && lastAckedAudioFrame < audioFrameSequence && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return lastAckedAudioFrame >= audioFrameSequence;
+}
+
 async function stopSession() {
   if (!session) return;
   shouldReconnect = false;
+  stopMicrophone();
+  const flushed = await waitForAudioFlush();
+  if (!flushed && audioFrameSequence > lastAckedAudioFrame) {
+    showNotification(`Stopped with ${audioFrameSequence - lastAckedAudioFrame} audio frame${audioFrameSequence - lastAckedAudioFrame === 1 ? '' : 's'} not acknowledged.`, 'bad', 0);
+  }
   await fetch(`/api/sessions/${session.sessionId}/transcription/stop`, { method: 'POST' });
   await fetch(`/api/sessions/${session.sessionId}/recording/stop`, { method: 'POST' });
-  stopMicrophone();
   if (socket) socket.close();
   session = null;
   renderSession();

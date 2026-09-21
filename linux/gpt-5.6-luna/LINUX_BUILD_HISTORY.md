@@ -1280,15 +1280,16 @@ Complement the latest acknowledgement latency with a session-local average for e
 - Dockerized contract tests passed.
 - Compose configuration passed.
 - Docker image rebuilt and restarted.
-- Direct backend health reports build `26`.
+- Direct backend health reports build `27`.
 
 ## Phase 33 — Server-side observability endpoint
 
 **Release:** `0.2.0`
 **Build:** `27`
-**Git commit:** recorded after this phase commit
+**Git commit:** `0cfbfbf`
 
-**Status:** In progress
+**Status:** Complete
+**Date:** 2026-09-21
 
 ### Goal
 
@@ -1299,3 +1300,21 @@ Expose operational counters for active sessions, queued file work, storage usage
 - Added `GET /api/metrics`.
 - Added aggregate session, file-queue, storage-byte, and ASR diagnostics.
 - Added contract coverage and updated deployment, architecture, README, and checklist metadata.
+
+## Phase 34 — Observability integration coverage
+
+**Release:** `0.2.0`
+**Build:** `28`
+**Git commit:** recorded after this phase commit
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Verify that server observability reflects live API state rather than being a static health decoration.
+
+### Delivered
+
+- Added integration coverage that creates a session and verifies `/api/metrics` reports it.
+- Updated the checklist and architecture contract notes.

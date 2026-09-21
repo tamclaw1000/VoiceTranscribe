@@ -53,6 +53,15 @@ def test_health_and_capabilities_expose_version_and_build():
     assert capabilities.json()["build"] == APP_BUILD
 
 
+def test_metrics_reflect_created_session():
+    client = TestClient(app)
+    created = client.post("/api/sessions", json={"source_name": "Metrics test"}).json()
+    metrics = client.get("/api/metrics").json()
+    assert metrics["sessions"]["total"] >= 1
+    client.delete(f"/api/sessions/{created['sessionId']}")
+    sessions.pop(created["sessionId"], None)
+
+
 def test_completed_session_metadata_survives_state_reload():
     session = Session(
         id="persistent-session",

@@ -5,7 +5,7 @@ os.environ["VT_DATA_DIR"] = str(Path(__file__).parent / "data")
 
 from fastapi.testclient import TestClient
 
-from app.main import APP_BUILD, APP_VERSION, Session, app, audio_path, load_persistent_state, markdown_for, persist_session, sessions
+from app.main import APP_BUILD, APP_VERSION, FileSource, Session, app, audio_path, load_persistent_state, markdown_for, persist_session, sessions
 
 
 def test_health_and_capabilities_expose_version_and_build():
@@ -80,6 +80,35 @@ def test_validation_errors_use_stable_envelope():
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"
     assert response.json()["error"]["requestId"] == response.headers["X-Request-ID"]
+
+
+def test_file_snapshot_exposes_linked_transcript():
+    session = Session(
+        id="file-session",
+        source_name="speech.wav",
+        sample_rate=16000,
+        channels=1,
+        created_at="2026-09-21T00:00:00+00:00",
+        state="completed",
+        finalized_segments=[{"segmentId": "segment-1", "text": "Recognized text.", "audioOffset": 0.0}],
+    )
+    sessions[session.id] = session
+    source = FileSource(
+        id="file-source",
+        original_name="speech.wav",
+        original_path=Path("/data/files/file-source-original.wav"),
+        normalized_path=None,
+        size_bytes=10,
+        duration=1.0,
+        sample_rate=16000,
+        channels=1,
+        format_name="WAV",
+        status="completed",
+        progress=1.0,
+        session_id=session.id,
+    )
+    assert source.snapshot()["transcript"][0]["text"] == "Recognized text."
+    sessions.pop(session.id, None)
 
 
 def test_session_delete_removes_recording_artifact_and_metadata():

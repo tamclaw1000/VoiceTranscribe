@@ -470,3 +470,37 @@ Give users an explicit, safe way to remove imported files and completed sessions
 - Retention/expiry cleanup jobs are not implemented.
 - Deletion is not authenticated; the service remains trusted-LAN-only.
 - Next recommended step is browser end-to-end coverage or recording metadata/playback hardening.
+
+## Phase 12 — File transcription result visibility
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Make imported-file transcription visibly useful in the browser instead of showing only a progress percentage.
+
+### Delivered
+
+- Marked a file job `queued` synchronously before scheduling its background transcription task, preventing the UI from missing the processing transition.
+- Extended file-source snapshots with linked finalized transcript segments.
+- Added browser polling for `queued`, `normalizing`, and `transcribing` states.
+- Added finalized segment text and audio offsets directly to each completed file card.
+- Added a completion message showing the number of produced segments.
+- Bumped Linux build metadata from `5` to `6` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- No new checklist item was marked complete; this phase fixes the observable behavior of the already-implemented file transcription job path.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Contract/media tests cover linked file transcript exposure and passed in Docker.
+- Fake-ASR file flow was used for deterministic regression coverage.
+- Live service reports build `6` after rebuild and restart.
+
+### Limitations and next step
+
+- The default faster-whisper profile still requires model inference and may take time before results appear.
+- Full browser automation and playback of imported source files remain open checklist items.

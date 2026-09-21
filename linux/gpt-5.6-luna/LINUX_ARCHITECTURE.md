@@ -48,7 +48,7 @@ The client tracks `lastSequence` and reconnects the event WebSocket with `?after
 
 `FileSource` tracks the original upload, safe generated storage path, FFprobe metadata, normalized artifact, progress, status, error, and any file-transcription session. Uploads are extension-filtered and size-limited, written below `/data/files`, probed with `ffprobe`, and normalized with `ffmpeg` to mono 16 kHz signed PCM WAV. The original is retained for later playback or reprocessing. The file-transcription job selects the configured adapter: deterministic fake text in the default image, or lazy faster-whisper inference in the optional ASR image. The normalized artifact and file-session contract provide audio-relative offsets for either path.
 
-The WebSocket path selects the rolling-window faster-whisper worker by default or fake finalization in development mode. File transcription uses the same lazy model loader. Both paths preserve the session/event contract; the live worker processes ten-second windows, emits audio-relative offsets, and publishes queued/running/completed/failed ASR status.
+The WebSocket path selects the rolling-window faster-whisper worker by default or fake finalization in development mode. File transcription uses the same lazy model loader. Both paths preserve the session/event contract; the live worker processes ten-second windows, emits audio-relative offsets, and publishes queued/running/completed/failed ASR status. File-source snapshots include linked finalized segments so the browser can render imported-file results without opening a separate session view.
 
 ### Session state
 
@@ -120,13 +120,14 @@ HTTP failures use a stable envelope: `{ "error": { "code": "â€¦", "message": "â€
 13. Stop commands finalize live transcription and recording independently.
 14. Markdown export reads the in-memory session and references the persisted PCM or normalized file artifact.
 15. Explicit deletion removes session/file metadata and data-volume artifacts; active work must be stopped first.
+16. File transcription is queued before its background task starts; the browser polls through queued/processing terminal states and renders finalized segments in the file card.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `5`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `6`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`http://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.

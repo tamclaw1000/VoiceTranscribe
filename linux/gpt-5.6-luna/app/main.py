@@ -71,6 +71,7 @@ class FileSource:
     session_id: str | None = None
 
     def snapshot(self) -> dict[str, Any]:
+        linked_session = sessions.get(self.session_id) if self.session_id else None
         return {
             "id": self.id,
             "name": self.original_name,
@@ -83,6 +84,7 @@ class FileSource:
             "progress": self.progress,
             "error": self.error,
             "sessionId": self.session_id,
+            "transcript": linked_session.finalized_segments if linked_session else [],
         }
 
 
@@ -859,6 +861,10 @@ async def file_transcribe(file_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="File is already processing")
     if source.normalized_path is None or not source.normalized_path.exists():
         raise HTTPException(status_code=422, detail="File has no normalized audio artifact")
+    source.status = "queued"
+    source.progress = 0.0
+    source.error = None
+    persist_file_source(source)
     asyncio.create_task(transcribe_file(source))
     return source.snapshot()
 

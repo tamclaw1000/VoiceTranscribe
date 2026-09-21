@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# Extract just the audio from a media file (video container or audio file) into a
+# 16 kHz mono WAV, which is the format the app transcribes.
+#
+# The output is the input's full filename plus ".wav", written next to the input:
+#   extract-audio "Episode.avi"   ->  "Episode.avi.wav"
+# The original name is kept whole so the audio still says which file it came from.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: extract-audio <input-file> [output-file] [--force]
+
+Extracts the audio track from <input-file> into a WAV the app can transcribe
+(16 kHz, mono, 16-bit PCM). Video is discarded, never decoded.
+
+Defaults to "<input-file>.wav", beside the input file.
+
+Options:
+  -f, --force   Overwrite the output file if it already exists
+  -h, --help    Show this message
+
+Requires ffmpeg (brew install ffmpeg).
+EOF
+}
+
+force=0
+positional=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -f|--force) force=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*)
+      echo "error: unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      positional+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ ${#positional[@]} -lt 1 ]]; then
+  echo "error: no input file given." >&2
+  usage >&2
+  exit 2
+fi
+
+if [[ ${#positional[@]} -gt 2 ]]; then
+  echo "error: too many arguments." >&2
+  usage >&2
+  exit 2
+fi
+
+input="${positional[0]}"
+
+if [[ ! -e "$input" ]]; then
+  echo "error: input file not found: $input" >&2
+  exit 1
+fi
+
+if [[ ! -f "$input" ]]; then
+  echo "error: input is not a regular file: $input" >&2
+  exit 1
+fi
+
+if [[ ${#positional[@]} -eq 2 ]]; then
+  output="${positional[1]}"
+else
+  output="${input}.wav"
+fi
+
+if [[ -e "$output" && $force -eq 0 ]]; then
+  echo "error: output already exists: $output" >&2
+  echo "Pass --force to overwrite it." >&2
+  exit 1
+fi
+
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "error: ffmpeg is required to extract audio." >&2
+  echo "Install it with: brew install ffmpeg" >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$output")"
+
+ffmpeg_args=(-hide_banner -loglevel error -nostdin -err_detect ignore_err)
+if [[ $force -eq 1 ]]; then
+  ffmpeg_args+=(-y)
+else
+  ffmpeg_args+=(-n)
+fi
+
+ffmpeg_log="$(mktemp -t voicetranscribe-extract-audio.XXXXXX)"
+trap 'rm -f "$ffmpeg_log"' EXIT
+
+# -vn discards video rather than decoding it; the audio is converted to the
+# pipeline's format here so nothing downstream has to guess at it. A malformed
+# packet in the source is common and is skipped (-err_detect ignore_err) rather
+# than failing the whole extraction.
+if ! ffmpeg "${ffmpeg_args[@]}" \
+  -i "$input" \
+  -vn \
+  -ac 1 \
+  -ar 16000 \
+  -c:a pcm_s16le \
+  "$output" 2>"$ffmpeg_log"; then
+  cat "$ffmpeg_log" >&2
+  echo "error: could not extract audio from: $input" >&2
+  rm -f "$output"
+  exit 1
+fi
+
+if [[ ! -s "$output" ]]; then
+  echo "error: extraction produced no audio: $output" >&2
+  rm -f "$output"
+  exit 1
+fi
+
+# The output is 16 kHz mono 16-bit PCM, so its duration is its size over 32000
+# bytes per second. Both numbers come from the file's own byte count, never from
+# the source (a truncated conversion must not report the source's duration) and
+# never from `du`, which reports allocated blocks: on this volume it reports 97M
+# of blocks for this 87 MB file, which would misstate what was written.
+bytes="$(wc -c <"$output" | tr -d ' ')"
+seconds=$((bytes / 32000))
+printf 'Wrote audio: %s (%d:%02d, %d MB)\n' \
+  "$output" \
+  "$((seconds / 60))" \
+  "$((seconds % 60))" \
+  "$((bytes / 1000000))"

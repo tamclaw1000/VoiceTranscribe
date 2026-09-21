@@ -192,6 +192,15 @@ Refresh only the .app package from the current build:
 # → dist/VoiceTranscribe.app
 ```
 
+Extract audio from a media file into a WAV the app can read as a file source (a dev tool, not part of the bundle):
+
+```sh
+./scripts/extract-audio "Episode.avi"
+# → Episode.avi.wav  (16 kHz mono, beside the input; --force to overwrite)
+```
+
+`./scripts/extract-audio` shells out to `ffmpeg`, discarding video with `-vn` rather than decoding it, and is currently the only supported way to make a video container readable by the app — the app cannot read one itself yet (see `TODO.md`).
+
 Run tests:
 ```sh
 swift test

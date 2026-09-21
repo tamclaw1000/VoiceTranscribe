@@ -2263,3 +2263,22 @@ The session's single `playback.target` event was for an **imported file**, and i
 - [ ] Not visually confirmed: the bar, the highlight, the centered follow scroll, and click-to-play. The math they rest on is tested; the rendering is not, and this is the third release in this branch to ship that way.
 
 **The lesson worth keeping.** Three symptoms read as three bugs and were one; the trace log answered it in a single line, which is cheaper than reading code. And the specific error was scoping a limitation to the whole row when it only held for one of the row's two clocks — with a TODO that said exactly the right fix ("the analyzer's own result time ranges") sitting unread next to a feature that did not work.
+
+## 112. Extract-Audio Script (tooling — no app version change)
+
+A helper that pulls just the audio out of any media file — the AVI the samples folder carries, or anything else — and writes a WAV the app's file source can read. It is a dev tool, so it carries no `Resources/Info.plist` bump and nothing in the app bundle changes; `#104` (agent process and gitignore cleanup) and `#106` (build script path repair) set that precedent for tooling-only work.
+
+### 112a. What It Does
+
+- [x] Added `scripts/extract-audio`: `extract-audio <input> [output] [--force]` writes `<input>.wav` beside the input, keeping the original filename whole (`Episode.avi` → `Episode.avi.wav`) so the audio still names the file it came from.
+- [x] Output is the pipeline's format — 16 kHz, mono, 16-bit PCM — so nothing downstream has to guess at it, and `-vn` discards the video track rather than decoding it.
+- [x] Refuses to overwrite an existing output unless `--force` is given. `ffmpeg -y` was available and rejected: silently replacing whatever sits at that path is the wrong default for a general-purpose tool.
+- [x] A failed conversion deletes its partial output and reports ffmpeg's own message, so a half-written WAV cannot be mistaken for a result. `-err_detect ignore_err` skips the malformed packet this sample stream contains; `-nostdin` stops ffmpeg blocking on a prompt.
+- [x] The progress line reports duration and size from the output's own byte count — not from the source, so a truncated run cannot claim the source's length, and not from `du`, which reports allocated blocks (97M of blocks for this 87 MB file on this volume).
+
+### 112b. Verification
+
+- [x] Run on the real fixture: `../samples/Star Trek … Okona - 1988-12-12.avi` → 45:30, 87,387,230 bytes, `WAVE 1 ch 16000 Hz Int16`, `duration 2730.848` — identical to the container's own duration, so nothing is trimmed or padded. 1.1 s for the whole episode.
+- [x] Error paths exercised, not assumed: no argument (exit 2 with usage), missing file (exit 1 naming the path), existing output without `--force` (exit 1 in 0.014 s, before any conversion), `--force`, an explicit output path, and a machine with no ffmpeg (exit 1 with the install hint).
+- [x] No test/build impact by construction: this branch adds one file under `scripts/` and changes documentation only — no `Sources/`, `Resources/`, `Package.swift`, or test change — so the app bundle and the suite are untouched, and the tool itself was verified by the runs above rather than by rerunning a suite that cannot observe it.
+- [ ] Not built: AVI audio import, which this worktree was originally opened for. What it needs is measured and recorded in `TODO.md` (`# NEW FEATURES`) so the findings are not re-derived: AVFoundation cannot open the container at all, but macOS decodes its AC-3 once remuxed.

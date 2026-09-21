@@ -387,6 +387,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Bound concurrent file transcription jobs.
 - [x] Include export generation and release/build provenance.
 - [x] Preserve monotonic occurrence indexes for live finalized segments.
+- [x] Add a redacted diagnostics endpoint for support troubleshooting.
 
 
 

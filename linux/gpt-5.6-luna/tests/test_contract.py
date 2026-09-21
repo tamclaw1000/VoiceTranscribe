@@ -44,6 +44,10 @@ def test_health_and_capabilities_expose_version_and_build():
     health = client.get("/api/health/ready")
     capabilities = client.get("/api/capabilities")
     metrics = client.get("/api/metrics")
+    diagnostics = client.get("/api/diagnostics")
+    assert diagnostics.status_code == 200
+    assert diagnostics.json()["diagnosticsVersion"] == 1
+    assert "dataDirectory" not in diagnostics.json()
     assert metrics.status_code == 200
     assert metrics.json()["build"] == APP_BUILD
     assert "sessions" in metrics.json()

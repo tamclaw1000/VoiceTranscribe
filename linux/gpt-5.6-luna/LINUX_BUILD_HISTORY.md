@@ -1398,3 +1398,23 @@ Preserve sentence occurrence identity in live finalized transcript events so rep
 - Fixed live fake-ASR segments to use monotonic `sentenceIndex` values.
 - Added regression coverage for two sequential live segments.
 - Updated architecture, README, checklist, and agent guide.
+
+## Phase 39 — Redacted diagnostics endpoint
+
+**Release:** `0.2.0`
+**Build:** `33`
+**Git commit:** recorded after this phase commit
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Provide a safe support snapshot for troubleshooting without requiring access to transcript, audio, filesystem, or secret data.
+
+### Delivered
+
+- Added `GET /api/diagnostics`.
+- Included application metadata, runtime mode, feature availability, and aggregate metrics.
+- Explicitly excluded filesystem paths, transcript/audio content, and secrets.
+- Added contract coverage for the redaction boundary.

@@ -763,6 +763,18 @@ async def metrics() -> dict[str, Any]:
     }
 
 
+@app.get("/api/diagnostics")
+async def diagnostics() -> dict[str, Any]:
+    current_metrics = await metrics()
+    return {
+        "diagnosticsVersion": 1,
+        "application": {"version": APP_VERSION, "build": APP_BUILD},
+        "runtime": {"asrEngine": ASR_ENGINE, "asrModel": ASR_MODEL if ASR_ENGINE == "faster-whisper" else "demo"},
+        "metrics": current_metrics,
+        "features": {"browserCapture": True, "fileImport": True, "playback": True, "diarization": False, "aiPrompts": False, "jev": False},
+    }
+
+
 @app.get("/api/health/live")
 async def health_live() -> dict[str, str]:
     return {"status": "ok"}

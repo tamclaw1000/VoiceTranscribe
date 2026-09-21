@@ -144,6 +144,11 @@ function applyEvent(event) {
       break;
     case 'audio.ack':
       $('audioBytes').textContent = formatBytes(payload.totalBytes);
+      const capturedAt = Number(payload.capturedAt);
+      if (Number.isFinite(capturedAt)) {
+        const latencyMs = Math.max(0, Date.now() - capturedAt);
+        $('audioTransportLatency').textContent = `${latencyMs} ms`;
+      }
       if (Number.isFinite(Number(payload.frameSequence))) {
         lastAckedAudioFrame = Math.max(lastAckedAudioFrame, Number(payload.frameSequence));
       }

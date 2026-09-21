@@ -951,3 +951,38 @@ Make browser backgrounding visible during live capture and recover the event con
 
 - Browser vendors may still throttle or pause microphone processing while a tab is hidden; this phase reports that risk but cannot override browser scheduling.
 - Authentication, durable event storage, and browser end-to-end automation remain open.
+
+## Phase 26 — Audio transport latency diagnostics
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Expose the most recent browser-to-server audio acknowledgement latency so a user can distinguish an active capture path from a stalled or delayed transport.
+
+### Delivered
+
+- Added a Transport metric to the browser Capture panel.
+- Calculated best-effort latency from the existing `capturedAt` value returned by `audio.ack`.
+- Updated the contract test to require the metric and acknowledgement-latency behavior.
+- Documented that the value is a client-side diagnostic rather than authoritative server timing.
+- Bumped Linux metadata from build `19` to build `20` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- No broad observability checklist item was marked complete; this is a browser-side slice of the larger audio-lag and dropped-frame metrics work.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized contract tests passed.
+- Compose configuration passed.
+- Docker image rebuilt and restarted.
+- Direct backend and public Traefik health endpoints report version `0.2.0`, build `20`.
+- Public browser HTML and JavaScript contain the Transport metric.
+
+### Limitations and next step
+
+- The metric measures elapsed client wall-clock time from capture timestamp to acknowledgement and can be skewed by browser clock behavior; it does not yet report dropped frames, queue depth, or server processing time.
+- Authentication, durable event storage, and browser end-to-end automation remain open.

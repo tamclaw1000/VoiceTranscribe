@@ -706,6 +706,16 @@ def error_response(request: Request, status_code: int, code: str, message: str) 
 
 
 @app.middleware("http")
+async def security_headers(request: Request, call_next: Any) -> JSONResponse:
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("Permissions-Policy", "microphone=(self)")
+    return response
+
+
+@app.middleware("http")
 async def request_id_middleware(request: Request, call_next: Any) -> JSONResponse:
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request.state.request_id = request_id

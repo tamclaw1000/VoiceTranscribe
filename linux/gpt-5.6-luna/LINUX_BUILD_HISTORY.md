@@ -1318,3 +1318,24 @@ Verify that server observability reflects live API state rather than being a sta
 
 - Added integration coverage that creates a session and verifies `/api/metrics` reports it.
 - Updated the checklist and architecture contract notes.
+
+## Phase 35 — Baseline browser security headers
+
+**Release:** `0.2.0`
+**Build:** `29`
+**Git commit:** recorded after this phase commit
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Reduce common browser embedding, content-sniffing, referrer, and microphone-policy risks while authentication remains deferred.
+
+### Delivered
+
+- Added `X-Content-Type-Options: nosniff`.
+- Added `X-Frame-Options: DENY`.
+- Added same-origin referrer policy and a microphone Permissions Policy.
+- Added contract assertions for the response headers.
+- Documented that these headers do not replace authentication.

@@ -142,13 +142,14 @@ HTTP failures use a stable envelope: `{ "error": { "code": "â€¦", "message": "â€
 34. The browser maintains a session-local average of client-observed acknowledgement latency alongside the latest sample; both remain diagnostic estimates based on browser and server clocks.
 35. The `/api/metrics` endpoint exposes aggregate active-session, file-queue, storage, and ASR diagnostics without exposing transcript or audio content.
 36. Contract tests exercise the metrics endpoint against live in-memory session state, keeping operational reporting coupled to API behavior.
+37. HTTP responses include baseline browser security headers; authentication and session ownership remain separate required work before untrusted exposure.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `28`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `29`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`https://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.

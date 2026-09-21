@@ -47,6 +47,9 @@ def test_health_and_capabilities_expose_version_and_build():
     assert metrics.json()["build"] == APP_BUILD
     assert "sessions" in metrics.json()
     assert "storage" in metrics.json()
+    assert health.headers["X-Content-Type-Options"] == "nosniff"
+    assert health.headers["X-Frame-Options"] == "DENY"
+    assert health.headers["Permissions-Policy"] == "microphone=(self)"
     assert health.json()["version"] == APP_VERSION
     assert health.json()["build"] == APP_BUILD
     assert capabilities.json()["version"] == APP_VERSION

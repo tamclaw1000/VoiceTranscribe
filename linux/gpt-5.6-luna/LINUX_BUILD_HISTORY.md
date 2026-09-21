@@ -2,6 +2,7 @@
 
 This file records each implementation phase for the Linux web version. Every completed implementation step must update this file and `LINUX_ARCHITECTURE.md` before the next step begins. The local `linux-implementation-plan.md` is the checklist for this working directory; mark an item complete only after implementation and verification.
 
+
 ## Phase 0 — Design and implementation target
 
 **Status:** Complete
@@ -985,4 +986,40 @@ Expose the most recent browser-to-server audio acknowledgement latency so a user
 ### Limitations and next step
 
 - The metric measures elapsed client wall-clock time from capture timestamp to acknowledgement and can be skewed by browser clock behavior; it does not yet report dropped frames, queue depth, or server processing time.
+- Authentication, durable event storage, and browser end-to-end automation remain open.
+
+## Phase 27 — Audio acknowledgement gap diagnostics
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Make gaps in acknowledged audio-frame sequences visible so transport loss is not mistaken for a healthy capture path.
+
+### Delivered
+
+- Added a Dropped metric to the browser Capture panel.
+- Counted sequence gaps only after the first valid acknowledgement, avoiding startup false positives.
+- Reset the dropped-frame count when a new live session starts.
+- Added contract coverage for the dropped-frame display and logic.
+- Documented that the count is client-observed and does not prove server-side loss by itself.
+- Bumped Linux metadata from build `20` to build `21` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- No broad observability checklist item was marked complete; this is the dropped-frame portion of the larger audio-lag, queue-depth, real-time-factor, and metrics work.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized contract tests passed.
+- Compose configuration passed.
+- Docker image rebuilt and restarted.
+- Direct backend and public Traefik health endpoints report version `0.2.0`, build `21`.
+- Public browser HTML and JavaScript contain the Dropped metric.
+
+### Limitations and next step
+
+- A count of acknowledged sequence gaps cannot distinguish network loss from browser scheduling or a server-side acknowledgement ordering problem; server-side counters and browser end-to-end tests remain open.
 - Authentication, durable event storage, and browser end-to-end automation remain open.

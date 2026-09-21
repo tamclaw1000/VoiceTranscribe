@@ -14,6 +14,7 @@ let notificationTimer = null;
 let captureStopping = false;
 let audioFrameSequence = 0;
 let lastAckedAudioFrame = 0;
+let droppedAudioFrames = 0;
 let pageHidden = document.hidden;
 
 function showNotification(text, kind = 'neutral', timeout = 5000) {
@@ -150,7 +151,12 @@ function applyEvent(event) {
         $('audioTransportLatency').textContent = `${latencyMs} ms`;
       }
       if (Number.isFinite(Number(payload.frameSequence))) {
-        lastAckedAudioFrame = Math.max(lastAckedAudioFrame, Number(payload.frameSequence));
+        const frameSequence = Number(payload.frameSequence);
+        if (lastAckedAudioFrame > 0 && frameSequence > lastAckedAudioFrame + 1) {
+          droppedAudioFrames += frameSequence - lastAckedAudioFrame - 1;
+          $('audioDroppedFrames').textContent = String(droppedAudioFrames);
+        }
+        lastAckedAudioFrame = Math.max(lastAckedAudioFrame, frameSequence);
       }
       break;
   }
@@ -415,6 +421,8 @@ async function startSession() {
     lastSequence = 0;
     audioFrameSequence = 0;
     lastAckedAudioFrame = 0;
+    droppedAudioFrames = 0;
+    $('audioDroppedFrames').textContent = '0';
     $('transcript').innerHTML = '';
     shouldReconnect = true;
     reconnectAttempt = 0;

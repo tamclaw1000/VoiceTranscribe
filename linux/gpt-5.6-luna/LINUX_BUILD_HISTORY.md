@@ -1339,3 +1339,23 @@ Reduce common browser embedding, content-sniffing, referrer, and microphone-poli
 - Added same-origin referrer policy and a microphone Permissions Policy.
 - Added contract assertions for the response headers.
 - Documented that these headers do not replace authentication.
+
+## Phase 36 — Bounded transcription concurrency
+
+**Release:** `0.2.0`
+**Build:** `30`
+**Git commit:** recorded after this phase commit
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Prevent multiple imported files from starting unbounded ASR work on CPU deployments.
+
+### Delivered
+
+- Added `VT_MAX_CONCURRENT_FILE_JOBS`, defaulting to `2`.
+- Added a process-local semaphore around file transcription workers.
+- Preserved queued and processing states for browser polling and metrics.
+- Updated architecture, README, checklist, and agent guide.

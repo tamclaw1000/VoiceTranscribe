@@ -31,6 +31,7 @@ FILES_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "voice-transcribe.sqlite3"
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_UPLOAD_BYTES = int(os.environ.get("VT_MAX_UPLOAD_BYTES", str(500 * 1024 * 1024)))
+MAX_CONCURRENT_FILE_JOBS = max(1, int(os.environ.get("VT_MAX_CONCURRENT_FILE_JOBS", "2")))
 SUPPORTED_EXTENSIONS = {"wav", "m4a", "mp3", "flac", "ogg", "webm", "mp4", "avi", "mov"}
 ASR_ENGINE = os.environ.get("VT_ASR_ENGINE", "fake").lower()
 ASR_MODEL = os.environ.get("VT_ASR_MODEL", "small.en")
@@ -137,6 +138,7 @@ class Session:
 
 sessions: dict[str, Session] = {}
 file_sources: dict[str, FileSource] = {}
+file_job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_FILE_JOBS)
 
 
 def initialize_database() -> None:
@@ -549,6 +551,11 @@ async def drain_live_asr(session: Session) -> None:
 
 
 async def transcribe_file(source: FileSource) -> None:
+    async with file_job_semaphore:
+        await _transcribe_file(source)
+
+
+async def _transcribe_file(source: FileSource) -> None:
     source.status = "loading"
     source.progress = 0.0
     persist_file_source(source)

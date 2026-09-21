@@ -434,3 +434,39 @@ Make backend failures consistently consumable by the browser and diagnosable by 
 
 - Request IDs are response/correlation metadata only; structured request/session/job logging and authentication remain open.
 - Next recommended step is to harden recording/file lifecycle behavior or add browser end-to-end coverage.
+
+## Phase 11 — Explicit artifact deletion
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Give users an explicit, safe way to remove imported files and completed sessions while preventing deletion races with active recording or transcription.
+
+### Delivered
+
+- Added `DELETE /api/files/{file_id}` for imported-file metadata and original/normalized artifact cleanup.
+- Added `DELETE /api/sessions/{session_id}` for session metadata, PCM recording, live-window artifacts, and linked file-session cleanup.
+- Rejected deletion while recording, transcription, normalization, or live ASR work is active.
+- Restricted artifact removal to paths below the configured `/data` directory.
+- Added a browser Delete control for imported file cards.
+- Bumped Linux build metadata from `4` to `5` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- Local checklist section 8: file removal and cleanup behavior.
+- Local checklist section 15: session deletion and artifact cleanup.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized contract/media tests passed, including session artifact deletion.
+- Compose configuration passed.
+- Live service restarted at `http://tamclaw:10000/` and reports build `5`.
+
+### Limitations and next step
+
+- Retention/expiry cleanup jobs are not implemented.
+- Deletion is not authenticated; the service remains trusted-LAN-only.
+- Next recommended step is browser end-to-end coverage or recording metadata/playback hardening.

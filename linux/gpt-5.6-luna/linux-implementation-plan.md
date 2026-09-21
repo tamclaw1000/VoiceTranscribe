@@ -125,7 +125,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Support the initial chosen format set: WAV, M4A, MP3, FLAC, and other selected formats.
 - [ ] Decide whether AVI and video-container extraction are supported directly.
 - [x] Add imported-file metadata and duration display.
-- [ ] Add file removal and cleanup behavior.
+- [x] Add file removal and cleanup behavior.
 - [ ] Add tests for malformed, oversized, unsupported, and valid media.
 
 ## 9. Live transcription
@@ -235,7 +235,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [ ] Include details, recording rows, speaker labels/pairs, pauses, summary, AI results, Jev results, and file references.
 - [ ] Exclude API keys, secrets, and sensitive diagnostics from exports.
 - [ ] Make export generation idempotent and safe for concurrent requests.
-- [ ] Add session deletion and artifact cleanup.
+- [x] Add session deletion and artifact cleanup.
 - [ ] Add retention/expiry cleanup jobs.
 - [ ] Test export contents manually against a completed fixture session.
 

@@ -326,6 +326,27 @@ def normalized_file_path(file_id: str) -> Path:
     return FILES_DIR / f"{file_id}-16k-mono.wav"
 
 
+def remove_artifact(path: Path | None) -> None:
+    if path is None:
+        return
+    resolved = path.resolve()
+    data_root = DATA_DIR.resolve()
+    if data_root not in resolved.parents:
+        raise RuntimeError("Refusing to remove an artifact outside the data directory")
+    resolved.unlink(missing_ok=True)
+
+
+def delete_session_data(session: Session) -> None:
+    if session.audio_file is not None:
+        session.audio_file.close()
+        session.audio_file = None
+    remove_artifact(audio_path(session))
+    remove_artifact(DATA_DIR / f"{session.id}-live-window.wav")
+    with sqlite3.connect(DB_PATH) as database:
+        database.execute("DELETE FROM sessions WHERE id = ?", (session.id,))
+    sessions.pop(session.id, None)
+
+
 def probe_media(path: Path) -> tuple[float | None, int | None, int | None, str | None]:
     """Read media metadata through ffprobe; return unknown values if probing fails."""
     try:
@@ -809,6 +830,26 @@ async def file_snapshot(file_id: str) -> dict[str, Any]:
     return source.snapshot()
 
 
+@app.delete("/api/files/{file_id}")
+async def delete_file(file_id: str) -> dict[str, Any]:
+    source = file_sources.get(file_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="File source not found")
+    if source.status in {"normalizing", "transcribing"}:
+        raise HTTPException(status_code=409, detail="Cannot delete a file while it is processing")
+    linked_session = sessions.get(source.session_id) if source.session_id else None
+    if linked_session is not None and (linked_session.recording or linked_session.transcribing):
+        raise HTTPException(status_code=409, detail="Cannot delete a file with an active transcription session")
+    remove_artifact(source.original_path)
+    remove_artifact(source.normalized_path)
+    if linked_session is not None:
+        delete_session_data(linked_session)
+    with sqlite3.connect(DB_PATH) as database:
+        database.execute("DELETE FROM file_sources WHERE id = ?", (file_id,))
+    file_sources.pop(file_id, None)
+    return {"deleted": True, "fileId": file_id}
+
+
 @app.post("/api/files/{file_id}/transcribe", status_code=202)
 async def file_transcribe(file_id: str) -> dict[str, Any]:
     source = file_sources.get(file_id)
@@ -893,6 +934,22 @@ async def transcription_stop(session_id: str, _: SessionCommand | None = None) -
     persist_session(session)
     await publish(session, "transcription.completed", {"segments": len(session.finalized_segments)})
     return session.snapshot()
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str) -> dict[str, Any]:
+    session = get_session(session_id)
+    if session.recording or session.transcribing or (session.live_asr_task is not None and not session.live_asr_task.done()):
+        raise HTTPException(status_code=409, detail="Stop recording and transcription before deleting the session")
+    for source in list(file_sources.values()):
+        if source.session_id == session_id:
+            remove_artifact(source.original_path)
+            remove_artifact(source.normalized_path)
+            with sqlite3.connect(DB_PATH) as database:
+                database.execute("DELETE FROM file_sources WHERE id = ?", (source.id,))
+            file_sources.pop(source.id, None)
+    delete_session_data(session)
+    return {"deleted": True, "sessionId": session_id}
 
 
 @app.get("/api/sessions/{session_id}/export/markdown")

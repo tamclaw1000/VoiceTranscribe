@@ -99,6 +99,8 @@ Current event families include:
 - `asr.window.completed`
 - `transcription.failed` with live ASR scope
 
+Deletion endpoints are `DELETE /api/files/{file_id}` and `DELETE /api/sessions/{session_id}`. They remove SQLite metadata and artifacts below `/data`; deletion is rejected while recording or transcription is active. A file deletion also removes its linked completed/failed transcription session.
+
 HTTP failures use a stable envelope: `{ "error": { "code": "…", "message": "…", "requestId": "…" } }`. Every HTTP response includes the same request ID in `X-Request-ID`; a caller-provided header is preserved for log/request correlation. Validation failures use `validation_error`, missing resources use `not_found`, and other handled request failures use `request_failed`.
 
 ## Data flow and lifecycle
@@ -117,13 +119,14 @@ HTTP failures use a stable envelope: `{ "error": { "code": "…", "message": "�
 12. The server broadcasts transcript, level, and file lifecycle events; the browser updates its transcript, meter, and file-source status.
 13. Stop commands finalize live transcription and recording independently.
 14. Markdown export reads the in-memory session and references the persisted PCM or normalized file artifact.
+15. Explicit deletion removes session/file metadata and data-volume artifacts; active work must be stopped first.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `4`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `5`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`http://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.
@@ -135,7 +138,7 @@ HTTP failures use a stable envelope: `{ "error": { "code": "…", "message": "�
 
 The following interfaces should be added without changing the browser session/event model:
 
-- Improved live ASR segmentation, interim text, VAD tuning, durable job execution, and full structured request logging.
+- Improved live ASR segmentation, interim text, VAD tuning, durable job execution, full structured request logging, and automated retention cleanup.
 - PostgreSQL migration for multi-user/durable deployments; the current SQLite metadata repository is implemented.
 - Redis-backed job/event coordination for long-running work.
 - Asynchronous diarization and session-only voice identity.

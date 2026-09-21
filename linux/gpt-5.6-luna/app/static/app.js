@@ -142,12 +142,13 @@ function renderFileSources(files) {
     const card = document.createElement('div');
     card.className = 'file-source';
     const status = file.error || `${file.status} · ${Math.round(file.progress * 100)}%`;
-    card.innerHTML = `<strong class="name" title=""></strong><span class="meta"></span><span class="meta status-text"></span><button class="secondary" ${file.status !== 'ready' ? 'disabled' : ''}>Transcribe file</button>`;
+    card.innerHTML = `<strong class="name" title=""></strong><span class="meta"></span><span class="meta status-text"></span><div class="button-row"><button class="secondary" ${file.status !== 'ready' ? 'disabled' : ''}>Transcribe file</button><button class="secondary delete-file">Delete</button></div>`;
     card.querySelector('.name').textContent = file.name;
     card.querySelector('.name').title = file.name;
     card.querySelector('.meta').textContent = `${formatDuration(file.duration)} · ${formatBytes(file.sizeBytes)} · ${file.format}`;
     card.querySelector('.status-text').textContent = status;
     card.querySelector('button').addEventListener('click', () => transcribeFile(file.id));
+    card.querySelector('.delete-file').addEventListener('click', () => deleteFile(file.id));
     container.appendChild(card);
   }
 }
@@ -163,6 +164,16 @@ async function uploadFile(file) {
   const response = await fetch('/api/files', { method: 'POST', body: form });
   if (!response.ok) throw new Error(await response.text());
   await refreshFiles();
+}
+
+async function deleteFile(fileId) {
+  const response = await fetch(`/api/files/${fileId}`, { method: 'DELETE' });
+  if (!response.ok) {
+    setConnection(`File deletion failed: ${await response.text()}`, 'bad');
+    return;
+  }
+  await refreshFiles();
+  setConnection('File deleted', 'good');
 }
 
 async function transcribeFile(fileId) {

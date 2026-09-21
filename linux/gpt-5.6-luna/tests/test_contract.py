@@ -5,7 +5,7 @@ os.environ["VT_DATA_DIR"] = str(Path(__file__).parent / "data")
 
 from fastapi.testclient import TestClient
 
-from app.main import APP_BUILD, APP_VERSION, Session, app, load_persistent_state, markdown_for, persist_session, sessions
+from app.main import APP_BUILD, APP_VERSION, Session, app, audio_path, load_persistent_state, markdown_for, persist_session, sessions
 
 
 def test_health_and_capabilities_expose_version_and_build():
@@ -80,6 +80,19 @@ def test_validation_errors_use_stable_envelope():
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"
     assert response.json()["error"]["requestId"] == response.headers["X-Request-ID"]
+
+
+def test_session_delete_removes_recording_artifact_and_metadata():
+    client = TestClient(app)
+    created = client.post("/api/sessions", json={"source_name": "Delete me"}).json()
+    session_id = created["sessionId"]
+    artifact = audio_path(sessions[session_id])
+    artifact.write_bytes(b"pcm")
+    response = client.delete(f"/api/sessions/{session_id}")
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True, "sessionId": session_id}
+    assert session_id not in sessions
+    assert not artifact.exists()
 
 
 def test_session_snapshot_keeps_recording_and_transcription_independent():

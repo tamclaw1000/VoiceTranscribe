@@ -60,7 +60,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Add `/health/live` for process liveness.
 - [x] Add `/health/ready` for model, storage, and queue readiness.
 - [x] Add `GET /api/capabilities`.
-- [ ] Add API error envelopes with stable error codes and user-safe messages.
+- [x] Add API error envelopes with stable error codes and user-safe messages.
 - [ ] Add graceful startup and shutdown behavior.
 - [ ] Add bounded request body and upload limits.
 - [ ] Add API documentation generated from the backend contract.

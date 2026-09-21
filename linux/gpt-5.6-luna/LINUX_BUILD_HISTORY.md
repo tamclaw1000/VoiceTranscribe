@@ -401,3 +401,36 @@ Make rolling-window ASR progress and failures visible in the browser instead of 
 
 The live-ASR observability iteration increments the Linux build number from `2` to `3` while keeping version `0.2.0`. Future implementation iterations must increment `VT_BUILD` and update the runtime, browser, README, architecture, and history metadata together.
 - Live results are finalized window segments; interim decoder text, VAD-driven boundaries, and model-backed performance metrics remain open.
+
+## Phase 10 — API error envelopes and request IDs
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Make backend failures consistently consumable by the browser and diagnosable by an operator without exposing internal exception details.
+
+### Delivered
+
+- Added a stable JSON error envelope with `code`, user-safe `message`, and `requestId` fields.
+- Added request-ID middleware that generates an ID when absent and returns it in `X-Request-ID`.
+- Preserved caller-supplied `X-Request-ID` values for client/server correlation.
+- Added normalized handlers for HTTP errors and Pydantic validation failures.
+- Kept unexpected failures behind a generic `internal_error` response.
+- Bumped Linux build metadata from `3` to `4` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- Local checklist section 4: API error envelopes with stable error codes and user-safe messages.
+
+### Verification
+
+- Python syntax checks passed.
+- Contract tests cover missing-resource, validation, generated-request-ID, and caller-supplied-request-ID behavior.
+- Compose configuration and Docker tests passed.
+
+### Limitations and next step
+
+- Request IDs are response/correlation metadata only; structured request/session/job logging and authentication remain open.
+- Next recommended step is to harden recording/file lifecycle behavior or add browser end-to-end coverage.

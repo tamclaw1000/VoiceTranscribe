@@ -60,6 +60,28 @@ def test_markdown_export_contains_transcript_and_audio_reference():
     assert "session-1.pcm" in output
 
 
+def test_api_errors_have_stable_envelope_and_request_id():
+    client = TestClient(app)
+    response = client.get("/api/sessions/does-not-exist")
+    body = response.json()
+    assert response.status_code == 404
+    assert body["error"]["code"] == "not_found"
+    assert body["error"]["message"] == "Session not found"
+    assert body["error"]["requestId"] == response.headers["X-Request-ID"]
+
+    supplied = client.get("/api/sessions/does-not-exist", headers={"X-Request-ID": "request-test-1"})
+    assert supplied.headers["X-Request-ID"] == "request-test-1"
+    assert supplied.json()["error"]["requestId"] == "request-test-1"
+
+
+def test_validation_errors_use_stable_envelope():
+    client = TestClient(app)
+    response = client.post("/api/sessions", json={"sample_rate": 1})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+    assert response.json()["error"]["requestId"] == response.headers["X-Request-ID"]
+
+
 def test_session_snapshot_keeps_recording_and_transcription_independent():
     session = Session(
         id="session-2",

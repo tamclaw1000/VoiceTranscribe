@@ -16,7 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -661,6 +662,39 @@ async def stop_recording(session: Session) -> None:
 
 
 app = FastAPI(title="VoiceTranscribe Linux", version=APP_VERSION)
+
+
+def error_response(request: Request, status_code: int, code: str, message: str) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": {"code": code, "message": message, "requestId": request_id}},
+        headers={"X-Request-ID": request_id},
+    )
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next: Any) -> JSONResponse:
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+    try:
+        response = await call_next(request)
+    except Exception:
+        return error_response(request, 500, "internal_error", "An unexpected server error occurred")
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exception: HTTPException) -> JSONResponse:
+    detail = exception.detail if isinstance(exception.detail, str) else "Request failed"
+    code = "not_found" if exception.status_code == 404 else "request_failed"
+    return error_response(request, exception.status_code, code, detail)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, _: RequestValidationError) -> JSONResponse:
+    return error_response(request, 422, "validation_error", "Request validation failed")
 
 
 @app.get("/api/health/live")

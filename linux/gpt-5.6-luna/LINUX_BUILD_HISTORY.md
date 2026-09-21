@@ -1047,3 +1047,27 @@ Expose the number of accepted audio acknowledgements so the existing latency and
 - Compose configuration passed.
 - Docker image rebuilt and restarted.
 - Direct backend and public Traefik health endpoints report build `22`.
+
+## Phase 29 — Independent capture uptime
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Show how long browser capture has been active independently of transcription progress.
+
+### Delivered
+
+- Added a Capture time metric to the browser Capture panel.
+- Started and reset the timer with each live session.
+- Updated the contract test, checklist, architecture, README, and agent guide.
+- Bumped Linux metadata from build `22` to build `23`.
+
+### Verification
+
+- Python and JavaScript syntax checks passed.
+- Dockerized contract tests passed.
+- Compose configuration passed.
+- Docker image rebuilt and restarted.
+- Direct backend health reports build `23`.

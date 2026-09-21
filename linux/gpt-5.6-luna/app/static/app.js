@@ -16,6 +16,7 @@ let audioFrameSequence = 0;
 let lastAckedAudioFrame = 0;
 let droppedAudioFrames = 0;
 let audioAckCount = 0;
+let captureStartedAt = 0;
 let pageHidden = document.hidden;
 
 function showNotification(text, kind = 'neutral', timeout = 5000) {
@@ -172,6 +173,10 @@ function updateLevel(rms, peak, clipping = false) {
   $('rms').textContent = `${Math.round(rmsValue * 100)}%`;
   $('peak').textContent = `${Math.round(peakValue * 100)}%${clipping ? ' · clip' : ''}`;
   $('meterFill').style.width = `${Math.round(peakValue * 100)}%`;
+}
+
+function renderCaptureUptime() {
+  $('captureUptime').textContent = captureStartedAt ? formatDuration((Date.now() - captureStartedAt) / 1000) : '—';
 }
 
 function formatBytes(value) {
@@ -426,7 +431,9 @@ async function startSession() {
     lastAckedAudioFrame = 0;
     droppedAudioFrames = 0;
     audioAckCount = 0;
+    captureStartedAt = Date.now();
     $('audioAckCount').textContent = '0';
+    renderCaptureUptime();
     $('audioDroppedFrames').textContent = '0';
     $('transcript').innerHTML = '';
     shouldReconnect = true;
@@ -464,6 +471,8 @@ async function stopSession() {
   await fetch(`/api/sessions/${session.sessionId}/recording/stop`, { method: 'POST' });
   if (socket) socket.close();
   session = null;
+  captureStartedAt = 0;
+  renderCaptureUptime();
   renderSession();
 }
 
@@ -544,3 +553,4 @@ fetch('/api/capabilities').then((response) => response.json()).then((capabilitie
 });
 loadDevices();
 renderSession();
+setInterval(renderCaptureUptime, 1000);

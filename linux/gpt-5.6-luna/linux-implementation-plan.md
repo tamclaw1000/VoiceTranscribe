@@ -377,6 +377,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 ### Iteration diagnostics completed
 
 - [x] Expose acknowledged audio-frame count beside transport diagnostics.
+- [x] Show independent live capture uptime.
 
 
 

@@ -1403,7 +1403,7 @@ Preserve sentence occurrence identity in live finalized transcript events so rep
 
 **Release:** `0.2.0`
 **Build:** `33`
-**Git commit:** recorded after this phase commit
+**Git commit:** `a2fec18`
 
 **Status:** Complete
 **Date:** 2026-09-21

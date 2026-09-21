@@ -46,7 +46,7 @@ The current deployment is:
 ## Version and build metadata
 
 - Current version: `0.2.0`.
-- Current build: `11`.
+- Current build: `12`.
 - Runtime configuration names are `VT_VERSION` and `VT_BUILD`.
 - The values must appear consistently in:
   - `compose.yml` defaults.
@@ -135,6 +135,7 @@ Warnings from dependency tooling should be recorded but treated separately from 
 | `app/static/audio-worklet.js` | Browser PCM frames and level metrics |
 | `compose.yml` | Default trusted-LAN CPU deployment |
 | `compose.asr.yml` | Optional faster-whisper deployment |
+| `compose.traefik.yml` | HTTP upstream override when Traefik terminates public HTTPS |
 | `Dockerfile` | Shared image build and optional ASR installation |
 | `LINUX_ARCHITECTURE.md` | Current technical architecture and data flow |
 | `LINUX_BUILD_HISTORY.md` | Chronological implementation record |

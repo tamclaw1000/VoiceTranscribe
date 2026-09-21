@@ -125,13 +125,14 @@ HTTP failures use a stable envelope: `{ "error": { "code": "â€¦", "message": "â€
 18. Imported transcript rows use engine-reported audio offsets; playback `timeupdate` highlights the active row, and row clicks seek without starting playback.
 19. Imported-file review is rendered in the main content panel; the sidebar is reserved for session controls, capture state, and capabilities.
 20. The container starts Uvicorn with a persistent development TLS certificate by default so non-localhost browsers can expose `getUserMedia`; `VT_HTTPS=false` is retained for HTTP-only diagnostics.
+21. Compose health checks `/api/health/live` using the active HTTP/TLS mode, and `stop_grace_period` gives Uvicorn time to finish shutdown handling.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `11`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `12`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`https://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.

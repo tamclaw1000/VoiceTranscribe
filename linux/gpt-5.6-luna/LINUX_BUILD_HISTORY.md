@@ -674,3 +674,36 @@ Make browser microphone capture usable from the requested non-localhost `tamclaw
 - The development certificate is self-signed; Edge requires accepting the certificate warning once before granting microphone permission.
 - Production use requires a trusted certificate and authentication.
 - Microphone capture still requires an Edge site permission grant and a non-blocking browser policy.
+
+## Phase 18 — Docker health and graceful shutdown
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Give Docker and Traefik a reliable liveness signal and allow the Uvicorn process a bounded period to close active work during container replacement.
+
+### Delivered
+
+- Added a Compose healthcheck against `/api/health/live`.
+- Made the healthcheck detect either HTTP or HTTPS from `VT_HTTPS`.
+- Added a 30-second `stop_grace_period` to the service.
+- Documented the Traefik override and health behavior.
+- Bumped Linux build metadata from `11` to `12` while keeping version `0.2.0`.
+
+### Checklist items completed
+
+- Local checklist section 16 CPU profile: health checks and graceful shutdown configuration.
+
+### Verification
+
+- Python, JavaScript, and Compose syntax checks passed.
+- Dockerized test suite passed.
+- Compose healthcheck reached `healthy` for the HTTPS default and HTTP Traefik override profiles.
+- Public Traefik route remained reachable after service restart.
+
+### Limitations and next step
+
+- The healthcheck verifies process liveness, not model readiness or end-to-end WebSocket capture.
+- Active WebSocket state is still process-local; durable job coordination remains deferred.

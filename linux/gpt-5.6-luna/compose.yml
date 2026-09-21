@@ -6,7 +6,7 @@ services:
     environment:
       VT_DATA_DIR: /data
       VT_VERSION: ${VT_VERSION:-0.2.0}
-      VT_BUILD: ${VT_BUILD:-11}
+      VT_BUILD: ${VT_BUILD:-12}
       VT_HTTPS: ${VT_HTTPS:-true}
       VT_TLS_HOST: ${VT_TLS_HOST:-tamclaw}
       VT_ASR_ENGINE: faster-whisper
@@ -15,6 +15,18 @@ services:
     volumes:
       - voice-transcribe-data:/data
       - voice-transcribe-models:/data/models
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import os, ssl, urllib.request; scheme = "https" if os.getenv("VT_HTTPS", "true") == "true" else "http"; context = ssl._create_unverified_context() if scheme == "https" else None; urllib.request.urlopen(f"{scheme}://127.0.0.1:8000/api/health/live", context=context, timeout=3).read()
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    stop_grace_period: 30s
     restart: unless-stopped
 
 volumes:

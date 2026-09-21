@@ -248,7 +248,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [x] Add SQLite configuration.
 - [x] Add model-cache volume configuration.
 - [x] Verify CPU-only startup without GPU packages.
-- [ ] Verify health checks and graceful shutdown.
+- [x] Verify health checks and graceful shutdown.
 - [ ] Document `docker compose up` and browser access.
 
 ### GPU profile

@@ -2,7 +2,7 @@
 
 This directory contains the Linux implementation from `docs/linux/linux-implementation-plan.md`.
 
-Current release metadata: **version 0.2.0, build 11**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
+Current release metadata: **version 0.2.0, build 12**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
 
 ## Included
 
@@ -43,6 +43,14 @@ docker compose -f compose.yml up --build
 Open <https://tamclaw:10000/> in Edge and grant microphone permission. The first visit uses a development certificate; choose the certificate warning's advanced/continue option, then reload and allow microphone access. Compose binds to all host interfaces on port `10000` by default so another machine can reach the service. Audio, session artifacts, and the certificate are stored in Docker volumes.
 
 For HTTP-only API diagnostics, use `VT_HTTPS=false`; browser microphone capture will not work from the non-localhost HTTP URL.
+
+When using the shared Traefik reverse proxy, run:
+
+```sh
+docker compose -f compose.yml -f compose.traefik.yml up -d --build
+```
+
+This keeps the public URL on HTTPS while using HTTP for the private host-gateway upstream. The Compose service also reports Docker health from `/api/health/live` and allows a 30-second graceful stop window.
 
 Stop the service with:
 

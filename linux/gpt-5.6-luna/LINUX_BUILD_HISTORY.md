@@ -1424,7 +1424,7 @@ Provide a safe support snapshot for troubleshooting without requiring access to 
 
 **Release:** `0.2.0`
 **Build:** `34`
-**Git commit:** recorded after this phase commit
+**Git commit:** `fa70d10`
 
 **Status:** Complete
 **Date:** 2026-09-21

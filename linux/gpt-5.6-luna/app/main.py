@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import mimetypes
 import os
 import struct
@@ -38,6 +39,46 @@ ASR_MODEL = os.environ.get("VT_ASR_MODEL", "small.en")
 ASR_COMPUTE_TYPE = os.environ.get("VT_ASR_COMPUTE_TYPE", "int8")
 APP_VERSION = os.environ.get("VT_VERSION", "0.1.0")
 APP_BUILD = os.environ.get("VT_BUILD", "1")
+LOG_LEVEL = os.environ.get("VT_LOG_LEVEL", "INFO").upper()
+
+# Field names whose values must never reach the log stream.
+REDACTED_LOG_FIELDS = {"text", "transcript", "content", "audio", "originalPath", "normalizedPath", "originalName"}
+REDACTED_LOG_VALUE = "[redacted]"
+
+
+class JsonLogFormatter(logging.Formatter):
+    """Render one JSON object per line so container log collectors can parse records."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname.lower(),
+            "event": record.getMessage(),
+        }
+        fields = getattr(record, "fields", None)
+        if isinstance(fields, dict):
+            payload.update(fields)
+        return json.dumps(payload, default=str)
+
+
+LOGGER = logging.getLogger("voicetranscribe")
+LOGGER.handlers.clear()
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(JsonLogFormatter())
+LOGGER.addHandler(_log_handler)
+LOGGER.setLevel(LOG_LEVEL)
+# Root has no handlers outside tests, so records print once but caplog can still observe them.
+LOGGER.propagate = True
+
+
+def log_event(level: str, event: str, **fields: Any) -> None:
+    safe_fields = {
+        name: (REDACTED_LOG_VALUE if name in REDACTED_LOG_FIELDS else value)
+        for name, value in fields.items()
+    }
+    LOGGER.log(getattr(logging, level.upper(), logging.INFO), event, extra={"fields": safe_fields})
+
+
 _whisper_model: Any = None
 _whisper_model_lock = threading.Lock()
 
@@ -71,6 +112,7 @@ class FileSource:
     progress: float = 1.0
     error: str | None = None
     session_id: str | None = None
+    job_id: str | None = None
 
     def snapshot(self) -> dict[str, Any]:
         linked_session = sessions.get(self.session_id) if self.session_id else None
@@ -86,6 +128,7 @@ class FileSource:
             "progress": self.progress,
             "error": self.error,
             "sessionId": self.session_id,
+            "jobId": self.job_id,
             "audioUrl": f"/api/files/{self.id}/audio",
             "transcript": linked_session.finalized_segments if linked_session else [],
         }
@@ -440,6 +483,7 @@ def whisper_model() -> Any:
                     compute_type=ASR_COMPUTE_TYPE,
                     download_root=str(DATA_DIR / "models"),
                 )
+                log_event("info", "asr.model.loaded", model=ASR_MODEL, computeType=ASR_COMPUTE_TYPE)
     return _whisper_model
 
 
@@ -535,6 +579,7 @@ async def schedule_live_asr(session: Session) -> None:
             session.asr_last_error = str(error)
             persist_session(session)
             await publish(session, "transcription.failed", {"error": str(error), "scope": "live"})
+            log_event("error", "asr.window.failed", sessionId=session.id, scope="live", error=str(error))
 
     session.live_asr_task = asyncio.create_task(run())
 
@@ -548,6 +593,7 @@ async def drain_live_asr(session: Session) -> None:
             await process_live_asr(session, force=True)
         except Exception as error:
             await publish(session, "transcription.failed", {"error": str(error), "scope": "live"})
+            log_event("error", "asr.window.failed", sessionId=session.id, scope="final", error=str(error))
 
 
 async def transcribe_file(source: FileSource) -> None:
@@ -561,6 +607,8 @@ async def _transcribe_file(source: FileSource) -> None:
     persist_file_source(source)
     session = create_file_session(source)
     await publish(session, "session.created", session.snapshot())
+    started_at = time.perf_counter()
+    log_event("info", "file.job.started", jobId=source.job_id, fileId=source.id, engine=ASR_ENGINE)
     try:
         if ASR_ENGINE == "faster-whisper":
             if not faster_whisper_available():
@@ -601,6 +649,7 @@ async def _transcribe_file(source: FileSource) -> None:
         persist_session(session)
         persist_file_source(source)
         await publish(session, "transcription.failed", {"error": source.error})
+        log_event("error", "file.job.failed", jobId=source.job_id, fileId=source.id, sessionId=session.id, error=source.error, durationMs=round((time.perf_counter() - started_at) * 1000, 2))
         return
     session.transcribing = False
     session.state = "completed"
@@ -609,6 +658,7 @@ async def _transcribe_file(source: FileSource) -> None:
     persist_session(session)
     persist_file_source(source)
     await publish(session, "transcription.completed", {"segments": len(session.finalized_segments), "engine": ASR_ENGINE})
+    log_event("info", "file.job.completed", jobId=source.job_id, fileId=source.id, sessionId=session.id, segments=len(session.finalized_segments), durationMs=round((time.perf_counter() - started_at) * 1000, 2))
 
 
 def markdown_for(session: Session) -> str:
@@ -681,6 +731,7 @@ async def start_recording(session: Session) -> None:
     session.state = "recording"
     persist_session(session)
     await publish(session, "recording.started", {"path": audio_path(session).name})
+    log_event("info", "recording.started", sessionId=session.id)
 
 
 async def stop_recording(session: Session) -> None:
@@ -700,9 +751,12 @@ async def stop_recording(session: Session) -> None:
         "duration": duration,
         "bytes": session.audio_bytes,
     })
+    log_event("info", "recording.finalized", sessionId=session.id, durationSeconds=round(duration, 3), bytes=session.audio_bytes)
 
 
 app = FastAPI(title="VoiceTranscribe Linux", version=APP_VERSION)
+
+log_event("info", "service.started", version=APP_VERSION, build=APP_BUILD, asrEngine=ASR_ENGINE, logLevel=LOG_LEVEL)
 
 
 def error_response(request: Request, status_code: int, code: str, message: str) -> JSONResponse:
@@ -728,11 +782,21 @@ async def security_headers(request: Request, call_next: Any) -> JSONResponse:
 async def request_id_middleware(request: Request, call_next: Any) -> JSONResponse:
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request.state.request_id = request_id
+    path = request.url.path
+    # API requests are operations-relevant; static asset traffic stays at debug.
+    log_level = "info" if path.startswith("/api/") else "debug"
+    started = time.perf_counter()
+
+    def elapsed_ms() -> float:
+        return round((time.perf_counter() - started) * 1000, 2)
+
     try:
         response = await call_next(request)
     except Exception:
+        log_event(log_level, "http.request", requestId=request_id, method=request.method, path=path, status=500, durationMs=elapsed_ms())
         return error_response(request, 500, "internal_error", "An unexpected server error occurred")
     response.headers["X-Request-ID"] = request_id
+    log_event(log_level, "http.request", requestId=request_id, method=request.method, path=path, status=response.status_code, durationMs=elapsed_ms())
     return response
 
 
@@ -828,6 +892,7 @@ async def create_session(request: SessionCreate) -> dict[str, Any]:
     sessions[session_id] = session
     persist_session(session)
     await publish(session, "session.created", session.snapshot())
+    log_event("info", "session.created", sessionId=session_id, sampleRate=session.sample_rate, channels=session.channels)
     return session.snapshot()
 
 
@@ -836,6 +901,7 @@ async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
     original_name = Path(file.filename or "upload").name
     extension = Path(original_name).suffix.lower().lstrip(".")
     if extension not in SUPPORTED_EXTENSIONS:
+        log_event("warning", "file.upload.rejected", reason="unsupported_format", extension=extension)
         raise HTTPException(status_code=415, detail=f"Unsupported audio format: .{extension or 'unknown'}")
     file_id = str(uuid.uuid4())
     target = FILES_DIR / f"{file_id}-original.{extension}"
@@ -849,6 +915,7 @@ async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
                 output.write(chunk)
     except HTTPException:
         target.unlink(missing_ok=True)
+        log_event("warning", "file.upload.rejected", reason="upload_too_large", sizeBytes=size, limitBytes=MAX_UPLOAD_BYTES)
         raise
     duration, sample_rate, channels, codec = await asyncio.to_thread(probe_media, target)
     source = FileSource(
@@ -870,7 +937,9 @@ async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
         source.status = "failed"
         source.error = str(error)
         persist_file_source(source)
+        log_event("warning", "file.upload.rejected", reason="invalid_media", fileId=file_id, error=str(error))
         raise HTTPException(status_code=422, detail=source.error)
+    log_event("info", "file.uploaded", fileId=file_id, sizeBytes=size, format=source.format_name, duration=source.duration)
     return source.snapshot()
 
 
@@ -935,7 +1004,9 @@ async def file_transcribe(file_id: str) -> dict[str, Any]:
     source.status = "queued"
     source.progress = 0.0
     source.error = None
+    source.job_id = str(uuid.uuid4())
     persist_file_source(source)
+    log_event("info", "file.job.queued", jobId=source.job_id, fileId=source.id)
     asyncio.create_task(transcribe_file(source))
     return source.snapshot()
 
@@ -974,6 +1045,7 @@ async def transcription_start(session_id: str, _: SessionCommand | None = None) 
     session.state = "recording" if session.recording else "transcribing"
     persist_session(session)
     await publish(session, "transcription.started", {"engine": ASR_ENGINE, "model": ASR_MODEL if ASR_ENGINE == "faster-whisper" else "demo"})
+    log_event("info", "transcription.started", sessionId=session_id, engine=ASR_ENGINE)
     return session.snapshot()
 
 
@@ -984,6 +1056,7 @@ async def transcription_pause(session_id: str, _: SessionCommand | None = None) 
         session.paused = True
         persist_session(session)
         await publish(session, "transcription.paused", {})
+        log_event("info", "transcription.paused", sessionId=session_id)
     return session.snapshot()
 
 
@@ -994,6 +1067,7 @@ async def transcription_resume(session_id: str, _: SessionCommand | None = None)
         session.paused = False
         persist_session(session)
         await publish(session, "transcription.resumed", {})
+        log_event("info", "transcription.resumed", sessionId=session_id)
     return session.snapshot()
 
 
@@ -1010,6 +1084,7 @@ async def transcription_stop(session_id: str, _: SessionCommand | None = None) -
     session.state = "recording" if session.recording else "completed"
     persist_session(session)
     await publish(session, "transcription.completed", {"segments": len(session.finalized_segments)})
+    log_event("info", "transcription.stopped", sessionId=session_id, segments=len(session.finalized_segments))
     return session.snapshot()
 
 
@@ -1026,6 +1101,7 @@ async def delete_session(session_id: str) -> dict[str, Any]:
                 database.execute("DELETE FROM file_sources WHERE id = ?", (source.id,))
             file_sources.pop(source.id, None)
     delete_session_data(session)
+    log_event("info", "session.deleted", sessionId=session_id)
     return {"deleted": True, "sessionId": session_id}
 
 
@@ -1048,7 +1124,9 @@ async def events_socket(websocket: WebSocket, session_id: str, after: int = Quer
     await websocket.accept()
     async with session.lock:
         session.clients.add(websocket)
+        client_count = len(session.clients)
         replay = [event for event in session.events if event["sequence"] > after]
+    log_event("info", "ws.connected", sessionId=session_id, clients=client_count)
     for event in replay:
         await websocket.send_json(event)
     pending_audio_frame: dict[str, Any] | None = None
@@ -1106,6 +1184,8 @@ async def events_socket(websocket: WebSocket, session_id: str, after: int = Quer
     finally:
         async with session.lock:
             session.clients.discard(websocket)
+            remaining_clients = len(session.clients)
+        log_event("info", "ws.disconnected", sessionId=session_id, clients=remaining_clients)
 
 
 @app.get("/api/sessions/{session_id}/audio")

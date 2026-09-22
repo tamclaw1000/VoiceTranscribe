@@ -13,6 +13,7 @@ The current deployment is:
 - Docker Compose CPU profile.
 - Trusted-LAN binding at `https://tamclaw:10000/` by default; Traefik can terminate public HTTPS and use an HTTP upstream.
 - Faster-whisper file and rolling-window live ASR by default.
+- Structured JSON application logging to stdout, level controlled by `VT_LOG_LEVEL`.
 - Fake ASR is an opt-in deterministic development mode.
 - No authentication; HTTPS is provided by the default development certificate or by the shared Traefik edge.
 
@@ -46,7 +47,7 @@ The current deployment is:
 ## Version and build metadata
 
 - Current version: `0.2.0`.
-- Current build: `33`.
+- Current build: `34`.
 - Runtime configuration names are `VT_VERSION` and `VT_BUILD`.
 - The values must appear consistently in:
   - `compose.yml` defaults.
@@ -122,6 +123,7 @@ Warnings from dependency tooling should be recorded but treated separately from 
 - Audio-relative offsets, not processing timestamps, drive playback following.
 - Diarization and voice identity are best-effort and must not block transcript text.
 - API keys must not appear in browser state, logs, or Markdown exports.
+- Application logs are single-line JSON records; routine log records must never contain transcript text, audio content, filesystem paths, or secrets (enforced by `log_event` field redaction).
 - The default service is currently unauthenticated; do not represent it as production-safe.
 - A feature that produces per-sentence results must account for configuration, selection, rendering, and export surfaces.
 

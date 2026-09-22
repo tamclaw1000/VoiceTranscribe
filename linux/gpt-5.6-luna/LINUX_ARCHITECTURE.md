@@ -25,6 +25,7 @@ FastAPI / Uvicorn container
   ├─ recording writer → /data/<session-id>.pcm
   ├─ FFmpeg probe/normalizer → /data/files/<file-id>-16k-mono.wav
   ├─ configurable fake/faster-whisper ASR adapters
+  ├─ structured JSON application logging (stdout, `VT_LOG_LEVEL`)
   ├─ bounded event replay list
   └─ Markdown export
        │
@@ -147,13 +148,17 @@ HTTP failures use a stable envelope: `{ "error": { "code": "…", "message": "�
 39. Markdown exports include generation time and application release/build metadata so exported records retain provenance without embedding secrets.
 40. Live fake-ASR segment occurrences use monotonic sentence indexes rather than a constant index, preserving repeated-sentence identity for downstream rendering and export.
 41. `/api/diagnostics` composes redacted runtime, feature, and aggregate metric information; it deliberately omits data paths, transcript content, audio content, and secrets.
+42. `log_event` emits single-line JSON application logs to stdout with a timestamp, level, event name, and structured fields; HTTP requests are logged with request ID, method, path, status, and duration, and session/recording/transcription/file-job/WebSocket lifecycle transitions are logged with their session, file, and job identifiers.
+43. `log_event` redacts a fixed set of content field names (`text`, `transcript`, `content`, `audio`, `originalPath`, `normalizedPath`, `originalName`) before serialization, so routine log records cannot carry transcript text, audio content, or filesystem paths; secrets are never passed as fields.
+44. Log verbosity is controlled by `VT_LOG_LEVEL` (default `INFO`); API requests log at info and static asset traffic logs at debug.
+45. File transcription requests assign a `jobId` that is returned in the file snapshot and carried through queued/started/completed/failed log records for correlation.
 
 ## Deployment profile
 
 - Image: `python:3.12-slim` plus the Debian FFmpeg runtime.
 - Service: FastAPI/Uvicorn.
 - Storage: Docker volume mounted at `/data`, including SQLite metadata, audio artifacts, normalized files, and optional model cache.
-- Application metadata: version `0.2.0`, build `33`, configurable with `VT_VERSION` and `VT_BUILD`.
+- Application metadata: version `0.2.0`, build `34`, configurable with `VT_VERSION` and `VT_BUILD`.
 - Default host binding: `0.0.0.0:10000` (`https://tamclaw:10000/`).
 - Override with `VT_BIND_ADDRESS` and `VT_PORT` when a different interface/port is required.
 - Default runtime mode: CPU, faster-whisper, single process, lazy model download.
@@ -165,7 +170,7 @@ HTTP failures use a stable envelope: `{ "error": { "code": "…", "message": "�
 
 The following interfaces should be added without changing the browser session/event model:
 
-- Improved live ASR segmentation, interim text, VAD tuning, durable job execution, full structured request logging, and automated retention cleanup.
+- Improved live ASR segmentation, interim text, VAD tuning, durable job execution, and automated retention cleanup.
 - PostgreSQL migration for multi-user/durable deployments; the current SQLite metadata repository is implemented.
 - Redis-backed job/event coordination for long-running work.
 - Asynchronous diarization and session-only voice identity.

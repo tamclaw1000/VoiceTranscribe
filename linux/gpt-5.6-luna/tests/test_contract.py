@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -7,7 +8,7 @@ os.environ["VT_DATA_DIR"] = str(Path(__file__).parent / "data")
 
 from fastapi.testclient import TestClient
 
-from app.main import APP_BUILD, APP_VERSION, FileSource, Session, app, audio_path, fake_finalize, file_sources, load_persistent_state, markdown_for, persist_session, sessions
+from app.main import APP_BUILD, APP_VERSION, FileSource, JsonLogFormatter, Session, app, audio_path, fake_finalize, file_sources, load_persistent_state, log_event, markdown_for, persist_session, sessions
 
 
 def test_browser_shell_exposes_accessible_notification_surface():
@@ -59,6 +60,74 @@ def test_health_and_capabilities_expose_version_and_build():
     assert health.json()["build"] == APP_BUILD
     assert capabilities.json()["version"] == APP_VERSION
     assert capabilities.json()["build"] == APP_BUILD
+
+
+def test_structured_logs_are_json_and_redact_content(caplog):
+    formatter = JsonLogFormatter()
+    with caplog.at_level(logging.INFO, logger="voicetranscribe"):
+        log_event("info", "unit.redaction", sessionId="log-session", text="SUPERSECRET", originalPath="/data/files/secret.wav", note="kept")
+    record = next(record for record in caplog.records if record.getMessage() == "unit.redaction")
+    payload = json.loads(formatter.format(record))
+    assert payload["event"] == "unit.redaction"
+    assert payload["level"] == "info"
+    assert "timestamp" in payload
+    assert payload["sessionId"] == "log-session"
+    assert payload["text"] == "[redacted]"
+    assert payload["originalPath"] == "[redacted]"
+    assert payload["note"] == "kept"
+    assert "SUPERSECRET" not in formatter.format(record)
+
+
+def test_http_requests_are_logged_with_request_id(caplog):
+    formatter = JsonLogFormatter()
+    with caplog.at_level(logging.INFO, logger="voicetranscribe"):
+        response = TestClient(app).get("/api/health/live", headers={"X-Request-ID": "log-request-1"})
+    assert response.status_code == 200
+    record = next(
+        record for record in caplog.records
+        if record.getMessage() == "http.request" and getattr(record, "fields", {}).get("requestId") == "log-request-1"
+    )
+    payload = json.loads(formatter.format(record))
+    assert payload["method"] == "GET"
+    assert payload["path"] == "/api/health/live"
+    assert payload["status"] == 200
+    assert isinstance(payload["durationMs"], (int, float))
+
+
+def test_session_lifecycle_and_file_jobs_log_identifiers(caplog):
+    formatter = JsonLogFormatter()
+    client = TestClient(app)
+    with caplog.at_level(logging.INFO, logger="voicetranscribe"):
+        created = client.post("/api/sessions", json={"source_name": "Log test"}).json()
+        client.post(f"/api/sessions/{created['sessionId']}/transcription/start")
+        client.post(f"/api/sessions/{created['sessionId']}/transcription/stop")
+        client.delete(f"/api/sessions/{created['sessionId']}")
+    messages = {record.getMessage() for record in caplog.records}
+    assert {"session.created", "transcription.started", "transcription.stopped", "session.deleted"} <= messages
+    created_record = next(record for record in caplog.records if record.getMessage() == "session.created" and getattr(record, "fields", {}).get("sessionId") == created["sessionId"])
+    assert json.loads(formatter.format(created_record))["sessionId"] == created["sessionId"]
+    stopped_record = next(record for record in caplog.records if record.getMessage() == "transcription.stopped" and getattr(record, "fields", {}).get("sessionId") == created["sessionId"])
+    assert isinstance(json.loads(formatter.format(stopped_record))["segments"], int)
+    sessions.pop(created["sessionId"], None)
+
+
+def test_file_snapshot_exposes_job_and_session_identifiers():
+    source = FileSource(
+        id="job-source",
+        original_name="job.wav",
+        original_path=Path("/data/files/job-original.wav"),
+        normalized_path=None,
+        size_bytes=10,
+        duration=1.0,
+        sample_rate=16000,
+        channels=1,
+        format_name="WAV",
+        job_id="job-123",
+        session_id="job-session",
+    )
+    snapshot = source.snapshot()
+    assert snapshot["jobId"] == "job-123"
+    assert snapshot["sessionId"] == "job-session"
 
 
 def test_metrics_reflect_created_session():

@@ -55,8 +55,8 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 
 - [x] Create the HTTP service using the selected backend framework.
 - [ ] Add configuration loading with safe defaults and validation.
-- [ ] Add structured application logging.
-- [ ] Add request IDs, session IDs, and job IDs to logs and responses.
+- [x] Add structured application logging.
+- [x] Add request IDs, session IDs, and job IDs to logs and responses.
 - [x] Add `/health/live` for process liveness.
 - [x] Add `/health/ready` for model, storage, and queue readiness.
 - [x] Add `GET /api/capabilities`.
@@ -292,7 +292,7 @@ This checklist turns `linux-version-analysis.md` into an incremental implementat
 - [ ] Keep provider keys out of browser state, logs, events, and exports.
 - [ ] Encrypt or otherwise protect stored audio and transcripts.
 - [ ] Add explicit delete-session behavior.
-- [ ] Redact transcript/audio content from routine logs.
+- [x] Redact transcript/audio content from routine logs.
 - [ ] Document remote-provider data flows.
 - [ ] Track dependency, model, and license provenance.
 - [ ] Review container privileges and exposed ports.

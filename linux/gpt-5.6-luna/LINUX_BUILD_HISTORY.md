@@ -1418,3 +1418,28 @@ Provide a safe support snapshot for troubleshooting without requiring access to 
 - Included application metadata, runtime mode, feature availability, and aggregate metrics.
 - Explicitly excluded filesystem paths, transcript/audio content, and secrets.
 - Added contract coverage for the redaction boundary.
+- Updated architecture, README, checklist, and agent guide.
+
+## Phase 40 — Structured application logging
+
+**Release:** `0.2.0`
+**Build:** `34`
+**Git commit:** recorded after this phase commit
+
+**Status:** Complete
+**Date:** 2026-09-21
+
+### Goal
+
+Make service behavior observable from the container log stream without exposing transcript text, audio content, filesystem paths, or secrets.
+
+### Delivered
+
+- Added `log_event`, a single-line JSON logger on stdout with timestamp, level, event name, and structured fields.
+- Logged HTTP requests with request ID, method, path, status, and duration; API paths log at info, static assets at debug.
+- Logged session, recording, transcription, upload, file-job, ASR-window, model-load, and WebSocket lifecycle events with their identifiers.
+- Added `jobId` to file snapshots so queued/started/completed/failed job log records correlate with API responses.
+- Added field-name redaction for content and path fields before serialization.
+- Added `VT_LOG_LEVEL` (default `INFO`) for verbosity control.
+- Added contract coverage for JSON formatting, redaction, request-ID logging, lifecycle identifiers, and job identifiers.
+- Updated architecture, README, checklist, and agent guide.

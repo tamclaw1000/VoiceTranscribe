@@ -2,7 +2,7 @@
 
 This directory contains the Linux implementation from `docs/linux/linux-implementation-plan.md`.
 
-Current release metadata: **version 0.2.0, build 21**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
+Current release metadata: **version 0.2.0, build 34**. The browser header and health/capability APIs expose the same values. Override them with `VT_VERSION` and `VT_BUILD` when packaging a release.
 
 ## Included
 
@@ -135,4 +135,5 @@ curl http://tamclaw:10000/api/capabilities
 - Markdown exports include generation time and application release/build provenance; secrets are not included.
 - Live finalized segments retain monotonic occurrence indexes so repeated text is not collapsed by downstream consumers.
 - `/api/diagnostics` provides redacted troubleshooting information without transcript/audio content, filesystem paths, or secrets.
+- Application logs are single-line JSON events on stdout with request, session, and job identifiers; routine records exclude transcript text, audio content, filesystem paths, and secrets. Set `VT_LOG_LEVEL` (default `INFO`) to change verbosity.
 - HTTPS is enabled by default for microphone access. The generated development certificate is not publicly trusted; production deployments should replace it with a certificate trusted by the client.

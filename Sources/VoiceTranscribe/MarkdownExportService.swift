@@ -199,6 +199,7 @@ enum MarkdownExportService {
         var startTime: TimeInterval
         var endTime: TimeInterval
         var speaker: String
+        var personID: UUID? = nil
         var confidenceTotal: Float = 0
         var confidenceCount: Int = 0
 
@@ -246,8 +247,10 @@ enum MarkdownExportService {
         var rows: [SpeakerTimelineRow] = []
         for segment in segments.sorted(by: { $0.startTime < $1.startTime }) {
             let speaker = speakerText(segment)
-            if mergeSameNamedSpeakers,
-               var last = rows.last, !speaker.isEmpty, last.speaker == speaker {
+            if var last = rows.last,
+               !speaker.isEmpty,
+               (segment.personID != nil && last.personID == segment.personID
+                    || segment.personID == nil && mergeSameNamedSpeakers && last.speaker == speaker) {
                 last.absorb(segment)
                 rows[rows.count - 1] = last
                 continue
@@ -255,7 +258,8 @@ enum MarkdownExportService {
             var row = SpeakerTimelineRow(
                 startTime: segment.startTime,
                 endTime: segment.endTime,
-                speaker: speaker
+                speaker: speaker,
+                personID: segment.personID
             )
             if let confidence = segment.confidence {
                 row.confidenceTotal = confidence

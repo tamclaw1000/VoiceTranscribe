@@ -227,10 +227,12 @@ struct ContentView: View {
                     finalized: appModel.transcription.segments,
                     interim: appModel.transcription.interimSegment,
                     aiPrompts: appModel.aiPrompt.items,
-                    speakerNameItems: appModel.speakerNameEditorItems,
-                    existingSpeakerNames: appModel.assignedSpeakerNames,
-                    mergeSameNamedSpeakers: $appModel.settings.mergeSameNamedSpeakers,
+                    identityPeople: appModel.identityPeople,
+                    identityRanges: appModel.identityRanges,
+                    unresolvedIdentityRanges: appModel.unresolvedIdentityRanges,
+                    canUndoIdentityEdit: appModel.canUndoIdentityEdit,
                     currentSpeakerID: appModel.diarization.currentSpeakerID,
+                    currentPersonID: appModel.diarization.currentPersonID,
                     currentSpeakerLabel: appModel.diarization.currentSpeakerLabel,
                     isDiarizationActive: appModel.diarization.isStarting || appModel.diarization.isRunning,
                     diarizationError: appModel.diarization.lastError,
@@ -248,19 +250,20 @@ struct ContentView: View {
                     hasTranscriptText: !appModel.transcription.transcriptText
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .isEmpty,
-                    onCycleSpeaker: appModel.cycleTranscriptSegmentSpeaker,
-                    onAssignObservedVoice: appModel.assignTranscriptSegmentIdentity,
-                    onForceNewVoice: appModel.forceNewVoiceForTranscriptSegment,
-                    onSetSpeakerName: { item, name in appModel.setSpeakerName(name, for: item) },
-                    onSelectSpeakerName: { item, name in appModel.selectExistingSpeakerName(name, for: item) },
-                    onUnlockSpeakerName: { item in appModel.unlockSpeakerName(for: item) },
-                    onResetSpeakerName: appModel.resetSpeakerNames(for:),
-                    onResetAllSpeakerNames: appModel.resetAllSpeakerNames,
+                    onCreateIdentityPerson: appModel.createIdentityPerson,
+                    onRenameIdentityPerson: appModel.renameIdentityPerson(_:to:),
+                    onAssignIdentityRanges: appModel.assignIdentityRanges(_:to:),
+                    onRestoreAutomaticIdentityRanges: appModel.restoreAutomaticIdentityRanges,
+                    onMergeIdentityPeople: appModel.mergeIdentityPeople(_:into:),
+                    onUndoIdentityEdit: appModel.undoIdentityEdit,
+                    onAssignTranscriptRowToPerson: appModel.assignTranscriptRowToPerson(_:personID:),
+                    onCreatePersonForTranscriptRange: appModel.createPersonForTranscriptRange,
                     onSaveToFile: appModel.saveTranscriptToFile,
                     onExportMarkdown: appModel.saveTranscriptMarkdownToFile,
                     onCopyText: appModel.copyTranscriptText,
                     onTogglePlayback: appModel.toggleTranscriptPlayback,
                     onSeekPlayback: appModel.seekTranscriptPlayback(toOffset:),
+                    onPlayRange: appModel.playTranscriptRange(at:),
                     onSeekToRow: appModel.seekTranscriptPlayback(toRowID:)
                 )
                 .tabItem {
@@ -1253,11 +1256,12 @@ private struct TranscriptAIPromptPanel: View {
     /// One row per canonical speaker — merged by name when the merge toggle is on. The pane
     /// and the transcript row's speaker menu both read this list, so a speaker appears once
     /// in each, and a merged entry is assigned through its first combo.
-    let speakerNameItems: [SpeakerNameEditorItem]
-    /// Names already assigned this session, offered as quick picks.
-    let existingSpeakerNames: [String]
-    @Binding var mergeSameNamedSpeakers: Bool
+    let identityPeople: [SessionPerson]
+    let identityRanges: [SessionIdentityRange]
+    let unresolvedIdentityRanges: [SessionIdentityRange]
+    let canUndoIdentityEdit: Bool
     let currentSpeakerID: String?
+    let currentPersonID: UUID?
     let currentSpeakerLabel: String?
     let isDiarizationActive: Bool
     let diarizationError: String?
@@ -1276,23 +1280,25 @@ private struct TranscriptAIPromptPanel: View {
     let playbackTimeline: TranscriptPlaybackTimeline?
     @Binding var autoScrollToBottom: Bool
     let hasTranscriptText: Bool
-    let onCycleSpeaker: (UUID) -> Void
-    let onAssignObservedVoice: (UUID, String, String?) -> Void
-    let onForceNewVoice: (UUID) -> Void
-    let onSetSpeakerName: (SpeakerNameEditorItem, String) -> Void
-    let onSelectSpeakerName: (SpeakerNameEditorItem, String) -> Void
-    let onUnlockSpeakerName: (SpeakerNameEditorItem) -> Void
-    let onResetSpeakerName: (SpeakerNameEditorItem) -> Void
-    let onResetAllSpeakerNames: () -> Void
+    let onCreateIdentityPerson: () -> SessionPerson
+    let onRenameIdentityPerson: (UUID, String) -> Void
+    let onAssignIdentityRanges: (Set<UUID>, UUID?) -> Void
+    let onRestoreAutomaticIdentityRanges: (Set<UUID>) -> Void
+    let onMergeIdentityPeople: (UUID, UUID) -> Void
+    let onUndoIdentityEdit: () -> Void
+    let onAssignTranscriptRowToPerson: (UUID, UUID?) -> Void
+    let onCreatePersonForTranscriptRange: (UUID) -> Void
     let onSaveToFile: () -> Void
     let onExportMarkdown: () -> Void
     let onCopyText: () -> Void
     let onTogglePlayback: () -> Void
     let onSeekPlayback: (TimeInterval) -> Void
+    let onPlayRange: (TimeInterval) -> Void
     /// Jumps the audio to a transcript row the user clicked.
     let onSeekToRow: (String) -> Void
 
     @State private var isVoiceIdentificationPaneExpanded = false
+    @State private var selectedIdentityRanges: Set<UUID> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1370,7 +1376,7 @@ private struct TranscriptAIPromptPanel: View {
             HStack(spacing: 0) {
                 transcriptTable
 
-                if !speakerNameItems.isEmpty {
+                if !identityRanges.isEmpty || !identityPeople.isEmpty {
                     Divider()
                     voiceIdentificationSidePane
                 }
@@ -1551,10 +1557,23 @@ private struct TranscriptAIPromptPanel: View {
                     HStack(spacing: 8) {
                         Label("Voice Identification", systemImage: "person.wave.2")
                             .font(.caption.weight(.semibold))
-                        Text("\(speakerNameItems.count)")
+                        Text("\(identityPeople.count)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
+                        Button {
+                            _ = onCreateIdentityPerson()
+                        } label: {
+                            Image(systemName: "person.badge.plus")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Create person")
+                        Button(action: onUndoIdentityEdit) {
+                            Image(systemName: "arrow.uturn.backward")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(!canUndoIdentityEdit)
+                        .help("Undo identity edit")
                         Button {
                             isVoiceIdentificationPaneExpanded = false
                         } label: {
@@ -1563,44 +1582,34 @@ private struct TranscriptAIPromptPanel: View {
                         .buttonStyle(.borderless)
                         .help("Collapse voice identification")
                     }
-
-                    HStack {
-                        Text(speakerNameItems.contains(where: \.hasCustomName) ? "Custom names" : "Generated labels")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button {
-                            onResetAllSpeakerNames()
-                        } label: {
-                            Label("Reset All", systemImage: "arrow.counterclockwise")
-                        }
-                        .font(.caption)
-                        .disabled(!speakerNameItems.contains(where: \.hasCustomName))
-                        .help("Reset all voice names to their generated labels")
-                    }
-
-                    Toggle(isOn: $mergeSameNamedSpeakers) {
-                        Text("Merge same-named speakers")
-                            .font(.caption)
-                    }
-                    .toggleStyle(.checkbox)
-                    .help("Treat every Speaker/Voice combo assigned the same name as one speaker: one row here, one color in the transcript, and one entry in the exported speaker timeline.")
-
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 10) {
-                            ForEach(speakerNameItems) { item in
-                                VoiceIdentificationRow(
-                                    item: item,
-                                    existingSpeakerNames: existingSpeakerNames,
-                                    mergeSameNamedSpeakers: mergeSameNamedSpeakers,
-                                    onSetSpeakerName: onSetSpeakerName,
-                                    onSelectSpeakerName: onSelectSpeakerName,
-                                    onUnlockSpeakerName: onUnlockSpeakerName,
-                                    onResetSpeakerName: onResetSpeakerName
-                                )
-                                // Skips rebuilding rows whose inputs did not change, so a publish
-                                // from anywhere else in the app cannot close an open name menu.
-                                .equatable()
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(identityPeople) { person in
+                                identityPersonRow(person)
+                            }
+                            if !identityRanges.isEmpty {
+                                Divider()
+                                HStack {
+                                    Text("Audio ranges")
+                                        .font(.caption.weight(.semibold))
+                                    Spacer()
+                                    if !selectedIdentityRanges.isEmpty {
+                                        selectedRangeMenu
+                                    }
+                                }
+                            }
+                            ForEach(identityRanges) { range in
+                                identityRangeRow(range)
+                            }
+                            if !unresolvedIdentityRanges.isEmpty {
+                                Divider()
+                                Text("Needs review")
+                                    .font(.caption.weight(.semibold))
+                                ForEach(unresolvedIdentityRanges) { range in
+                                    Text("\(rangeTime(range.startTime)) \(range.speakerID): previous assignment could not be matched to a revised range")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
                             }
                         }
                         .padding(.vertical, 2)
@@ -1616,11 +1625,11 @@ private struct TranscriptAIPromptPanel: View {
                 } label: {
                     VStack(spacing: 8) {
                         Image(systemName: "person.wave.2")
-                        Text("Voices")
+                        Text("People")
                             .font(.caption2.weight(.semibold))
                             .rotationEffect(.degrees(-90))
                             .fixedSize()
-                        Text("\(speakerNameItems.count)")
+                        Text("\(identityPeople.count)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -1635,16 +1644,137 @@ private struct TranscriptAIPromptPanel: View {
         }
     }
 
-    /// Which label the transcript and pane color by. With same-name merging on, a named
-    /// speaker colors by its name so every combo folded into it shares one color; otherwise
-    /// the speaker slot decides, exactly as before this feature.
-    private func speakerColorKey(speakerID: String?, speakerName: String?) -> String? {
-        if mergeSameNamedSpeakers,
-           let name = speakerName?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !name.isEmpty {
-            return name
+    private func identityPersonRow(_ person: SessionPerson) -> some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(speakerColor(for: speakerColorKey(personID: person.id)))
+                .frame(width: 8, height: 8)
+            TextField(person.label, text: Binding(
+                get: { person.name },
+                set: { onRenameIdentityPerson(person.id, $0) }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.caption)
+            Menu {
+                ForEach(identityPeople.filter { $0.id != person.id }) { target in
+                    Button("Merge into \(target.label)") {
+                        onMergeIdentityPeople(person.id, target.id)
+                    }
+                }
+            } label: {
+                Image(systemName: "arrow.triangle.merge")
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 24)
+            .disabled(identityPeople.count < 2)
+            .help("Merge this person into another")
         }
-        return speakerID ?? speakerName
+        .padding(.vertical, 2)
+    }
+
+    private var selectedRangeMenu: some View {
+        Menu {
+            ForEach(identityPeople) { person in
+                Button("Assign to \(person.label)") {
+                    onAssignIdentityRanges(selectedIdentityRanges, person.id)
+                    selectedIdentityRanges = []
+                }
+            }
+            Button("Create person and assign") {
+                let person = onCreateIdentityPerson()
+                onAssignIdentityRanges(selectedIdentityRanges, person.id)
+                selectedIdentityRanges = []
+            }
+            Button("Mark unidentified") {
+                onAssignIdentityRanges(selectedIdentityRanges, nil)
+                selectedIdentityRanges = []
+            }
+            Button("Restore automatic") {
+                onRestoreAutomaticIdentityRanges(selectedIdentityRanges)
+                selectedIdentityRanges = []
+            }
+        } label: {
+            Label("\(selectedIdentityRanges.count) selected", systemImage: "checkmark.circle")
+        }
+        .font(.caption)
+    }
+
+    private func identityRangeRow(_ range: SessionIdentityRange) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Toggle("Select range", isOn: Binding(
+                get: { selectedIdentityRanges.contains(range.id) },
+                set: { selected in
+                    if selected { selectedIdentityRanges.insert(range.id) }
+                    else { selectedIdentityRanges.remove(range.id) }
+                }
+            ))
+            .labelsHidden()
+            .toggleStyle(.checkbox)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(identityPeople.first(where: { $0.id == range.personID })?.label ?? "Unidentified audio")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(range.personID == nil ? .secondary : .primary)
+                Text("\(rangeTime(range.startTime)) - \(rangeTime(range.endTime))  \(range.speakerID)\(range.voiceID.map { " / \($0)" } ?? "")")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(range.source == .manual ? "Confirmed" : range.source == .unidentified
+                    ? "Unidentified" : range.personID != nil ? "Automatic"
+                    : range.duration < 2 ? "Short range" : range.identityAttempts > 0
+                    ? "No reliable match" : "Awaiting identity")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if let snippet = finalized.first(where: { $0.diarizationRangeID == range.id })?.text {
+                    Text(snippet)
+                        .font(.caption2)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+            Button {
+                onPlayRange(range.startTime)
+            } label: {
+                Image(systemName: "play.fill")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!playback.isAvailable)
+            .help("Play this audio range")
+            Menu {
+                ForEach(identityPeople) { person in
+                    Button("Assign this range to \(person.label)") {
+                        onAssignIdentityRanges([range.id], person.id)
+                    }
+                }
+                Button("Create person for this range") {
+                    let person = onCreateIdentityPerson()
+                    onAssignIdentityRanges([range.id], person.id)
+                }
+                Button("Mark unidentified") {
+                    onAssignIdentityRanges([range.id], nil)
+                }
+                Button("Restore automatic") {
+                    onRestoreAutomaticIdentityRanges([range.id])
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 22)
+            .help("Correct this audio range")
+        }
+        .padding(.vertical, 4)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private func rangeTime(_ offset: TimeInterval) -> String {
+        let seconds = Int(max(0, offset).rounded(.down))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private func speakerColorKey(personID: UUID?) -> String? {
+        guard let personID, let person = identityPeople.first(where: { $0.id == personID }) else {
+            return nil
+        }
+        return "Speaker \(person.number)"
     }
 
     /// Finalized segments with each paused span placed where it interrupted the session.
@@ -1746,7 +1876,7 @@ private struct TranscriptAIPromptPanel: View {
     /// The speaker cell's tooltip. Naming the pair here means a row whose label is a single name
     /// still answers "which combo is this?" on hover, without widening the cell.
     private func pairHelpText(for segment: TranscriptSegment) -> String {
-        let action = "Choose an observed voice for this row, or force a new voice."
+        let action = "Correct this audio range or this transcript row."
         guard let pair = segment.speakerVoicePair else {
             return action
         }
@@ -1773,7 +1903,6 @@ private struct TranscriptAIPromptPanel: View {
         rowID: String?,
         isPlayheadActive: Bool
     ) -> some View {
-        let speakerID = segment.speakerID ?? fallbackSpeakerID
         let speakerLabel = segment.speakerLabel ?? fallbackSpeakerLabel
         let label = speakerLabel ?? "Detecting"
         GridRow(alignment: .top) {
@@ -1785,35 +1914,43 @@ private struct TranscriptAIPromptPanel: View {
             )
 
             Menu {
-                // Deduplicated by canonical speaker, so two combos the user named the same
-                // are one "Dana" entry rather than the same name listed twice.
-                ForEach(speakerNameItems) { item in
+                ForEach(identityPeople) { person in
                     Button {
-                        onAssignObservedVoice(segment.id, item.speakerID, item.voiceID)
+                        if let rangeID = segment.diarizationRangeID {
+                            onAssignIdentityRanges([rangeID], person.id)
+                        } else {
+                            onAssignTranscriptRowToPerson(segment.id, person.id)
+                        }
                     } label: {
-                        Text(item.displayName)
+                        Text("Assign audio range to \(person.label)")
                     }
-                    .help(item.combos.count > 1
-                        ? "Assign this row to \(item.displayName) (\(item.observedLabel))"
-                        : "Assign this row to \(item.observedLabel)")
                 }
-
-                if !speakerNameItems.isEmpty {
+                if !identityPeople.isEmpty {
                     Divider()
                 }
-
                 Button {
-                    onForceNewVoice(segment.id)
+                    onCreatePersonForTranscriptRange(segment.id)
                 } label: {
-                    Label("Force New Voice", systemImage: "plus.circle")
+                    Label("Create person for audio range", systemImage: "person.badge.plus")
                 }
-
-                Button {
-                    onCycleSpeaker(segment.id)
-                } label: {
-                    Label("Cycle Voice", systemImage: "arrow.triangle.2.circlepath")
+                if let rangeID = segment.diarizationRangeID {
+                    Button("Mark audio range unidentified") {
+                        onAssignIdentityRanges([rangeID], nil)
+                    }
+                    Button("Restore automatic match") {
+                        onRestoreAutomaticIdentityRanges([rangeID])
+                    }
                 }
-                .disabled(speakerNameItems.isEmpty)
+                Menu("Correct this row only") {
+                    ForEach(identityPeople) { person in
+                        Button(person.label) {
+                            onAssignTranscriptRowToPerson(segment.id, person.id)
+                        }
+                    }
+                    Button("Unidentified") {
+                        onAssignTranscriptRowToPerson(segment.id, nil)
+                    }
+                }
             } label: {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(label)
@@ -1833,8 +1970,7 @@ private struct TranscriptAIPromptPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(SpeakerLabelButtonStyle(color: speakerColor(for: speakerColorKey(
-                speakerID: speakerID,
-                speakerName: segment.speakerName ?? speakerLabel
+                personID: segment.personID
             ))))
             .frame(width: 150, alignment: .leading)
             .help(pairHelpText(for: segment))
@@ -2027,7 +2163,7 @@ private struct TranscriptAIPromptPanel: View {
     }
 
     private var currentSpeakerColor: Color {
-        if let key = speakerColorKey(speakerID: currentSpeakerID, speakerName: currentSpeakerLabel) {
+        if let key = speakerColorKey(personID: currentPersonID) {
             return speakerColor(for: key)
         }
         if diarizationError != nil {

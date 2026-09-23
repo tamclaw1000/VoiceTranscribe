@@ -1,5 +1,11 @@
 
 # BUGS
+- [ ] v2.4.48 person/range/row edits are absent from `/tmp/VoiceTranscribe.log`, so a user assignment sequence cannot be reconstructed from telemetry. See the observed run in `docs/dev/voice-identity-telemetry-20260922.md`.
+- [ ] Add local JSON-line events for `identity.person.created`, `.renamed`, `.merged`; `identity.range.assigned`, `.unidentified`, `.automaticRestored`; `identity.row.assigned`; and `identity.edit.undone`. Include session ID, action/scope, affected person/range/row IDs, before/after assignment IDs and source (`automatic`, `manual`, `unidentified`), and a monotonic edit ID that undo references. Range events need audio start/end offsets and a selected-range count for bulk actions.
+- [ ] Add range ID and audio offsets to automatic voice match/defer events; current `voiceIdentity.*` events only report speaker slot and voice label, so they cannot be joined reliably to manual corrections.
+- [ ] Include a compact export snapshot of person ID/name, range ID, row-only overrides, and assignment source so the final state can be compared with the edit trace. Define retention/redaction first: names and transcript text are sensitive local data in always-on logs.
+- [ ] Add a regression test for auto match, rename, bulk range assignment, row override, merge, undo, and export. Assert that the trace reconstructs action order and final assignments without inferring from display labels.
+- [ ] v2.4.48 voice-identity rework has not yet been visually validated against a real multi-speaker recording. Check range selection, name editing focus, row-only versus range correction, late backfill, undo, and the exported Markdown timeline. Tune conservative matcher thresholds against labeled audio; a short or ambiguous range intentionally stays unidentified.
 - [x] Changing the speaker drop-down ends up changing the voice currently speaking
 - [x] Application sometimes crashes when switching or toggling transcription
 - [x] Application sometimes doesn't pick up sounds until after restart. This mostly happens on initial launch.

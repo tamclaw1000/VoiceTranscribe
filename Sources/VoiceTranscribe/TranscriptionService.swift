@@ -227,7 +227,7 @@ final class TranscriptionCoordinator: ObservableObject {
     /// Paused spans for this session, in pause order; the last span is open while `isPaused`.
     @Published private(set) var pauseSpans: [TranscriptionPauseSpan] = []
     var onFinalSegment: ((TranscriptSegment) -> Void)?
-    var speakerProvider: (() -> SpeakerAnnotation?)?
+    var speakerProvider: ((TranscriptSegment) -> SpeakerAnnotation?)?
 
     private var transcript = TranscriptDocument()
     private var service: TranscriptionService
@@ -469,6 +469,36 @@ final class TranscriptionCoordinator: ObservableObject {
         ])
     }
 
+    func synchronizePeople(_ directory: SessionIdentityDirectory) {
+        segments = segments.map(directory.resolved)
+        if let interimSegment {
+            self.interimSegment = directory.resolved(interimSegment)
+        }
+        transcript.synchronizePeople(directory)
+    }
+
+    func updateSegmentPerson(segmentID: UUID, personID: UUID?, name: String?) {
+        segments = segments.map { segment in
+            guard segment.id == segmentID else { return segment }
+            var copy = segment
+            copy.personID = personID
+            copy.manualPersonID = personID
+            copy.speakerName = name ?? "Unidentified audio"
+            copy.diarizationRangeID = nil
+            copy.isPersonOverride = true
+            return copy
+        }
+        if var interimSegment, interimSegment.id == segmentID {
+            interimSegment.personID = personID
+            interimSegment.manualPersonID = personID
+            interimSegment.speakerName = name ?? "Unidentified audio"
+            interimSegment.diarizationRangeID = nil
+            interimSegment.isPersonOverride = true
+            self.interimSegment = interimSegment
+        }
+        transcript.updateSegmentPerson(segmentID: segmentID, personID: personID, name: name)
+    }
+
     func updateVoiceIdentity(
         speakerID: String,
         voiceID: String?,
@@ -536,6 +566,8 @@ final class TranscriptionCoordinator: ObservableObject {
             copy.voiceID = voiceID
             copy.voiceName = voiceName
             copy.voiceConfidence = voiceConfidence
+            copy.isPersonOverride = true
+            copy.diarizationRangeID = nil
             return copy
         }
 
@@ -545,6 +577,8 @@ final class TranscriptionCoordinator: ObservableObject {
             interimSegment.voiceID = voiceID
             interimSegment.voiceName = voiceName
             interimSegment.voiceConfidence = voiceConfidence
+            interimSegment.isPersonOverride = true
+            interimSegment.diarizationRangeID = nil
             self.interimSegment = interimSegment
         }
 
@@ -568,12 +602,14 @@ final class TranscriptionCoordinator: ObservableObject {
 
     private func apply(_ segment: TranscriptSegment) {
         var segment = segment
-        if let speaker = speakerProvider?() {
+        if let speaker = speakerProvider?(segment) {
             segment.speakerID = speaker.speakerID
             segment.speakerName = speaker.speakerName
             segment.voiceID = speaker.voiceID
             segment.voiceName = speaker.voiceName
             segment.voiceConfidence = speaker.voiceConfidence
+            segment.personID = speaker.personID
+            segment.diarizationRangeID = speaker.rangeID
         }
         bufferSnapshot.lastResultAt = Date()
         bufferSnapshot.queuedDuration = segment.isFinal ? 0 : min(bufferSnapshot.queuedDuration, 0.75)

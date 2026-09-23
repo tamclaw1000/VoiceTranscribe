@@ -195,8 +195,18 @@ final class AppModel: ObservableObject {
 
     init() {
         transcription = TranscriptionCoordinator(service: AppModel.makeInitialService())
-        transcription.speakerProvider = { [weak self] in
-            self?.diarization.annotationForCurrentSpeaker()
+        transcription.speakerProvider = { [weak self] segment in
+            self?.diarization.annotation(at: segment.audioOffset)
+        }
+        diarization.onRangeIdentityChanged = { [weak self] _ in
+            guard let self else { return }
+            self.transcription.synchronizePeople(self.diarization.identityDirectory)
+            self.objectWillChange.send()
+        }
+        diarization.onRangesReconciled = { [weak self] in
+            guard let self else { return }
+            self.transcription.synchronizePeople(self.diarization.identityDirectory)
+            self.objectWillChange.send()
         }
         transcription.onFinalSegment = { [weak self] segment in
             guard let self else { return }
@@ -265,6 +275,66 @@ final class AppModel: ObservableObject {
 
     var isSourceActionBusy: Bool {
         isStartingRecording || isStartingTranscription || isSwitchingCaptureSource
+    }
+
+    var identityPeople: [SessionPerson] { diarization.identityDirectory.people }
+    var identityRanges: [SessionIdentityRange] { diarization.identityDirectory.ranges }
+    var unresolvedIdentityRanges: [SessionIdentityRange] {
+        diarization.identityDirectory.unresolvedRanges
+    }
+    var canUndoIdentityEdit: Bool { diarization.identityDirectory.canUndo }
+
+    @discardableResult
+    func createIdentityPerson() -> SessionPerson {
+        diarization.createPerson()
+    }
+
+    func renameIdentityPerson(_ id: UUID, to name: String) {
+        diarization.renamePerson(id, to: name)
+        synchronizePeople()
+    }
+
+    func assignIdentityRanges(_ ids: Set<UUID>, to personID: UUID?) {
+        diarization.assignRanges(ids, to: personID)
+        synchronizePeople()
+    }
+
+    func restoreAutomaticIdentityRanges(_ ids: Set<UUID>) {
+        diarization.restoreAutomaticRanges(ids)
+        synchronizePeople()
+    }
+
+    func mergeIdentityPeople(_ sourceID: UUID, into targetID: UUID) {
+        diarization.mergePeople(sourceID, into: targetID)
+        synchronizePeople()
+    }
+
+    func undoIdentityEdit() {
+        diarization.undoPersonEdit()
+        synchronizePeople()
+    }
+
+    func assignTranscriptRowToPerson(_ rowID: UUID, personID: UUID?) {
+        let name = diarization.identityDirectory.person(id: personID)?.label
+        transcription.updateSegmentPerson(segmentID: rowID, personID: personID, name: name)
+        objectWillChange.send()
+    }
+
+    func createPersonForTranscriptRange(_ rowID: UUID) {
+        let person = diarization.createPerson()
+        if let row = transcription.segments.first(where: { $0.id == rowID })
+            ?? (transcription.interimSegment?.id == rowID ? transcription.interimSegment : nil),
+           let rangeID = row.diarizationRangeID,
+           diarization.identityDirectory.range(id: rangeID) != nil {
+            assignIdentityRanges([rangeID], to: person.id)
+        } else {
+            assignTranscriptRowToPerson(rowID, personID: person.id)
+        }
+    }
+
+    private func synchronizePeople() {
+        transcription.synchronizePeople(diarization.identityDirectory)
+        objectWillChange.send()
     }
 
     /// Voice Identification rows: one per canonical speaker. With same-name merging on,
@@ -1471,6 +1541,12 @@ final class AppModel: ObservableObject {
         playback.seek(to: offset)
     }
 
+    func playTranscriptRange(at offset: TimeInterval) {
+        guard ensureTranscriptPlaybackLoaded() else { return }
+        playback.seek(to: offset)
+        if !playback.isPlaying { playback.play() }
+    }
+
     /// Jumps to the row the user clicked and plays from there, so a click is a "read this
     /// passage" action rather than a silent reposition.
     func seekTranscriptPlayback(toRowID rowID: String) {
@@ -1549,7 +1625,7 @@ final class AppModel: ObservableObject {
             finalizedSegments: transcription.segments,
             speakerSegments: diarization.segments,
             pauseSpans: transcription.pauseSpans,
-            mergeSameNamedSpeakers: settings.mergeSameNamedSpeakers,
+            mergeSameNamedSpeakers: false,
             aiPrompts: aiPrompt.items,
             jevResults: jev.items,
             summaryParagraphs: summary.paragraphs

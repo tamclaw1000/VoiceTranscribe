@@ -12,6 +12,7 @@ struct VoiceIdentityProfile: Equatable, Sendable {
     var id: String
     var name: String
     var centroid: [Float]
+    var references: [[Float]]
     var sampleCount: Int
     var totalDuration: TimeInterval
 }
@@ -19,6 +20,9 @@ struct VoiceIdentityProfile: Equatable, Sendable {
 struct VoiceIdentityMatcher: Sendable {
     var matchThreshold: Float = 0.70
     var updateThreshold: Float = 0.82
+    var ambiguityMargin: Float = 0.08
+    var noveltyThreshold: Float = 0.55
+    var minimumNewVoiceDuration: TimeInterval = 2.5
 
     private(set) var profiles: [VoiceIdentityProfile] = []
     private var nextVoiceNumber = 1
@@ -33,11 +37,16 @@ struct VoiceIdentityMatcher: Sendable {
         nextVoiceNumber = 1
     }
 
-    mutating func identify(embedding: [Float], duration: TimeInterval) -> VoiceIdentityMatch {
+    mutating func identify(embedding: [Float], duration: TimeInterval) -> VoiceIdentityMatch? {
         let normalized = Self.normalized(embedding)
-        let best = bestProfile(for: normalized)
+        let ranked = rankedProfiles(for: normalized)
+        let best = ranked.first
+        let runnerUp = ranked.dropFirst().first
 
         if let best, best.similarity >= matchThreshold {
+            guard runnerUp == nil || best.similarity - runnerUp!.similarity >= ambiguityMargin else {
+                return nil
+            }
             updateProfile(at: best.index, with: normalized, similarity: best.similarity, duration: duration)
             let profile = profiles[best.index]
             return VoiceIdentityMatch(
@@ -47,12 +56,18 @@ struct VoiceIdentityMatcher: Sendable {
             )
         }
 
+        guard duration >= minimumNewVoiceDuration,
+              best == nil || best!.similarity < noveltyThreshold else {
+            return nil
+        }
+
         let id = "Voice \(nextVoiceNumber)"
         nextVoiceNumber += 1
         let profile = VoiceIdentityProfile(
             id: id,
             name: id,
             centroid: normalized,
+            references: [normalized],
             sampleCount: 1,
             totalDuration: duration
         )
@@ -60,15 +75,12 @@ struct VoiceIdentityMatcher: Sendable {
         return VoiceIdentityMatch(voiceID: id, voiceName: id, confidence: nil)
     }
 
-    private func bestProfile(for embedding: [Float]) -> (index: Int, similarity: Float)? {
-        var best: (index: Int, similarity: Float)?
-        for index in profiles.indices {
-            let similarity = Self.cosineSimilarity(embedding, profiles[index].centroid)
-            if best == nil || similarity > best!.similarity {
-                best = (index, similarity)
-            }
-        }
-        return best
+    private func rankedProfiles(for embedding: [Float]) -> [(index: Int, similarity: Float)] {
+        profiles.indices.map { index in
+            let profile = profiles[index]
+            let scores = profile.references.map { Self.cosineSimilarity(embedding, $0) }
+            return (index, max(scores.max() ?? 0, Self.cosineSimilarity(embedding, profile.centroid)))
+        }.sorted { $0.similarity > $1.similarity }
     }
 
     private mutating func updateProfile(
@@ -89,6 +101,8 @@ struct VoiceIdentityMatcher: Sendable {
             (old * oldWeight + new * newWeight) / totalWeight
         }
         profile.centroid = Self.normalized(merged)
+        profile.references.append(embedding)
+        if profile.references.count > 8 { profile.references.removeFirst() }
         profile.sampleCount += 1
         profile.totalDuration += duration
         profiles[index] = profile
@@ -170,7 +184,14 @@ actor VoiceIdentityService {
             "sampleRate": targetSampleRate,
             "embeddingDimensions": embedding.count
         ])
-        return matcher.identify(embedding: embedding, duration: duration)
+        let match = matcher.identify(embedding: embedding, duration: duration)
+        if match == nil {
+            Trace.event("voiceIdentity.match.deferred", [
+                "duration": String(format: "%.2f", duration),
+                "profiles": matcher.profiles.count
+            ])
+        }
+        return match
     }
 
     private func loadModel() async throws -> WeSpeakerModel {

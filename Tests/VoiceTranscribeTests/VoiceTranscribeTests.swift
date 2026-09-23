@@ -305,7 +305,7 @@ import Testing
     let service = FakeTranscriptionService(engineName: "FluidAudio Test")
     let coordinator = TranscriptionCoordinator(service: service)
     var currentSpeaker = "Speaker 1"
-    coordinator.speakerProvider = {
+    coordinator.speakerProvider = { _ in
         SpeakerAnnotation(speakerID: currentSpeaker, speakerName: nil)
     }
 
@@ -324,7 +324,7 @@ import Testing
 @Test @MainActor func transcriptionCoordinatorUpdatesIndividualSegmentSpeaker() async throws {
     let service = FakeTranscriptionService(engineName: "Speaker Cycle Test")
     let coordinator = TranscriptionCoordinator(service: service)
-    coordinator.speakerProvider = {
+    coordinator.speakerProvider = { _ in
         SpeakerAnnotation(speakerID: "Speaker 1", speakerName: nil)
     }
 
@@ -412,12 +412,165 @@ import Testing
     let second = matcher.identify(embedding: [0.96, 0.1, 0], duration: 3.0)
     let third = matcher.identify(embedding: [0, 1, 0], duration: 2.5)
 
-    #expect(first.voiceID == "Voice 1")
-    #expect(first.confidence == nil)
-    #expect(second.voiceID == "Voice 1")
-    #expect((second.confidence ?? 0) > 0.9)
-    #expect(third.voiceID == "Voice 2")
+    #expect(first?.voiceID == "Voice 1")
+    #expect(first?.confidence == nil)
+    #expect(second?.voiceID == "Voice 1")
+    #expect((second?.confidence ?? 0) > 0.9)
+    #expect(third?.voiceID == "Voice 2")
     #expect(matcher.profiles.count == 2)
+}
+
+@Test func voiceMatcherLeavesAmbiguousAndShortNewSamplesUnidentified() {
+    var matcher = VoiceIdentityMatcher()
+    let first = matcher.identify(embedding: [1, 0, 0], duration: 3)
+    let second = matcher.identify(embedding: [0, 1, 0], duration: 3)
+    let ambiguous = matcher.identify(embedding: [0.72, 0.70, 0], duration: 3)
+    let borderline = matcher.identify(embedding: [0.6, 0.6, 0.5], duration: 3)
+    let tooShort = matcher.identify(embedding: [0, 0, 1], duration: 2.1)
+    #expect(first?.voiceID == "Voice 1")
+    #expect(second?.voiceID == "Voice 2")
+    #expect(ambiguous == nil)
+    #expect(borderline == nil)
+    #expect(tooShort == nil)
+    #expect(matcher.profiles.count == 2)
+    let third = matcher.identify(embedding: [0, 0, 1], duration: 3)
+    #expect(third?.voiceID == "Voice 3")
+}
+
+@Test func sessionIdentityAssignmentsArePerRangeAndManualWins() throws {
+    var directory = SessionIdentityDirectory()
+    directory.reconcile([
+        SpeakerDiarizationSegment(speakerID: "Speaker 1", startTime: 0, endTime: 1),
+        SpeakerDiarizationSegment(speakerID: "Speaker 1", startTime: 2, endTime: 3)
+    ])
+    let firstID = try #require(directory.range(at: 0.5)?.id)
+    let secondID = try #require(directory.range(at: 2.5)?.id)
+    #expect(directory.people.isEmpty)
+    #expect(directory.personLabel(for: try #require(directory.range(id: firstID))) == "Unidentified audio")
+
+    let manual = directory.createPerson()
+    directory.rename(personID: manual.id, to: "Dana")
+    directory.assign([firstID], to: manual.id)
+    directory.assignAutomatic(voiceID: "Voice 1", confidence: 0.91, to: firstID)
+    directory.assignAutomatic(voiceID: "Voice 1", confidence: 0.89, to: secondID)
+    #expect(directory.range(id: firstID)?.personID == manual.id)
+    #expect(directory.range(id: firstID)?.source == .manual)
+    #expect(directory.range(id: secondID)?.personID != manual.id)
+    #expect(directory.range(id: secondID)?.source == .automatic)
+}
+
+@Test func sessionIdentityMergeIsExplicitAndUndoable() throws {
+    var directory = SessionIdentityDirectory()
+    directory.reconcile([
+        SpeakerDiarizationSegment(speakerID: "Speaker 1", startTime: 0, endTime: 1),
+        SpeakerDiarizationSegment(speakerID: "Speaker 2", startTime: 2, endTime: 3)
+    ])
+    let firstID = try #require(directory.range(at: 0.5)?.id)
+    let secondID = try #require(directory.range(at: 2.5)?.id)
+    let first = directory.createPerson()
+    let second = directory.createPerson()
+    directory.rename(personID: first.id, to: "Dana")
+    directory.rename(personID: second.id, to: "Dana")
+    directory.assign([firstID], to: first.id)
+    directory.assign([secondID], to: second.id)
+    #expect(directory.range(id: firstID)?.personID != directory.range(id: secondID)?.personID)
+    directory.merge(second.id, into: first.id)
+    #expect(directory.range(id: secondID)?.personID == first.id)
+    #expect(directory.people.count == 1)
+    let undone = directory.undo()
+    #expect(undone)
+    #expect(directory.range(id: secondID)?.personID == second.id)
+}
+
+@Test func revisedRangeKeepsStableIDOnlyWhenItStillCoversTheSameAudio() throws {
+    var directory = SessionIdentityDirectory()
+    directory.reconcile([SpeakerDiarizationSegment(speakerID: "Speaker 1", startTime: 0, endTime: 1)])
+    let id = try #require(directory.range(at: 0.5)?.id)
+    let person = directory.createPerson()
+    directory.assign([id], to: person.id)
+    directory.reconcile([SpeakerDiarizationSegment(speakerID: "Speaker 1", startTime: 0, endTime: 3)])
+    #expect(directory.range(at: 2.5)?.id == id)
+    directory.reconcile([
+        SpeakerDiarizationSegment(speakerID: "Speaker 1", startTime: 0, endTime: 1),
+        SpeakerDiarizationSegment(speakerID: "Speaker 1", startTime: 1, endTime: 3)
+    ])
+    #expect(directory.ranges.allSatisfy { $0.id != id })
+    #expect(directory.unresolvedRanges.contains { $0.id == id })
+}
+
+@Test func transcriptResolvesLateRangeWithoutOverwritingRowCorrection() throws {
+    var directory = SessionIdentityDirectory()
+    var document = TranscriptDocument()
+    let row = TranscriptSegment(text: "hello", isFinal: true, audioOffset: 0.5)
+    document.apply(row)
+    directory.reconcile([SpeakerDiarizationSegment(speakerID: "Speaker 1", startTime: 0, endTime: 3)])
+    let rangeID = try #require(directory.range(at: 0.5)?.id)
+    directory.assignAutomatic(voiceID: "Voice 1", confidence: 0.93, to: rangeID)
+    document.synchronizePeople(directory)
+    #expect(document.finalized[0].diarizationRangeID == rangeID)
+    #expect(document.finalized[0].voiceID == "Voice 1")
+
+    let corrected = directory.createPerson()
+    directory.rename(personID: corrected.id, to: "Lee")
+    document.updateSegmentPerson(segmentID: row.id, personID: corrected.id, name: "Lee")
+    directory.assignAutomatic(voiceID: "Voice 2", confidence: 0.95, to: rangeID)
+    document.synchronizePeople(directory)
+    #expect(document.finalized[0].speakerName == "Lee")
+    #expect(document.finalized[0].personID == corrected.id)
+    #expect(document.finalized[0].diarizationRangeID == nil)
+}
+
+@Test func transcriptRebindsWhenDiarizationReplacesItsRange() throws {
+    var directory = SessionIdentityDirectory()
+    directory.reconcile([SpeakerDiarizationSegment(speakerID: "Speaker 1", startTime: 0, endTime: 3)])
+    let oldID = try #require(directory.range(at: 1.5)?.id)
+    let row = TranscriptSegment(
+        text: "next speaker", isFinal: true, audioOffset: 1.5,
+        diarizationRangeID: oldID
+    )
+    directory.reconcile([
+        SpeakerDiarizationSegment(speakerID: "Speaker 1", startTime: 0, endTime: 1),
+        SpeakerDiarizationSegment(speakerID: "Speaker 2", startTime: 1, endTime: 3)
+    ])
+    let rebound = directory.resolved(row)
+    #expect(rebound.diarizationRangeID != oldID)
+    #expect(rebound.speakerID == "Speaker 2")
+}
+
+@Test func rowOnlyCorrectionFollowsPersonRenameMergeAndUndo() {
+    var directory = SessionIdentityDirectory()
+    let first = directory.createPerson()
+    let second = directory.createPerson()
+    var document = TranscriptDocument()
+    let row = TranscriptSegment(text: "hello", isFinal: true)
+    document.apply(row)
+    document.updateSegmentPerson(segmentID: row.id, personID: second.id, name: second.label)
+
+    directory.rename(personID: second.id, to: "Dana")
+    document.synchronizePeople(directory)
+    #expect(document.finalized[0].speakerName == "Dana")
+    directory.merge(second.id, into: first.id)
+    document.synchronizePeople(directory)
+    #expect(document.finalized[0].personID == first.id)
+    let undone = directory.undo()
+    document.synchronizePeople(directory)
+    #expect(undone)
+    #expect(document.finalized[0].personID == second.id)
+    #expect(document.finalized[0].speakerName == "Dana")
+}
+
+@Test func undoManualAssignmentKeepsLaterAutomaticEvidence() throws {
+    var directory = SessionIdentityDirectory()
+    directory.reconcile([SpeakerDiarizationSegment(speakerID: "Speaker 1", startTime: 0, endTime: 3)])
+    let rangeID = try #require(directory.range(at: 0.5)?.id)
+    let manual = directory.createPerson()
+    directory.assign([rangeID], to: manual.id)
+    directory.assignAutomatic(voiceID: "Voice 1", confidence: nil, to: rangeID)
+    let automaticID = try #require(directory.range(id: rangeID)?.automaticPersonID)
+    let undone = directory.undo()
+    #expect(undone)
+    #expect(directory.range(id: rangeID)?.personID == automaticID)
+    #expect(directory.person(id: automaticID) != nil)
 }
 
 // MARK: - Speaker/Voice pair in the transcript display
@@ -1983,7 +2136,7 @@ private func voiceEntry(
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
     let start = Date(timeIntervalSince1970: 1_779_971_597.0)
 
-    let segments = [
+    var segments = [
         SpeakerDiarizationSegment(speakerID: "Speaker 1", speakerName: "Dana", startTime: 0, endTime: 3, confidence: 0.8),
         SpeakerDiarizationSegment(speakerID: "Speaker 2", speakerName: "Dana", startTime: 3, endTime: 6, confidence: 0.6),
         SpeakerDiarizationSegment(speakerID: "Speaker 3", speakerName: "Bob", startTime: 6, endTime: 8, confidence: 0.9),
@@ -2027,6 +2180,16 @@ private func voiceEntry(
     let unmerged = export(merging: false)
     #expect(unmerged.contains("| 0:00 | 0:03 | Dana | 0.80 |"))
     #expect(unmerged.contains("| 0:03 | 0:06 | Dana | 0.60 |"))
+
+    let samePerson = UUID()
+    segments[0].personID = samePerson
+    segments[1].personID = samePerson
+    let explicitlyMerged = export(merging: false)
+    #expect(explicitlyMerged.contains("| 0:00 | 0:06 | Dana | 0.70 |"))
+    segments[1].personID = UUID()
+    let distinctPeople = export(merging: false)
+    #expect(distinctPeople.contains("| 0:00 | 0:03 | Dana | 0.80 |"))
+    #expect(distinctPeople.contains("| 0:03 | 0:06 | Dana | 0.60 |"))
 }
 
 // MARK: - Playback follow

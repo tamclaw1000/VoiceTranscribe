@@ -126,6 +126,34 @@ struct TranscriptDocument {
         }
     }
 
+    mutating func synchronizePeople(_ directory: SessionIdentityDirectory) {
+        finalized = finalized.map(directory.resolved)
+        if let interim {
+            self.interim = directory.resolved(interim)
+        }
+    }
+
+    mutating func updateSegmentPerson(segmentID: UUID, personID: UUID?, name: String?) {
+        finalized = finalized.map { segment in
+            guard segment.id == segmentID else { return segment }
+            var copy = segment
+            copy.personID = personID
+            copy.manualPersonID = personID
+            copy.speakerName = name ?? "Unidentified audio"
+            copy.diarizationRangeID = nil
+            copy.isPersonOverride = true
+            return copy
+        }
+        if var interim, interim.id == segmentID {
+            interim.personID = personID
+            interim.manualPersonID = personID
+            interim.speakerName = name ?? "Unidentified audio"
+            interim.diarizationRangeID = nil
+            interim.isPersonOverride = true
+            self.interim = interim
+        }
+    }
+
     mutating func updateSpeakerName(speakerID: String, speakerName: String?) {
         finalized = finalized.map { segment in
             guard segment.speakerID == speakerID else {
@@ -215,6 +243,8 @@ struct TranscriptDocument {
             copy.voiceID = voiceID
             copy.voiceName = voiceName
             copy.voiceConfidence = voiceConfidence
+            copy.isPersonOverride = true
+            copy.diarizationRangeID = nil
             return copy
         }
 
@@ -224,6 +254,8 @@ struct TranscriptDocument {
             interim.voiceID = voiceID
             interim.voiceName = voiceName
             interim.voiceConfidence = voiceConfidence
+            interim.isPersonOverride = true
+            interim.diarizationRangeID = nil
             self.interim = interim
         }
     }

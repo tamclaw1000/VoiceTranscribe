@@ -6,6 +6,7 @@ import SpeechVAD
 @MainActor
 final class DiarizationCoordinator: ObservableObject {
     @Published private(set) var segments: [SpeakerDiarizationSegment] = []
+    @Published private(set) var identityDirectory = SessionIdentityDirectory()
     @Published private(set) var isStarting = false
     @Published private(set) var isRunning = false
     @Published private(set) var lastError: String?
@@ -17,6 +18,7 @@ final class DiarizationCoordinator: ObservableObject {
     private var tracedSegmentKeys = Set<String>()
     private var voiceIdentitySegmentKeys = Set<String>()
     private var voiceIdentitySkippedKeys = Set<String>()
+    private var voiceIdentityDeferredKeys = Set<String>()
     private var voiceIdentities: [String: VoiceIdentityMatch] = [:]
     private var sessionAudioSamples: [Float] = []
     private let identitySampleRate = 16_000
@@ -30,12 +32,19 @@ final class DiarizationCoordinator: ObservableObject {
     /// so a quick pick from the existing-name list is not overwritten by accident.
     private var observedVoiceNameOrigins: [String: SpeakerNameOrigin] = [:]
 
+    var onRangeIdentityChanged: ((SessionIdentityRange) -> Void)?
+    var onRangesReconciled: (() -> Void)?
+
     var currentSpeakerLabel: String? {
         lastSpeaker?.speakerLabel
     }
 
     var currentSpeakerID: String? {
         lastSpeaker?.speakerID
+    }
+
+    var currentPersonID: UUID? {
+        lastSpeaker?.personID
     }
 
     func start() async throws {
@@ -62,11 +71,13 @@ final class DiarizationCoordinator: ObservableObject {
     func reset() {
         engine = nil
         segments = []
+        identityDirectory.reset()
         sessionID = UUID()
         lastSpeaker = nil
         tracedSegmentKeys = []
         voiceIdentitySegmentKeys = []
         voiceIdentitySkippedKeys = []
+        voiceIdentityDeferredKeys = []
         voiceIdentities = [:]
         sessionAudioSamples = []
         hasLoggedVoiceIdentityFailure = false
@@ -178,13 +189,67 @@ final class DiarizationCoordinator: ObservableObject {
         guard let lastSpeaker else {
             return nil
         }
+        let range = identityDirectory.range(at: (lastSpeaker.startTime + lastSpeaker.endTime) / 2)
         return SpeakerAnnotation(
             speakerID: lastSpeaker.speakerID,
             speakerName: lastSpeaker.speakerName,
             voiceID: lastSpeaker.voiceID,
             voiceName: lastSpeaker.voiceName,
-            voiceConfidence: lastSpeaker.voiceConfidence
+            voiceConfidence: lastSpeaker.voiceConfidence,
+            personID: range?.personID,
+            rangeID: range?.id
         )
+    }
+
+    func annotation(at offset: TimeInterval?) -> SpeakerAnnotation? {
+        guard let offset else {
+            return annotationForCurrentSpeaker()
+        }
+        guard let range = identityDirectory.range(at: offset) else { return nil }
+        let segment = segments.first {
+            $0.speakerID == range.speakerID
+                && $0.startTime <= offset && offset < $0.endTime
+        }
+        return SpeakerAnnotation(
+            speakerID: range.speakerID,
+            speakerName: identityDirectory.personLabel(for: range),
+            voiceID: range.voiceID,
+            voiceName: range.voiceID,
+            voiceConfidence: segment?.voiceConfidence,
+            personID: range.personID,
+            rangeID: range.id
+        )
+    }
+
+    func createPerson() -> SessionPerson {
+        let person = identityDirectory.createPerson()
+        objectWillChange.send()
+        return person
+    }
+
+    func renamePerson(_ id: UUID, to name: String) {
+        identityDirectory.rename(personID: id, to: name)
+        refreshPersonLabels()
+    }
+
+    func assignRanges(_ ids: Set<UUID>, to personID: UUID?) {
+        identityDirectory.assign(ids, to: personID)
+        refreshPersonLabels()
+    }
+
+    func restoreAutomaticRanges(_ ids: Set<UUID>) {
+        identityDirectory.restoreAutomatic(ids)
+        refreshPersonLabels()
+    }
+
+    func mergePeople(_ sourceID: UUID, into targetID: UUID) {
+        identityDirectory.merge(sourceID, into: targetID)
+        refreshPersonLabels()
+    }
+
+    func undoPersonEdit() {
+        guard identityDirectory.undo() else { return }
+        refreshPersonLabels()
     }
 
     func speakerName(for speakerID: String) -> String? {
@@ -249,20 +314,30 @@ final class DiarizationCoordinator: ObservableObject {
     }
 
     private func replaceSegments(_ newSegments: [SpeakerDiarizationSegment]) {
-        segments = newSegments
+        let sorted = newSegments.sorted { $0.startTime < $1.startTime }
+        identityDirectory.reconcile(sorted)
+        segments = sorted
             .map { segment in
                 var copy = segment
-                copy.speakerName = displayName(for: copy)
                 if let identity = voiceIdentities[voiceIdentityKey(segment)] {
                     copy.voiceID = identity.voiceID
                     copy.voiceName = identity.voiceName
                     copy.voiceConfidence = identity.confidence
-                    copy.speakerName = displayName(for: copy)
+                    if let range = identityDirectory.range(at: (segment.startTime + segment.endTime) / 2) {
+                        identityDirectory.assignAutomatic(
+                            voiceID: identity.voiceID,
+                            confidence: identity.confidence,
+                            to: range.id
+                        )
+                    }
                 }
+                let range = identityDirectory.range(at: (segment.startTime + segment.endTime) / 2)
+                copy.personID = range?.personID
+                copy.speakerName = range.map(identityDirectory.personLabel(for:))
                 return copy
             }
-            .sorted { $0.startTime < $1.startTime }
         lastSpeaker = segments.max { $0.endTime < $1.endTime }
+        onRangesReconciled?()
         queueVoiceIdentityWork(for: segments)
 
         for segment in segments {
@@ -298,8 +373,21 @@ final class DiarizationCoordinator: ObservableObject {
     }
 
     private func displayName(for segment: SpeakerDiarizationSegment) -> String? {
-        observedVoiceNames[observedVoiceKey(speakerID: segment.speakerID, voiceID: segment.voiceID)]
+        identityDirectory.range(at: (segment.startTime + segment.endTime) / 2)
+            .map(identityDirectory.personLabel(for:))
+            ?? observedVoiceNames[observedVoiceKey(speakerID: segment.speakerID, voiceID: segment.voiceID)]
             ?? speakerNames[segment.speakerID]
+    }
+
+    private func refreshPersonLabels() {
+        segments = segments.map { segment in
+            var copy = segment
+            let range = identityDirectory.range(at: (segment.startTime + segment.endTime) / 2)
+            copy.personID = range?.personID
+            copy.speakerName = range.map(identityDirectory.personLabel(for:))
+            return copy
+        }
+        lastSpeaker = segments.max { $0.endTime < $1.endTime }
     }
 
     private func observedVoiceKey(speakerID: String, voiceID: String?) -> String {
@@ -319,6 +407,7 @@ final class DiarizationCoordinator: ObservableObject {
         for segment in segments {
             let key = voiceIdentityKey(segment)
             guard !voiceIdentitySegmentKeys.contains(key),
+                  !voiceIdentityDeferredKeys.contains(key),
                   segment.endTime <= bufferedDuration - identityLiveEdgeDelay,
                   segment.endTime > segment.startTime else {
                 continue
@@ -349,7 +438,11 @@ final class DiarizationCoordinator: ObservableObject {
                 continue
             }
 
+            guard let range = identityDirectory.range(
+                at: (segment.startTime + segment.endTime) / 2
+            ), range.identityAttempts < 3 else { continue }
             voiceIdentitySegmentKeys.insert(key)
+            let rangeID = range.id
             let speakerID = segment.speakerID
             let sessionID = self.sessionID
             let sampleRate = identitySampleRate
@@ -368,13 +461,19 @@ final class DiarizationCoordinator: ObservableObject {
                         sampleRate: sampleRate,
                         duration: duration
                     ) else {
+                        await MainActor.run {
+                            guard self?.sessionID == sessionID else { return }
+                            self?.voiceIdentitySegmentKeys.remove(key)
+                            self?.voiceIdentityDeferredKeys.insert(key)
+                            self?.identityDirectory.markUnresolved(rangeID)
+                        }
                         return
                     }
                     await MainActor.run {
                         guard self?.sessionID == sessionID else {
                             return
                         }
-                        self?.applyVoiceIdentity(identity, key: key, speakerID: speakerID)
+                        self?.applyVoiceIdentity(identity, key: key, rangeID: rangeID, speakerID: speakerID)
                     }
                 } catch {
                     await MainActor.run {
@@ -400,26 +499,27 @@ final class DiarizationCoordinator: ObservableObject {
         return Array(sessionAudioSamples[startIndex..<endIndex])
     }
 
-    private func applyVoiceIdentity(_ identity: VoiceIdentityMatch, key: String, speakerID: String) {
+    private func applyVoiceIdentity(
+        _ identity: VoiceIdentityMatch, key: String, rangeID: UUID, speakerID: String
+    ) {
+        guard identityDirectory.range(id: rangeID) != nil else { return }
         voiceIdentities[key] = identity
+        identityDirectory.assignAutomatic(voiceID: identity.voiceID, confidence: identity.confidence, to: rangeID)
         segments = segments.map { segment in
-            guard voiceIdentityKey(segment) == key else {
+            guard identityDirectory.range(
+                at: (segment.startTime + segment.endTime) / 2
+            )?.id == rangeID else {
                 return segment
             }
             var copy = segment
             copy.voiceID = identity.voiceID
             copy.voiceName = identity.voiceName
             copy.voiceConfidence = identity.confidence
+            copy.personID = identityDirectory.range(id: rangeID)?.personID
             copy.speakerName = displayName(for: copy)
             return copy
         }
-        if var lastSpeaker, voiceIdentityKey(lastSpeaker) == key {
-            lastSpeaker.voiceID = identity.voiceID
-            lastSpeaker.voiceName = identity.voiceName
-            lastSpeaker.voiceConfidence = identity.confidence
-            lastSpeaker.speakerName = displayName(for: lastSpeaker)
-            self.lastSpeaker = lastSpeaker
-        }
+        lastSpeaker = segments.max { $0.endTime < $1.endTime }
         Trace.event("voiceIdentity.assigned", [
             "speakerID": speakerID,
             "voiceID": identity.voiceID,
@@ -427,6 +527,13 @@ final class DiarizationCoordinator: ObservableObject {
             "matchType": identity.confidence == nil ? "new" : "matched",
             "confidence": identity.confidence.map { String(format: "%.3f", $0) } ?? ""
         ])
+        if let range = identityDirectory.range(id: rangeID) {
+            onRangeIdentityChanged?(range)
+        }
+        if identity.confidence == nil, !voiceIdentityDeferredKeys.isEmpty {
+            voiceIdentityDeferredKeys.removeAll()
+            queueVoiceIdentityWork(for: segments)
+        }
     }
 
     private static func monoFloatSamples(from buffer: AVAudioPCMBuffer) -> [Float] {

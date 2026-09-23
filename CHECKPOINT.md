@@ -1,6 +1,15 @@
 # VoiceTranscribe Checkpoint
 
-Last updated: 2026-09-20
+Last updated: 2026-09-22
+
+## v2.4.48 Handoff (supersedes the historical repository-state notes below)
+
+- The session-person rework was developed in `../voice-identity-rework` from `main` at `5ac17b1` for release `v2.4.48` / build `91`. The older backfill attempt is preserved separately in `../archive-voice-identity-backfill` on `archive/voice-identity-backfill`; do not discard its uncommitted notes or code.
+- The rework introduces `SessionIdentityDirectory` for explicit people and per-diarization-range assignments. Sortformer slots and WeSpeaker clusters are evidence, not person IDs. The user can name/merge people, correct individual or selected ranges, mark unidentified, restore automatic, undo, and override a transcript row only. Apple Speech remains authoritative for text; its audio offsets link transcript rows to ranges. Markdown speaker runs coalesce by person ID, not by matching name.
+- `docs/dev/voice-identity-telemetry-20260922.md` reviews the first 120-second Star Trek run and its `202609222005*` exports. Its key finding: manual person/range/row edits are not traced, so the exported names are visible but the actions that produced them cannot be replayed. Playback and automatic WeSpeaker events are only supporting context; the event-schema gap is tracked in `TODO.md`.
+- WeSpeaker matching now abstains for short or ambiguous evidence. Thresholds and range reconciliation are provisional. Manual corrections take precedence over late automatic evidence; changed ranges that cannot retain a manual assignment are shown under Needs review.
+- `Resources/Info.plist` is `2.4.48` / `91`; `IMPLEMENTATION.md` #113, `ARCHITECTURE.md`, and `REQUIREMENTS.md` describe the new flow. The full test suite and clean packaged build are release gates. Running-app multi-speaker and export visual verification remain open in `TODO.md`; the 120-second sample exports were reviewed for telemetry but do not validate all interactions.
+- The material below is historical and contains stale worktree/branch inventory and the superseded tuple-based speaker UX. Check current Git state rather than relying on that inventory.
 
 ## Repository State
 

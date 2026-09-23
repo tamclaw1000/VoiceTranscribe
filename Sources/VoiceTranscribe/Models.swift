@@ -77,6 +77,10 @@ struct TranscriptSegment: Identifiable, Equatable {
     var voiceID: String?
     var voiceName: String?
     var voiceConfidence: Float?
+    var personID: UUID?
+    var manualPersonID: UUID?
+    var diarizationRangeID: UUID?
+    var isPersonOverride: Bool = false
     /// Position in the audio this text was spoken, when the engine reported one: measured from the
     /// start of the audio the transcriber was fed, which for an imported file is the start of that
     /// file. This is the audio's own timeline, not the clock, so it maps a transcript onto imported
@@ -137,7 +141,9 @@ struct TranscriptSegment: Identifiable, Equatable {
         voiceID: String? = nil,
         voiceName: String? = nil,
         voiceConfidence: Float? = nil,
-        audioOffset: TimeInterval? = nil
+        audioOffset: TimeInterval? = nil,
+        personID: UUID? = nil,
+        diarizationRangeID: UUID? = nil
     ) {
         self.id = id
         self.text = text
@@ -150,6 +156,8 @@ struct TranscriptSegment: Identifiable, Equatable {
         self.voiceName = voiceName
         self.voiceConfidence = voiceConfidence
         self.audioOffset = audioOffset
+        self.personID = personID
+        self.diarizationRangeID = diarizationRangeID
     }
 }
 
@@ -337,6 +345,7 @@ struct SpeakerDiarizationSegment: Identifiable, Equatable, Sendable {
     var voiceID: String?
     var voiceName: String?
     var voiceConfidence: Float?
+    var personID: UUID? = nil
     var startTime: TimeInterval
     var endTime: TimeInterval
     var confidence: Float?
@@ -386,6 +395,8 @@ struct SpeakerAnnotation: Equatable {
     var voiceID: String?
     var voiceName: String?
     var voiceConfidence: Float?
+    var personID: UUID? = nil
+    var rangeID: UUID? = nil
 }
 
 /// One observed `Speaker N / Voice M` combination. Session-only, like the rest of

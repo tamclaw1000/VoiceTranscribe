@@ -95,16 +95,31 @@ enum MarkdownExportService {
             lines.append(contentsOf: summary)
         }
 
-        appendAIResults(
-            to: &lines,
-            context: context,
-            summary: summary
-        )
+        // The AI and Jev blocks describe machinery a session may never have touched. Transcribing
+        // with no prompts enabled uses no LLM at all, so "AI processing enabled: No" followed by
+        // four endpoint lines and a copy of every prompt template is a page of configuration about
+        // something that did not run — in a document whose job is to record what happened.
+        //
+        // Each block is kept when its feature was on, when anything it produced is in this
+        // document, or — for the AI block — when there is a summary, since an LLM wrote that and
+        // dropping the block would take the model that produced it with it.
+        let aiRan = context.promptStates.contains {
+            !$0.state.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        if context.aiPromptEnabled || aiRan || !aiPrompts.isEmpty || !summary.isEmpty {
+            appendAIResults(
+                to: &lines,
+                context: context,
+                summary: summary
+            )
+        }
 
-        appendJevResults(
-            to: &lines,
-            context: context
-        )
+        if context.jevEnabled || !jevResults.isEmpty {
+            appendJevResults(
+                to: &lines,
+                context: context
+            )
+        }
 
         let fileLines = fileReferenceLines(context: context)
         if !fileLines.isEmpty {

@@ -2660,6 +2660,126 @@ private func makeSilentAudioFile(named name: String, seconds: Double, in directo
     #expect(!markdown.contains("🐻"), "a person who never spoke is not in the export")
 }
 
+/// A context with every AI and Jev field filled in, so each test below changes only the one
+/// thing it is about.
+private func llmSectionExportContext(start: Date) -> MarkdownExportContext {
+    MarkdownExportContext(
+        sourceName: "Built-in Microphone",
+        location: "",
+        startDate: start,
+        endDate: start.addingTimeInterval(6),
+        exportedAt: start.addingTimeInterval(6),
+        transcriptionEngine: "Apple SpeechTranscriber",
+        aiPromptEnabled: false,
+        llmName: "Local Ollama",
+        llmProvider: "Ollama",
+        llmEndpoint: "http://127.0.0.1:11434",
+        llmModel: "gemma3:12b",
+        aiPromptPrompt: "",
+        summaryPrompt: "Summarize the call.",
+        jevEnabled: false,
+        jevBaseURL: "https://jev.example",
+        jevModel: "system-one",
+        jevQueryDetails: "",
+        audioURL: nil,
+        transcriptURL: nil,
+        metadataURL: nil
+    )
+}
+
+@Test func markdownExportOmitsLLMSectionsWhenNoPromptRan() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+
+    let markdown = MarkdownExportService.makeDocument(
+        context: llmSectionExportContext(start: start),
+        finalizedSegments: [
+            TranscriptSegment(text: "Just a transcript.", timestamp: start, isFinal: true)
+        ],
+        aiPrompts: [],
+        summaryParagraphs: [],
+        calendar: calendar
+    )
+
+    #expect(markdown.contains("# RECORDING"), "the transcript itself is still exported")
+    #expect(!markdown.contains("# AI RESULTS"))
+    #expect(!markdown.contains("# JEV RESULTS"))
+    #expect(!markdown.contains("LLM"), "no endpoint, provider, base URL or model lines")
+    #expect(!markdown.contains("Summary Prompt"), "a prompt that never ran is not configuration worth exporting")
+    #expect(!markdown.contains("gemma3:12b"))
+    #expect(!markdown.contains("jev.example"))
+}
+
+@Test func markdownExportKeepsOnlyTheSectionWhoseFeatureWasUsed() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+    var context = llmSectionExportContext(start: start)
+    context.aiPromptEnabled = true
+    context.aiPromptPrompt = "Action Items on Local Ollama:\nList the action items."
+
+    let markdown = MarkdownExportService.makeDocument(
+        context: context,
+        finalizedSegments: [
+            TranscriptSegment(text: "Just a transcript.", timestamp: start, isFinal: true)
+        ],
+        aiPrompts: [],
+        summaryParagraphs: [],
+        calendar: calendar
+    )
+
+    #expect(markdown.contains("# AI RESULTS"))
+    #expect(markdown.contains("- LLM model: gemma3:12b"))
+    #expect(markdown.contains("## AI Processing Prompts"))
+    #expect(!markdown.contains("# JEV RESULTS"), "Jev was off, so its block goes even though AI's stays")
+}
+
+@Test func markdownExportKeepsAIResultsForASummaryWithNoPrompts() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+
+    let markdown = MarkdownExportService.makeDocument(
+        context: llmSectionExportContext(start: start),
+        finalizedSegments: [
+            TranscriptSegment(text: "Just a transcript.", timestamp: start, isFinal: true)
+        ],
+        aiPrompts: [],
+        summaryParagraphs: ["The team agreed to ship on Friday."],
+        calendar: calendar
+    )
+
+    // No prompt was enabled, but an LLM still wrote the summary — dropping the block would take
+    // the record of which model wrote it along with it.
+    #expect(markdown.contains("# AI RESULTS"))
+    #expect(markdown.contains("- LLM model: gemma3:12b"))
+}
+
+@Test func markdownExportKeepsPromptStateFromAPromptSwitchedOffLater() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+    var context = llmSectionExportContext(start: start)
+    context.promptStates = [
+        MarkdownExportPromptState(promptName: "Action Items", state: "Ship on Friday.")
+    ]
+
+    let markdown = MarkdownExportService.makeDocument(
+        context: context,
+        finalizedSegments: [
+            TranscriptSegment(text: "Just a transcript.", timestamp: start, isFinal: true)
+        ],
+        aiPrompts: [],
+        summaryParagraphs: [],
+        calendar: calendar
+    )
+
+    #expect(markdown.contains("# AI RESULTS"), "it ran during the session, so it counts as used")
+    #expect(markdown.contains("### Action Items"))
+    #expect(markdown.contains("Ship on Friday."))
+}
+
 private struct BatchProbeJevService: JevService {
     let probe: JevBatchProbe
 

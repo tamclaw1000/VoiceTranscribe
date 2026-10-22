@@ -1714,10 +1714,16 @@ final class AppModel: ObservableObject {
         let selectedLLM = settings.useGlobalPromptLLM
             ? settings.globalPromptLLMEndpoint
             : settings.selectedLLMEndpoint
+        // Enabled prompts only. The export records what this session did, and a disabled prompt
+        // did nothing — listing its template, marked "[disabled]", padded the document with
+        // configuration the reader has to skip. Accumulated prompt *state* is handled separately
+        // and keyed on having produced something, so a prompt that ran and was then switched off
+        // still reports its result.
         let promptTemplateDetails = settings.effectiveAIPromptTemplates
+            .filter(\.isEnabled)
             .map { promptTemplate -> String in
                 let llm = settings.effectiveLLMEndpoint(for: promptTemplate)
-                return "\(promptTemplate.displayName) [\(promptTemplate.isEnabled ? "enabled" : "disabled")] on \(llm.displayName):\n\(promptTemplate.template)"
+                return "\(promptTemplate.displayName) on \(llm.displayName):\n\(promptTemplate.template)"
             }
             .joined(separator: "\n\n")
         let promptStates = settings.effectiveAIPromptTemplates.map {
@@ -1727,8 +1733,9 @@ final class AppModel: ObservableObject {
             )
         }
         let jevQueryDetails = settings.jevQueries
+            .filter(\.isEnabled)
             .map { query -> String in
-                "\(query.displayName) [\(query.isEnabled ? "enabled" : "disabled")] (\(query.primitiveType.displayName)):\n\(query.instructions)"
+                "\(query.displayName) (\(query.primitiveType.displayName)):\n\(query.instructions)"
             }
             .joined(separator: "\n\n")
 

@@ -159,10 +159,10 @@ That's it. No other files need version info.
 
 ## Tracing
 
-Traces are **always-on** and write to `/tmp/VoiceTranscribe.log` as JSON lines (one per event):
+Traces are **always-on** and write to `/tmp/VoiceTranscribe--YYYYMMDD--HHMM.log` as JSON lines (one per event). Each launch gets its own file (named for that launch's local date/time) instead of one shared file being truncated on every start, so a crash-triggered relaunch can't destroy the telemetry for the session that just crashed. Logs older than 7 days are deleted automatically on the next launch.
 
 ```sh
-tail -f /tmp/VoiceTranscribe.log
+tail -f "$(ls -t /tmp/VoiceTranscribe--*.log | head -1)"
 ```
 
 No CLI flag needed. The `Trace.swift` utility records selected events, including:
@@ -227,7 +227,7 @@ swift test
 | `AIPromptService.swift` | AI processing LLM clients, queueing, prompt substitutions, batching, prompt state |
 | `JevService.swift` | Jev (TypeSafe System One) client, wire structs, `JevCoordinator` queueing/batching |
 | `PermissionService.swift` | Lazy mic/speech auth with caching and mock support |
-| `Trace.swift` | JSON-line event logger to `/tmp/VoiceTranscribe.log` |
+| `Trace.swift` | JSON-line event logger, one file per launch (`/tmp/VoiceTranscribe--YYYYMMDD--HHMM.log`), with 7-day rotation |
 | `Models.swift` | Data types: SoundInputSource, RecordingSession, TranscriptSegment, etc. |
 | `Utilities.swift` | FileNamer, BoundedBuffer, TranscriptDocument |
 | `AppSettings.swift` | @AppStorage preferences, output folder, format |
@@ -241,6 +241,7 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.49 | 92 | `Trace.swift` now writes a separate log per launch (`/tmp/VoiceTranscribe--YYYYMMDD--HHMM.log`, 7-day rotation) instead of truncating one shared `/tmp/VoiceTranscribe.log` on every start, which had been silently erasing the telemetry for any session a crash-triggered relaunch followed. |
 | 2.4.48 | 91 | Reworked session identity around explicit people and per-range assignments; conservative WeSpeaker abstention, late transcript backfill, scoped correction/merge/undo UI, and person-aligned Markdown timeline. |
 | 2.4.47 | 90 | One release carrying two features that were developed in parallel branches and folded together instead of shipping separately (no release carries `2.4.46`). Added playback of the audio the on-screen transcript belongs to, with the transcript following the playhead — scrolling to and highlighting the row being played, and jumping the audio from a clicked timestamp. Following is exact for app-recorded audio (placed by the file's wall-clock anchor) and for imported files (placed by each row's engine-reported position in the file; and the transcript's speaker cell now shows the row's raw `Speaker N / Voice M` pair beneath its label, so naming a row no longer hides the combo it belongs to, with the Markdown export appending that pair to named rows |
 | 2.4.45 | 88 | Voice Identification can set a speaker from a list of names already assigned this session (which locks the type-in field), and a "merge same-named speakers" toggle folds every combo sharing a name into one speaker across the pane, transcript colors, and the exported speaker timeline |

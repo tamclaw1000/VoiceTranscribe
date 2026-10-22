@@ -160,8 +160,8 @@ To relaunch an existing packaged app without rebuilding:
 
 ## Logs
 
-Trace logs are always written as JSON lines to:
+Trace logs are always written as JSON lines, one file per launch, to `/tmp/VoiceTranscribe--YYYYMMDD--HHMM.log` (logs older than 7 days are rotated out automatically):
 
 ```sh
-tail -f /tmp/VoiceTranscribe.log
+tail -f "$(ls -t /tmp/VoiceTranscribe--*.log | head -1)"
 ```

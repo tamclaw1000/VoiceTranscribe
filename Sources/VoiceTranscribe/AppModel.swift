@@ -279,6 +279,12 @@ final class AppModel: ObservableObject {
 
     var identityPeople: [SessionPerson] { diarization.identityDirectory.people }
     var identityRanges: [SessionIdentityRange] { diarization.identityDirectory.ranges }
+    /// Person ID to badge, for the Markdown export. Built from canonical people only — a merged
+    /// person's old ID is already rewritten onto segments by `SessionIdentityDirectory.resolved`,
+    /// so a row never arrives here holding an alias.
+    var identityPersonEmoji: [UUID: String] {
+        Dictionary(uniqueKeysWithValues: diarization.identityDirectory.people.map { ($0.id, $0.emoji) })
+    }
     var unresolvedIdentityRanges: [SessionIdentityRange] {
         diarization.identityDirectory.unresolvedRanges
     }
@@ -1670,6 +1676,7 @@ final class AppModel: ObservableObject {
             speakerSegments: diarization.segments,
             pauseSpans: transcription.pauseSpans,
             mergeSameNamedSpeakers: false,
+            personEmoji: identityPersonEmoji,
             aiPrompts: aiPrompt.items,
             jevResults: jev.items,
             summaryParagraphs: summary.paragraphs

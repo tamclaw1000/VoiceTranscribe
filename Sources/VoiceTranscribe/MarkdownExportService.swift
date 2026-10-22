@@ -36,6 +36,7 @@ enum MarkdownExportService {
         speakerSegments: [SpeakerDiarizationSegment] = [],
         pauseSpans: [TranscriptionPauseSpan] = [],
         mergeSameNamedSpeakers: Bool = false,
+        personEmoji: [UUID: String] = [:],
         aiPrompts: [AIPromptItem],
         jevResults: [JevResultItem] = [],
         summaryParagraphs: [String],
@@ -65,7 +66,7 @@ enum MarkdownExportService {
             let length = segmentLengthText(start: segment.timestamp, end: end)
             let aiResult = aiPromptText(for: segment, aiPrompts: aiPrompts)
             let jevResult = jevText(for: segment, jevResults: jevResults)
-            lines.append("| \(tableCell(dateTimeText(segment.timestamp, calendar: calendar))) | \(tableCell(length)) | \(tableCell(speakerText(segment))) | \(tableCell(segment.text)) | \(tableCell(aiResult)) | \(tableCell(jevResult)) |")
+            lines.append("| \(tableCell(dateTimeText(segment.timestamp, calendar: calendar))) | \(tableCell(length)) | \(tableCell(speakerText(segment, personEmoji: personEmoji))) | \(tableCell(segment.text)) | \(tableCell(aiResult)) | \(tableCell(jevResult)) |")
         }
         if finalizedSegments.isEmpty {
             lines.append("| | | | No finalized transcript text. | | |")
@@ -80,7 +81,8 @@ enum MarkdownExportService {
         appendSpeakerTimeline(
             to: &lines,
             speakerSegments: speakerSegments,
-            mergeSameNamedSpeakers: mergeSameNamedSpeakers
+            mergeSameNamedSpeakers: mergeSameNamedSpeakers,
+            personEmoji: personEmoji
         )
 
         let summary = summaryParagraphs
@@ -219,7 +221,8 @@ enum MarkdownExportService {
     private static func appendSpeakerTimeline(
         to lines: inout [String],
         speakerSegments: [SpeakerDiarizationSegment],
-        mergeSameNamedSpeakers: Bool = false
+        mergeSameNamedSpeakers: Bool = false,
+        personEmoji: [UUID: String] = [:]
     ) {
         guard !speakerSegments.isEmpty else {
             return
@@ -230,7 +233,7 @@ enum MarkdownExportService {
         lines.append("")
         lines.append("| start | end | speaker | confidence |")
         lines.append("| ---: | ---: | --- | ---: |")
-        for row in speakerTimelineRows(speakerSegments, mergeSameNamedSpeakers: mergeSameNamedSpeakers) {
+        for row in speakerTimelineRows(speakerSegments, mergeSameNamedSpeakers: mergeSameNamedSpeakers, personEmoji: personEmoji) {
             lines.append("| \(tableCell(timeOffsetText(row.startTime))) | \(tableCell(timeOffsetText(row.endTime))) | \(tableCell(row.speaker)) | \(tableCell(row.confidence.map { String(format: "%.2f", $0) } ?? "")) |")
         }
     }
@@ -242,11 +245,12 @@ enum MarkdownExportService {
     /// alternates between whoever is speaking.
     private static func speakerTimelineRows(
         _ segments: [SpeakerDiarizationSegment],
-        mergeSameNamedSpeakers: Bool
+        mergeSameNamedSpeakers: Bool,
+        personEmoji: [UUID: String] = [:]
     ) -> [SpeakerTimelineRow] {
         var rows: [SpeakerTimelineRow] = []
         for segment in segments.sorted(by: { $0.startTime < $1.startTime }) {
-            let speaker = speakerText(segment)
+            let speaker = speakerText(segment, personEmoji: personEmoji)
             if var last = rows.last,
                !speaker.isEmpty,
                (segment.personID != nil && last.personID == segment.personID
@@ -270,7 +274,22 @@ enum MarkdownExportService {
         return rows
     }
 
-    private static func speakerText(_ segment: TranscriptSegment) -> String {
+    /// The badge the live UI shows for this person, in front of whatever the row would say anyway.
+    /// The export is read beside the app — and often instead of it, weeks later — so a reader who
+    /// learned the speakers by badge mid-call can still tell them apart here. An unidentified row
+    /// carries no person, so it gets no badge.
+    private static func badged(_ text: String, personID: UUID?, personEmoji: [UUID: String]) -> String {
+        guard !text.isEmpty, let personID, let emoji = personEmoji[personID] else {
+            return text
+        }
+        return "\(emoji) \(text)"
+    }
+
+    private static func speakerText(_ segment: TranscriptSegment, personEmoji: [UUID: String] = [:]) -> String {
+        badged(speakerName(segment), personID: segment.personID, personEmoji: personEmoji)
+    }
+
+    private static func speakerName(_ segment: TranscriptSegment) -> String {
         if let manualName = trimmedNonEmpty(segment.speakerName) {
             // An assigned name is what the reader wants first, but it must not erase the identity
             // the rest of the export uses: the SPEAKERS timeline and unnamed rows both carry the
@@ -295,7 +314,11 @@ enum MarkdownExportService {
         return trimmedNonEmpty(segment.speakerID) ?? ""
     }
 
-    private static func speakerText(_ segment: SpeakerDiarizationSegment) -> String {
+    private static func speakerText(_ segment: SpeakerDiarizationSegment, personEmoji: [UUID: String] = [:]) -> String {
+        badged(speakerName(segment), personID: segment.personID, personEmoji: personEmoji)
+    }
+
+    private static func speakerName(_ segment: SpeakerDiarizationSegment) -> String {
         if let manualName = trimmedNonEmpty(segment.speakerName) {
             return manualName
         }

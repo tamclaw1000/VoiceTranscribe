@@ -1,5 +1,25 @@
 import Foundation
 
+/// The badge each person is identified by at a glance, so a speaker can be picked out mid-call
+/// without reading a name off a row.
+///
+/// Animals rather than faces on purpose: emoji faces and people carry gender and skin-tone
+/// readings, and attaching one to a diarized voice would have the app assert something about a
+/// speaker it has no way of knowing. An otter asserts nothing.
+///
+/// Keyed by the person's number, which is assigned once and never reused, so the badge is stable
+/// for the whole session: renaming a person, merging two of them, or undoing an edit all leave it
+/// where it was. Past the end of the palette it wraps, so a long call repeats a badge rather than
+/// running out — `voiceSpeakerColor` already wraps its colors the same way.
+enum SessionPersonEmoji {
+    static let palette = ["🦊", "🐻", "🦉", "🐬", "🦋", "🐙", "🦜", "🐢", "🦔", "🐝", "🦩", "🐳"]
+
+    static func forNumber(_ number: Int) -> String {
+        guard number > 0 else { return palette[0] }
+        return palette[(number - 1) % palette.count]
+    }
+}
+
 struct SessionPerson: Identifiable, Equatable {
     let id: UUID
     var number: Int
@@ -9,6 +29,15 @@ struct SessionPerson: Identifiable, Equatable {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Person \(number)" : trimmed
     }
+
+    /// Computed, not stored: deriving it from `number` leaves no second source of truth to keep in
+    /// step across create/rename/merge/undo, and nothing to migrate in the snapshots `undo()`
+    /// restores.
+    var emoji: String { SessionPersonEmoji.forNumber(number) }
+
+    /// Badge plus label, for display only. `label` stays clean because it is also what is written
+    /// into `TranscriptSegment.speakerName` and compared when the export coalesces speaker runs.
+    var displayLabel: String { "\(emoji) \(label)" }
 }
 
 enum RangeIdentitySource: Equatable {

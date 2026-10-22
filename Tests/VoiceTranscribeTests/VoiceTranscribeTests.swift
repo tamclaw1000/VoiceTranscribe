@@ -2559,6 +2559,107 @@ private func makeSilentAudioFile(named name: String, seconds: Double, in directo
     #expect(entries.map(\.kind) == [.metadata, .markdownExport, .transcript])
 }
 
+@Test func sessionPersonBadgesAreDistinctAndSurviveRenamesAndMerges() throws {
+    var directory = SessionIdentityDirectory()
+    let first = directory.createPerson()
+    let second = directory.createPerson()
+    let third = directory.createPerson()
+
+    #expect(Set([first.emoji, second.emoji, third.emoji]).count == 3, "each new speaker gets its own badge")
+    #expect(first.displayLabel == "\(first.emoji) Person 1")
+
+    // A rename changes the label, never the badge — the badge is how the user has been tracking
+    // this speaker for the length of the call so far.
+    directory.rename(personID: first.id, to: "Dana")
+    let renamed = try #require(directory.person(id: first.id))
+    #expect(renamed.emoji == first.emoji)
+    #expect(renamed.displayLabel == "\(first.emoji) Dana")
+
+    // Merging keeps the surviving person's badge, and the merged-away one does not take it with it.
+    directory.merge(second.id, into: first.id)
+    #expect(directory.person(id: second.id)?.emoji == first.emoji, "the alias resolves to the survivor")
+    #expect(directory.person(id: third.id)?.emoji == third.emoji)
+
+    // An undone merge restores the person, badge included.
+    let undone = directory.undo()
+    #expect(undone)
+    #expect(directory.person(id: second.id)?.emoji == second.emoji)
+}
+
+@Test func sessionPersonBadgesWrapPastTheEndOfThePalette() {
+    let palette = SessionPersonEmoji.palette
+    #expect(SessionPersonEmoji.forNumber(1) == palette[0])
+    #expect(SessionPersonEmoji.forNumber(palette.count) == palette[palette.count - 1])
+    #expect(SessionPersonEmoji.forNumber(palette.count + 1) == palette[0], "wraps rather than running out")
+    // Numbers are 1-based; a 0 or negative one is not a real person, and must not trap.
+    #expect(SessionPersonEmoji.forNumber(0) == palette[0])
+    #expect(SessionPersonEmoji.forNumber(-3) == palette[0])
+}
+
+@Test func markdownExportBadgesSpeakerRowsAndTheTimeline() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let start = Date(timeIntervalSince1970: 1_779_971_597.0)
+    let dana = UUID()
+    let unknown = UUID()
+
+    // `personID` is not in the memberwise init, so the timeline segment is built and then owned.
+    var danaTimeline = SpeakerDiarizationSegment(
+        speakerID: "Speaker 3",
+        speakerName: "Dana",
+        startTime: 0,
+        endTime: 3
+    )
+    danaTimeline.personID = dana
+
+    let markdown = MarkdownExportService.makeDocument(
+        context: MarkdownExportContext(
+            sourceName: "Built-in Microphone",
+            location: "",
+            startDate: start,
+            endDate: start.addingTimeInterval(6),
+            exportedAt: start.addingTimeInterval(6),
+            transcriptionEngine: "Apple SpeechTranscriber",
+            aiPromptEnabled: false,
+            llmName: "",
+            llmProvider: "",
+            llmEndpoint: "",
+            llmModel: "",
+            aiPromptPrompt: "",
+            summaryPrompt: "",
+            audioURL: nil,
+            transcriptURL: nil,
+            metadataURL: nil
+        ),
+        finalizedSegments: [
+            TranscriptSegment(
+                text: "Named row.",
+                timestamp: start,
+                isFinal: true,
+                speakerID: "Speaker 3",
+                speakerName: "Dana",
+                personID: dana
+            ),
+            TranscriptSegment(
+                text: "Nobody owns this row.",
+                timestamp: start.addingTimeInterval(3),
+                isFinal: true,
+                speakerID: "Speaker 4"
+            )
+        ],
+        speakerSegments: [danaTimeline],
+        personEmoji: [dana: "🦊", unknown: "🐻"],
+        aiPrompts: [],
+        summaryParagraphs: [],
+        calendar: calendar
+    )
+
+    #expect(markdown.contains("🦊 Dana (Speaker 3)"), "the badge leads the speaker cell, pair intact")
+    #expect(markdown.contains("| 🦊 Dana |"), "the SPEAKERS timeline is badged too")
+    #expect(markdown.contains("| Speaker 4 |"), "a row with no person gets no badge")
+    #expect(!markdown.contains("🐻"), "a person who never spoke is not in the export")
+}
+
 private struct BatchProbeJevService: JevService {
     let probe: JevBatchProbe
 

@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Speech
 import SwiftUI
@@ -12,7 +13,8 @@ struct ContentView: View {
     private enum DetailTab: Hashable {
         case transcript
         case summary
-        case recordings
+        case events
+        case recentFiles
     }
 
     /// The sidebar's two top-level groups: audio inputs, and AI configuration.
@@ -282,11 +284,25 @@ struct ContentView: View {
                 }
                 .tag(DetailTab.summary)
 
-                RecentRecordingsView(recordings: appModel.completedRecordings)
-                    .tabItem {
-                        Label("Recent Recordings", systemImage: "folder")
-                    }
-                    .tag(DetailTab.recordings)
+                EventsView(
+                    recordings: appModel.completedRecordings,
+                    onOpenInVLC: appModel.openInVLC,
+                    onRevealInFinder: appModel.revealInFinder
+                )
+                .tabItem {
+                    Label("Events", systemImage: "folder")
+                }
+                .tag(DetailTab.events)
+
+                RecentFilesView(
+                    outputFolder: appModel.settings.outputFolder,
+                    onOpenInObsidian: appModel.openInObsidian,
+                    onRevealInFinder: appModel.revealInFinder
+                )
+                .tabItem {
+                    Label("Recent Files", systemImage: "doc.on.doc")
+                }
+                .tag(DetailTab.recentFiles)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -2582,16 +2598,18 @@ private struct TranscriptionStatusView: View {
     }
 }
 
-private struct RecentRecordingsView: View {
+private struct EventsView: View {
     let recordings: [RecordingSession]
+    let onOpenInVLC: (URL) -> Void
+    let onRevealInFinder: (URL) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Recent Recordings", systemImage: "folder")
+            Label("Events", systemImage: "folder")
                 .font(.headline)
             if recordings.isEmpty {
                 ContentUnavailableView(
-                    "No Recent Recordings",
+                    "No Events",
                     systemImage: "folder",
                     description: Text("Completed recordings will appear here.")
                 )
@@ -2609,12 +2627,142 @@ private struct RecentRecordingsView: View {
                         Spacer()
                         Text(recording.duration, format: .number.precision(.fractionLength(1)))
                             .font(.caption)
+
+                        ExternalAppIconButton(app: .vlc, helpText: "Open in VLC.") {
+                            onOpenInVLC(recording.audioURL)
+                        }
+
+                        ExternalAppIconButton(app: .finder, helpText: "Reveal in Finder.") {
+                            onRevealInFinder(recording.audioURL)
+                        }
                     }
                 }
                 .listStyle(.plain)
             }
         }
         .padding()
+    }
+}
+
+/// An installed external app whose real `.icns` icon (not a generic SF Symbol) should label a
+/// button that opens or reveals a file with it.
+private enum ExternalAppIcon {
+    case vlc
+    case obsidian
+    case finder
+
+    var bundleIdentifier: String {
+        switch self {
+        case .vlc: return "org.videolan.vlc"
+        case .obsidian: return "md.obsidian"
+        case .finder: return "com.apple.finder"
+        }
+    }
+
+    /// Shown only if the app isn't installed and `NSWorkspace` can't resolve its icon.
+    var fallbackSystemImage: String {
+        switch self {
+        case .vlc: return "play.circle"
+        case .obsidian: return "note.text"
+        case .finder: return "folder"
+        }
+    }
+
+    private static var iconCache: [String: NSImage] = [:]
+
+    var icon: NSImage? {
+        if let cached = Self.iconCache[bundleIdentifier] {
+            return cached
+        }
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            return nil
+        }
+        let icon = NSWorkspace.shared.icon(forFile: appURL.path)
+        Self.iconCache[bundleIdentifier] = icon
+        return icon
+    }
+}
+
+private struct ExternalAppIconButton: View {
+    let app: ExternalAppIcon
+    let helpText: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            if let icon = app.icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 16, height: 16)
+            } else {
+                Image(systemName: app.fallbackSystemImage)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(helpText)
+    }
+}
+
+private struct RecentFilesView: View {
+    let outputFolder: URL
+    let onOpenInObsidian: (URL) -> Void
+    let onRevealInFinder: (URL) -> Void
+
+    @State private var entries: [SavedFileEntry] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Recent Files", systemImage: "doc.on.doc")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    refresh()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+                .help("Refresh the file list.")
+            }
+            if entries.isEmpty {
+                ContentUnavailableView(
+                    "No Saved Files",
+                    systemImage: "doc.on.doc",
+                    description: Text("Transcripts, Markdown exports, and recording metadata will appear here.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 180)
+            } else {
+                List(entries) { entry in
+                    HStack {
+                        Image(systemName: entry.kind.systemImage)
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading) {
+                            Text(entry.url.lastPathComponent)
+                                .font(.caption.weight(.semibold))
+                            Text(entry.kind.label)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+
+                        ExternalAppIconButton(app: .obsidian, helpText: "Open in Obsidian.") {
+                            onOpenInObsidian(entry.url)
+                        }
+
+                        ExternalAppIconButton(app: .finder, helpText: "Reveal in Finder.") {
+                            onRevealInFinder(entry.url)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+        .padding()
+        .onAppear(perform: refresh)
+    }
+
+    private func refresh() {
+        entries = SavedFilesService.scan(folder: outputFolder)
     }
 }
 

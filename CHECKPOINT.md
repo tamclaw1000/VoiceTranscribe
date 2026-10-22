@@ -1,6 +1,16 @@
 # VoiceTranscribe Checkpoint
 
-Last updated: 2026-09-22
+Last updated: 2026-10-22
+
+## v2.4.51 Handoff (current — supersedes the v2.4.48 notes below)
+
+- Release `v2.4.51` / build `94`, developed on `feature/events-and-recent-files-tabs` from `main` at `de11931`, merged to `main` with an explicit merge commit and the branch deleted. Full detail in `IMPLEMENTATION.md` #116. This checkpoint, the stale-doc fixes, and the `TODO.md` entries below were folded into the same release rather than carrying a second version bump.
+- `TODO.md` NF0001 is done. The detail-pane "Recent Recordings" tab is now **Events** (`DetailTab.events` / `EventsView` in `Views.swift`), still backed by `AppModel.completedRecordings`, which is in-memory and current-run-only. A new **Recent Files** tab (`RecentFilesView`) lists saved `.txt` transcripts, `.md` Markdown exports, and `.json` recording metadata via the new `SavedFilesService.scan(folder:)` over `settings.outputFolder`, newest first — a filesystem scan, so it includes files from earlier launches. Audio is deliberately excluded from Recent Files; that is what Events is for.
+- Rows carry external-app actions: Events opens the audio in VLC, Recent Files opens the file in Obsidian, both reveal in Finder. `AppModel.openInVLC(_:)` / `openInObsidian(_:)` route through a private `openFile(_:withApplicationBundleID:appName:)`; a missing app or missing file reports through the existing `userMessage` instead of failing silently. Icon buttons (`ExternalAppIcon` / `ExternalAppIconButton`, `Views.swift`) render the real installed app icon via `NSWorkspace`, with an SF Symbol fallback only when that app is absent.
+- **Known limitation, newly logged as `TODO.md` BG0018**: Obsidian will not open `.txt` or `.json` files, so the Recent Files → Obsidian action only does something useful on `.md` rows. The feature shipped before this was understood. Fix directions, not yet chosen: send non-Markdown rows to a different editor (BBEdit/VS Code/CotEditor), export transcripts as `.md` instead of `.txt`, or leave it to Obsidian's "Plain Text" community plugin on the user's side.
+- Deliberate scope call, not an oversight: `Trace.swift`'s per-launch log (`/tmp/VoiceTranscribe--*.log`, NF0015 / v2.4.49) is **not** in the Recent Files scan. It lives outside the output folder and is app telemetry rather than a session export, so NF0001's "transcription logs" was read as the `.txt` transcript.
+- Verification at close-out: `swift test` passing and `./scripts/build.sh` clean at `2.4.51` / `94`. Both tabs were confirmed in the running app earlier in the branch (Events empty state, Recent Files populated from real `~/Documents/VoiceTranscribe` files in correct newest-first order, Obsidian/Finder buttons showing real app icons). Never visually confirmed: VLC's icon in a populated Events row (no recording was made during that pass; identical code path to the confirmed buttons), and the renamed "No Events" empty-state string, which was fixed during close-out and has not been seen in the running app.
+- Next up in `TODO.md`: BG0018 above, then NF0002 (VLC + Finder icons in File Sources — the natural follow-on, reusing `ExternalAppIconButton`), NF0003 (auto-assign speaker emoji), NF0004 (AI call summary at the top of the Markdown). `# BUGS` also still holds BG0017, closed unreproduced — re-open it if silently-empty recordings recur, now that per-launch logging can capture the lead-up.
 
 ## v2.4.48 Handoff (supersedes the historical repository-state notes below)
 

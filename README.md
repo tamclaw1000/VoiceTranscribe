@@ -16,7 +16,7 @@ The app is built for macOS 26+ and uses FluidAudio by default for streaming ASR,
 - Supports audio file sources that can be loaded and transcribed.
 - Exports transcript sessions to Markdown with details, recording rows, summary, AI output, and file references.
 - Provides copy/save buttons for transcript text and recording summaries.
-- Uses a tabbed main detail area for Live Transcript, Recording Summary, and Recent Recordings.
+- Uses a tabbed main detail area for Live Transcript, Recording Summary, Events (completed recordings), and Recent Files (saved transcripts, Markdown exports, and recording metadata).
 - Provides a transcript auto-scroll toggle for following live speech.
 
 ## AI Processing

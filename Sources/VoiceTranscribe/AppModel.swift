@@ -1424,7 +1424,51 @@ final class AppModel: ObservableObject {
 
     func revealRecordingInFinder() {
         guard let url = recordingFileURL else { return }
+        revealInFinder(url)
+    }
+
+    func revealInFinder(_ url: URL) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Lists every saved transcript, Markdown export, and recording metadata file in the
+    /// current output folder, for the "Recent Files" tab.
+    func savedFiles() -> [SavedFileEntry] {
+        SavedFilesService.scan(folder: settings.outputFolder)
+    }
+
+    private static let vlcBundleID = "org.videolan.vlc"
+    private static let obsidianBundleID = "md.obsidian"
+
+    func openInVLC(_ url: URL) {
+        openFile(url, withApplicationBundleID: Self.vlcBundleID, appName: "VLC")
+    }
+
+    func openInObsidian(_ url: URL) {
+        openFile(url, withApplicationBundleID: Self.obsidianBundleID, appName: "Obsidian")
+    }
+
+    /// Opens `url` with the app identified by `bundleID`, surfacing a friendly message via
+    /// `userMessage` if that app isn't installed or the file no longer exists.
+    private func openFile(_ url: URL, withApplicationBundleID bundleID: String, appName: String) {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            userMessage = "\(url.lastPathComponent) no longer exists."
+            return
+        }
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            userMessage = "\(appName) is not installed."
+            return
+        }
+        NSWorkspace.shared.open(
+            [url],
+            withApplicationAt: appURL,
+            configuration: NSWorkspace.OpenConfiguration()
+        ) { [weak self] _, error in
+            guard let error else { return }
+            Task { @MainActor in
+                self?.userMessage = "Could not open \(url.lastPathComponent) in \(appName): \(error.localizedDescription)"
+            }
+        }
     }
 
     // MARK: - Playback Follow

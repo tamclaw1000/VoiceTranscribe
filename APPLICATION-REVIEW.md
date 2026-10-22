@@ -14,7 +14,7 @@
 
 VoiceTranscribe is now a transcription and AI processing app rather than a single-purpose fact-checking prototype. The main flow supports audio source selection, live levels, recording, transcription, live FluidAudio speaker diarization, recording summaries, Markdown export, and configurable prompt-driven AI processing.
 
-The main window uses a left source pane with microphone, file-source, and prompt-template controls. The detail area is split into tabs for Live Transcript, Recording Summary, and Recent Recordings. The Live Transcript tab includes timestamp, speaker, a current-speaker status, text, AI results, copy, save, Markdown export, and auto-scroll controls. The Recording Summary tab includes copy and save controls.
+The main window uses a left source pane with microphone, file-source, and prompt-template controls. The detail area is split into tabs for Live Transcript, Recording Summary, Events, and Recent Files. The Live Transcript tab includes timestamp, speaker, a current-speaker status, text, AI results, copy, save, Markdown export, and auto-scroll controls. The Recording Summary tab includes copy and save controls.
 
 ## AI Processing
 

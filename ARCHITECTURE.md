@@ -219,6 +219,7 @@ swift test
 | `AudioCaptureService.swift` | AVAudioEngine tap, metrics, visualization, consumer fan-out |
 | `AudioDeviceService.swift` | CoreAudio enumeration, 2s polling, transport labels |
 | `RecordingService.swift` | Async file writing, basename generation, metadata JSON |
+| `SavedFilesService.swift` | Scans the output folder for saved transcript/Markdown export/metadata files, for the Recent Files tab |
 | `AudioPlaybackService.swift` | AVAudioPlayer playback of the transcript's audio: load, play/pause, seek, position publishing for the transcript follow |
 | `TranscriptionService.swift` | SpeechTranscriber pipeline, format conversion, coordinator |
 | `DiarizationService.swift` | SpeechVAD Sortformer speaker diarization, speaker timeline, transcript annotations |
@@ -241,6 +242,7 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.51 | 94 | Renamed the "Recent Recordings" detail tab to "Events" and gave each recording row an icon to open the audio in VLC and reveal it in Finder. Added a new "Recent Files" tab that scans the output folder for every saved transcript/Markdown export/metadata file (not just this run's) and lists them newest-first with icons to open in Obsidian and reveal in Finder. Icon buttons show the real installed app icon via `NSWorkspace`, falling back to an SF Symbol if that app isn't installed. New `SavedFilesService.swift`. |
 | 2.4.50 | 93 | No code change. Closed `TODO.md` BG0017 (the 2026-10-22 silently-empty recordings) as unreproduced rather than fixed, and ignored the stray local `du-s.out` file. |
 | 2.4.49 | 92 | `Trace.swift` now writes a separate log per launch (`/tmp/VoiceTranscribe--YYYYMMDD--HHMM.log`, 7-day rotation) instead of truncating one shared `/tmp/VoiceTranscribe.log` on every start, which had been silently erasing the telemetry for any session a crash-triggered relaunch followed. |
 | 2.4.48 | 91 | Reworked session identity around explicit people and per-range assignments; conservative WeSpeaker abstention, late transcript backfill, scoped correction/merge/undo UI, and person-aligned Markdown timeline. |

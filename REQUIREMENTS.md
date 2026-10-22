@@ -28,7 +28,7 @@ Internal architecture, programming languages, frameworks, processing algorithms,
 - Give each device a Transcribe/Stop button and an independent Record checkbox. There is no Listen action or listen-only mode.
 - Clearly identify the active source and distinguish starting, recording, live transcription, background processing, completed, and failed states.
 - Show live input levels, recent activity, peak level, and clipping while a device is capturing audio. Allow visualization sensitivity to be adjusted.
-- Provide a combined Live Transcript and AI Processing view, a Transcript Paragraphs view, an AI Summary view, speaker diarization annotations, and Recent Recordings.
+- Provide a combined Live Transcript and AI Processing view, a Transcript Paragraphs view, an AI Summary view, speaker diarization annotations, Events (completed recordings), and Recent Files (saved transcripts, Markdown exports, and recording metadata).
 - Show each configured sentence prompt's enabled state and effective model in the main window; allow prompts to be enabled or disabled there.
 - Provide access to Settings and indicate when required permissions are missing.
 - Display the application version.
@@ -38,7 +38,7 @@ Internal architecture, programming languages, frameworks, processing algorithms,
 - Separate source and prompt controls from the content workspace. A wide display should support viewing both together; narrower displays may use equivalent navigation that keeps all actions reachable.
 - The default main-window size should be wide enough to show source controls, live levels, and the selected content tab without immediate horizontal crowding.
 - Split the sidebar into two top-level sections: Microphones (live devices, plus loaded audio under File Sources) and AI Selection (prompt toggles under AI Prompts and Jev query toggles). Either section must be reachable without scrolling past the other. Include a manual device refresh and an always-available Load File action.
-- Provide distinct Live Transcript, Transcript Paragraphs, AI Summary, and Recent Recordings views. Tabs are suitable, but a particular widget or window arrangement is not required.
+- Provide distinct Live Transcript, Transcript Paragraphs, AI Summary, Events, and Recent Files views. Tabs are suitable, but a particular widget or window arrangement is not required.
 - Keep source identity, capture/recording status, live input levels, and access to Settings discoverable while navigating content views. Show application version and build when available, or explain when version information is unavailable.
 - Use clear text for states and errors; icons and colors may supplement the text. Native icon names, fixed dimensions, control order, and platform-specific dialog types are not requirements.
 - Keep long content and settings lists navigable. Transcript text, paragraph text, and AI results must be readable and selectable.
@@ -69,7 +69,8 @@ Internal architecture, programming languages, frameworks, processing algorithms,
 - Disabling prompts governs new work; continue to show the actual status and results of earlier accepted work.
 - Transcript Paragraphs provides paragraph text, a finalized-sentence count, Copy Text, and Save to File. An included trailing fragment must not be falsely counted as a complete sentence.
 - AI Summary provides its current text, effective model, processing state, Copy Text, Save to File, and a retry action after failure when input remains available.
-- Recent Recordings lists completed recordings from the current application run, with filename, location, and elapsed duration.
+- Events lists completed recordings from the current application run, with filename, location, elapsed duration, and actions to open the audio in an external player and reveal it in the environment's file manager.
+- Recent Files scans the configured output destination for every saved transcript, Markdown export, and recording metadata file (not only files from the current run) and lists them newest first, each with actions to open it in a compatible notes application and reveal it in the environment's file manager.
 - Each view has an informative empty state. Disable content actions or explain why they cannot run when their required content is absent. Export behavior for unfinished sessions follows section 13.
 
 ### 3.4 Settings and File Interaction
@@ -89,7 +90,7 @@ Internal architecture, programming languages, frameworks, processing algorithms,
 - Record alone does not automatically start transcription or AI processing.
 - Unchecking Record stops that recording without stopping independently active live transcription or pending processing.
 - Show the in-progress recording filename. Allow the user to reveal the recording in the environment's file manager or equivalent storage interface when its file is available.
-- After recording stops, show the final filename for five seconds. Keep the completed recording accessible in Recent Recordings.
+- After recording stops, show the final filename for five seconds. Keep the completed recording accessible in Events.
 - Record source identity, start time, end time, and elapsed duration.
 - Save recordings in the configured output destination; default to a VoiceTranscribe folder in the user's documents area where available, or an equivalent user-accessible storage location. Clearly show the chosen destination.
 - Before recording, create the output folder when needed and validate that the destination can accept output. Report unavailable or unwritable storage and let the user choose another destination. Do not silently redirect output.
@@ -97,7 +98,7 @@ Internal architecture, programming languages, frameworks, processing algorithms,
 - Default to AAC audio in `.m4a`. Offer lossless PCM recording in `.wav` and `.caf`. Produce valid files playable by compatible external audio applications, with channel and sample-rate information consistent with the saved audio.
 - Recording must continue through temporary transcription or AI delays. If audio cannot be retained, report the failure and preserve the usable recording as incomplete rather than claiming success.
 - Add completed recordings to the loaded file sources so the user can transcribe the saved audio, including its full duration, later.
-- Recent Recordings lists completed recordings from the current application session, their filenames, paths, and durations. A persistent searchable library is not required.
+- Events lists completed recordings from the current application session, their filenames, paths, and durations, with actions to open each in an external player and reveal it in the environment's file manager. A persistent searchable library is not required.
 
 ## 5. Transcription and Coverage
 

@@ -2532,6 +2532,33 @@ private func makeSilentAudioFile(named name: String, seconds: Double, in directo
     return url
 }
 
+@Test func savedFilesServiceScansTranscriptsMarkdownAndMetadataNewestFirst() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("vt-savedfiles-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let older = directory.appendingPathComponent("older.txt")
+    let newer = directory.appendingPathComponent("newer.md")
+    let metadata = directory.appendingPathComponent("session.json")
+    let ignored = directory.appendingPathComponent("recording.m4a")
+    try "older transcript".write(to: older, atomically: true, encoding: .utf8)
+    try "newer export".write(to: newer, atomically: true, encoding: .utf8)
+    try "{}".write(to: metadata, atomically: true, encoding: .utf8)
+    try Data([0x00]).write(to: ignored)
+
+    try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: older.path)
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(10)], ofItemAtPath: newer.path)
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(20)], ofItemAtPath: metadata.path)
+
+    let entries = SavedFilesService.scan(folder: directory)
+
+    let resolvedExpected = [metadata, newer, older].map { $0.resolvingSymlinksInPath() }
+    let resolvedActual = entries.map { $0.url.resolvingSymlinksInPath() }
+    #expect(resolvedActual == resolvedExpected, "newest first; audio files are not saved files")
+    #expect(entries.map(\.kind) == [.metadata, .markdownExport, .transcript])
+}
+
 private struct BatchProbeJevService: JevService {
     let probe: JevBatchProbe
 

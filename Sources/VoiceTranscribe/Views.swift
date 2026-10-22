@@ -2609,7 +2609,7 @@ private struct EventsView: View {
                 .font(.headline)
             if recordings.isEmpty {
                 ContentUnavailableView(
-                    "No Recent Recordings",
+                    "No Events",
                     systemImage: "folder",
                     description: Text("Completed recordings will appear here.")
                 )

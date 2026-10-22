@@ -241,6 +241,7 @@ swift test
 
 | Version | Build | What Changed |
 |---------|-------|-------------|
+| 2.4.50 | 93 | No code change. Closed `TODO.md` BG0017 (the 2026-10-22 silently-empty recordings) as unreproduced rather than fixed, and ignored the stray local `du-s.out` file. |
 | 2.4.49 | 92 | `Trace.swift` now writes a separate log per launch (`/tmp/VoiceTranscribe--YYYYMMDD--HHMM.log`, 7-day rotation) instead of truncating one shared `/tmp/VoiceTranscribe.log` on every start, which had been silently erasing the telemetry for any session a crash-triggered relaunch followed. |
 | 2.4.48 | 91 | Reworked session identity around explicit people and per-range assignments; conservative WeSpeaker abstention, late transcript backfill, scoped correction/merge/undo UI, and person-aligned Markdown timeline. |
 | 2.4.47 | 90 | One release carrying two features that were developed in parallel branches and folded together instead of shipping separately (no release carries `2.4.46`). Added playback of the audio the on-screen transcript belongs to, with the transcript following the playhead — scrolling to and highlighting the row being played, and jumping the audio from a clicked timestamp. Following is exact for app-recorded audio (placed by the file's wall-clock anchor) and for imported files (placed by each row's engine-reported position in the file; and the transcript's speaker cell now shows the row's raw `Speaker N / Voice M` pair beneath its label, so naming a row no longer hides the combo it belongs to, with the Markdown export appending that pair to named rows |

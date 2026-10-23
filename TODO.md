@@ -23,7 +23,7 @@
 # NEW FEATURES
 - [x] NF0001: Rename Recent Recordings tab to "Events". Add a tab called "Recent Files" where every saved text file and markdown export will be listed. Add icons for Obsidian to open them and for the Finder. In the Recent Recordings tab, add VLC and Finder open icons. "Recent Files" should also note the transcription logs and any other files touched. Done in v2.4.51 (`IMPLEMENTATION.md` #116). "Transcription logs" interpreted as the `.txt` transcript — there's no other per-session log file; `Trace.swift`'s per-launch log lives in `/tmp`, not the output folder, and wasn't pulled into this scan.
 - [ ] NF0002: In the File Sources list: add a VLC icon that will launch the file in VLC, and a Finder icon that will open the folder in the Finder.
-- [ ] NF0003: Automatically assign an emojii to the new speakers - this will help quickly identify them in the call.
+- [x] NF0003: Automatically assign an emojii to the new speakers - this will help quickly identify them in the call. Done in v2.4.52 (`IMPLEMENTATION.md` #117): animal badges, assigned on person creation, shown in transcript rows, the current-speaker line, the people/range pane, the assignment menus, and the Markdown export. Not yet seen in the running app — it needs a live multi-speaker session to render.
 - [ ] NF0004: Add new AI capability to Summarize a call from the transcript - this should be saved at the top of the Markdown.
 - [ ] NF0005: Save / Restore voice patterns.
 - [ ] NF0006: Color the graph according to the color of the Assigned Speaker.

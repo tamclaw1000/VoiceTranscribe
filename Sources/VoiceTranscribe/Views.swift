@@ -1665,6 +1665,9 @@ private struct TranscriptAIPromptPanel: View {
             Circle()
                 .fill(speakerColor(for: speakerColorKey(personID: person.id)))
                 .frame(width: 8, height: 8)
+            Text(person.emoji)
+                .font(.caption)
+                .accessibilityHidden(true)
             TextField(person.label, text: Binding(
                 get: { person.name },
                 set: { onRenameIdentityPerson(person.id, $0) }
@@ -1673,7 +1676,7 @@ private struct TranscriptAIPromptPanel: View {
             .font(.caption)
             Menu {
                 ForEach(identityPeople.filter { $0.id != person.id }) { target in
-                    Button("Merge into \(target.label)") {
+                    Button("Merge into \(target.displayLabel)") {
                         onMergeIdentityPeople(person.id, target.id)
                     }
                 }
@@ -1691,7 +1694,7 @@ private struct TranscriptAIPromptPanel: View {
     private var selectedRangeMenu: some View {
         Menu {
             ForEach(identityPeople) { person in
-                Button("Assign to \(person.label)") {
+                Button("Assign to \(person.displayLabel)") {
                     onAssignIdentityRanges(selectedIdentityRanges, person.id)
                     selectedIdentityRanges = []
                 }
@@ -1727,7 +1730,7 @@ private struct TranscriptAIPromptPanel: View {
             .labelsHidden()
             .toggleStyle(.checkbox)
             VStack(alignment: .leading, spacing: 2) {
-                Text(identityPeople.first(where: { $0.id == range.personID })?.label ?? "Unidentified audio")
+                Text(identityPeople.first(where: { $0.id == range.personID })?.displayLabel ?? "Unidentified audio")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(range.personID == nil ? .secondary : .primary)
                 Text("\(rangeTime(range.startTime)) - \(rangeTime(range.endTime))  \(range.speakerID)\(range.voiceID.map { " / \($0)" } ?? "")")
@@ -1756,7 +1759,7 @@ private struct TranscriptAIPromptPanel: View {
             .help("Play this audio range")
             Menu {
                 ForEach(identityPeople) { person in
-                    Button("Assign this range to \(person.label)") {
+                    Button("Assign this range to \(person.displayLabel)") {
                         onAssignIdentityRanges([range.id], person.id)
                     }
                 }
@@ -1921,6 +1924,10 @@ private struct TranscriptAIPromptPanel: View {
     ) -> some View {
         let speakerLabel = segment.speakerLabel ?? fallbackSpeakerLabel
         let label = speakerLabel ?? "Detecting"
+        // The person's badge, when this row belongs to one. Prefixed to the visible label only:
+        // `label` stays clean for the accessibility string, so VoiceOver reads "Dana", not
+        // "fox face Dana".
+        let badge = identityPeople.first(where: { $0.id == segment.personID })?.emoji
         GridRow(alignment: .top) {
             timestampCell(
                 for: segment.timestamp,
@@ -1938,7 +1945,7 @@ private struct TranscriptAIPromptPanel: View {
                             onAssignTranscriptRowToPerson(segment.id, person.id)
                         }
                     } label: {
-                        Text("Assign audio range to \(person.label)")
+                        Text("Assign audio range to \(person.displayLabel)")
                     }
                 }
                 if !identityPeople.isEmpty {
@@ -1959,7 +1966,7 @@ private struct TranscriptAIPromptPanel: View {
                 }
                 Menu("Correct this row only") {
                     ForEach(identityPeople) { person in
-                        Button(person.label) {
+                        Button(person.displayLabel) {
                             onAssignTranscriptRowToPerson(segment.id, person.id)
                         }
                     }
@@ -1969,7 +1976,7 @@ private struct TranscriptAIPromptPanel: View {
                 }
             } label: {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(label)
+                    Text(badge.map { "\($0) \(label)" } ?? label)
                         .font(.caption.weight(.semibold))
                         .lineLimit(1)
                     // The Speaker/Voice pair the row belongs to, shown whenever it says something
@@ -2160,7 +2167,10 @@ private struct TranscriptAIPromptPanel: View {
 
     private var currentSpeakerStatusText: String {
         if let currentSpeakerLabel, !currentSpeakerLabel.isEmpty {
-            return "Current speaker: \(currentSpeakerLabel)"
+            // The badge goes on the who-is-talking-now indicator too — this is the one line that is
+            // read while the call is in progress rather than afterwards.
+            let badge = identityPeople.first(where: { $0.id == currentPersonID })?.emoji
+            return "Current speaker: \(badge.map { "\($0) " } ?? "")\(currentSpeakerLabel)"
         }
         if let diarizationError, !diarizationError.isEmpty {
             return "Speaker detection unavailable"
